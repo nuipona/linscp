@@ -16,14 +16,17 @@ struct LocalFileInfo
 {
     bool exists;
     bool isDir;
+    bool isRegular;
     uint64_t size;
     unsigned long mtime;
     unsigned long permissions;
+    int error;
 
-    LocalFileInfo() : exists(false), isDir(false), size(0), mtime(0), permissions(0) {}
+    LocalFileInfo() : exists(false), isDir(false), isRegular(false), size(0),
+        mtime(0), permissions(0), error(0) {}
 };
 
-/* Returns the attributes of a path; 'exists' is false if there are none. */
+/* Returns path attributes; if stat fails, 'error' contains the errno value. */
 LocalFileInfo StatLocal(const std::string & path);
 
 /* Names in a directory, without '.' and '..'. */

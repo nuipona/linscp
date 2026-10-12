@@ -230,7 +230,7 @@ std::string ExpandTilde(const std::string & path)
         return path;
     }
     const char * home = getenv("HOME");
-    if (home == NULL)
+    if (home == NULL || home[0] == '\0')
     {
         return path;
     }
@@ -242,12 +242,7 @@ std::string ExpandTilde(const std::string & path)
     {
         return path; // '~user' is not supported
     }
-    std::string result(home);
-    if (result.size() > 1 && result[result.size() - 1] == '/')
-    {
-        result.erase(result.size() - 1);
-    }
-    return result + path.substr(1);
+    return JoinLocalPath(home, path.substr(2));
 }
 
 std::string LocalDirName(const std::string & path)
@@ -318,54 +313,45 @@ bool HasWildcard(const std::string & path)
         path.find('?') != std::string::npos;
 }
 
-namespace {
-
-bool MatchHere(const char * mask, const char * name)
+bool MatchesMask(const std::string & mask, const std::string & name)
 {
-    while (*mask)
+    /* Greedy wildcard matching with backtracking to the most recent '*'.
+     * This avoids recursive stack growth on long names and masks, while
+     * using only constant auxiliary memory. */
+    size_t maskIndex = 0;
+    size_t nameIndex = 0;
+    size_t lastStar = std::string::npos;
+    size_t retryNameIndex = 0;
+
+    while (nameIndex < name.size())
     {
-        if (*mask == '*')
+        if (maskIndex < mask.size() &&
+            (mask[maskIndex] == '?' || mask[maskIndex] == name[nameIndex]))
         {
-            while (*mask == '*')
-            {
-                mask++;
-            }
-            if (!*mask)
-            {
-                return true;
-            }
-            while (*name)
-            {
-                if (MatchHere(mask, name))
-                {
-                    return true;
-                }
-                name++;
-            }
-            return false;
+            maskIndex++;
+            nameIndex++;
         }
-        if (!*name)
+        else if (maskIndex < mask.size() && mask[maskIndex] == '*')
         {
-            return false;
+            lastStar = maskIndex++;
+            retryNameIndex = nameIndex;
         }
-        if (*mask == '?' || *mask == *name)
+        else if (lastStar != std::string::npos)
         {
-            mask++;
-            name++;
+            maskIndex = lastStar + 1;
+            nameIndex = ++retryNameIndex;
         }
         else
         {
             return false;
         }
     }
-    return !*name;
-}
 
-} // namespace
-
-bool MatchesMask(const std::string & mask, const std::string & name)
-{
-    return MatchHere(mask.c_str(), name.c_str());
+    while (maskIndex < mask.size() && mask[maskIndex] == '*')
+    {
+        maskIndex++;
+    }
+    return maskIndex == mask.size();
 }
 
 std::string FormatSize(uint64_t size)
@@ -404,7 +390,10 @@ std::string FormatFileTime(unsigned long time)
 {
     time_t t = static_cast<time_t>(time);
     struct tm tmResult;
-    localtime_r(&t, &tmResult);
+    if (localtime_r(&t, &tmResult) == NULL)
+    {
+        return "unknown";
+    }
     char buffer[32];
     time_t now = ::time(NULL);
     // Within six months show the time, otherwise the year, like 'ls -l'.

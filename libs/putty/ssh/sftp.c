@@ -151,6 +151,9 @@ static struct sftp_request *sftp_alloc_request(void)
 void sftp_cleanup_request(void)
 {
     if (sftp_requests != NULL) {
+        struct sftp_request *req;
+        while ((req = delpos234(sftp_requests, 0)) != NULL)
+            sfree(req);
         freetree234(sftp_requests);
         sftp_requests = NULL;
     }
@@ -1069,11 +1072,13 @@ bool xfer_download_data(struct fxp_xfer *xfer, void **buf, int *len)
 #ifdef DEBUG_DOWNLOAD
             printf("handing back data from read request %p\n", rr);
 #endif
-        }
+        } else {
+            /* EOF and failed reads have no consumer to free their buffer. */
+            sfree(rr->buffer);
 #ifdef DEBUG_DOWNLOAD
-        else
             printf("skipping failed read request %p\n", rr);
 #endif
+        }
 
         xfer->head = xfer->head->next;
         if (xfer->head)

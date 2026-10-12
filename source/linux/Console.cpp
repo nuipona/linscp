@@ -153,15 +153,17 @@ bool Console::ReadPassword(const std::string & prompt, std::string & password)
 
 bool Console::Confirm(const std::string & prompt, bool defaultYes)
 {
-    if (mBatchMode)
+    /* Never consume stdin from a script or silently approve a destructive
+     * action when there is no terminal to answer the prompt. */
+    if (!IsInteractive())
     {
-        return defaultYes;
+        return false;
     }
     std::string answer;
     std::string full = prompt + (defaultYes ? " [Y/n]: " : " [y/N]: ");
     if (!ReadLine(full, answer))
     {
-        return defaultYes;
+        return false;
     }
     if (answer.empty())
     {

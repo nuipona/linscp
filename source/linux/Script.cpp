@@ -1,5 +1,6 @@
 #include "Script.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -41,6 +42,53 @@ bool StartsWith(const std::string & text, const char * prefix)
     return text.size() > len && text.compare(0, len, prefix) == 0;
 }
 
+enum class ConfirmationResult
+{
+    Accepted,
+    Declined,
+    Unavailable
+};
+
+ConfirmationResult ConfirmDestructiveAction(const std::string & question)
+{
+    Console & console = Console::Instance();
+    if (!console.IsInteractive())
+    {
+        console.Error("Cannot confirm this action without a terminal; run "
+            "interactively or use 'option confirm off' in a trusted script.");
+        return ConfirmationResult::Unavailable;
+    }
+    if (console.Confirm(question, false))
+    {
+        return ConfirmationResult::Accepted;
+    }
+    console.Status("Cancelled.");
+    return ConfirmationResult::Declined;
+}
+
+bool ParseOctalPermissions(const std::string & text, unsigned long & permissions)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    unsigned long value = 0;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        if (text[i] < '0' || text[i] > '7')
+        {
+            return false;
+        }
+        value = value * 8 + static_cast<unsigned long>(text[i] - '0');
+        if (value > 07777)
+        {
+            return false;
+        }
+    }
+    permissions = value;
+    return true;
+}
+
 } // namespace
 
 Script::Script() :
@@ -52,8 +100,13 @@ Script::Script() :
 
 bool Script::RequireConnection()
 {
-    if (!mSession.IsOpen())
+    if (!mSession.IsOpen() || !mSession.IsAlive())
     {
+        if (mSession.IsOpen())
+        {
+            mSession.Close();
+            mRemoteDirectory.clear();
+        }
         Console::Instance().Error(Texts::NotConnected());
         mErrors++;
         return false;
@@ -63,12 +116,12 @@ bool Script::RequireConnection()
 
 bool Script::OpenSite(const std::vector<std::string> & args)
 {
+    /* Command-line options are defaults for every opened site. Explicit
+     * values in the URL or on this command override them; do not reset the
+     * port or credentials here (doing so made -port/-username/-password
+     * silently ineffective). */
     SessionOptions options = mDefaults;
     options.hostName.clear();
-    options.portNumber = 22;
-    options.userName.clear();
-    options.password.clear();
-    options.hostKey = mDefaults.hostKey;
     options.initialDirectory.clear();
 
     std::string url;
@@ -101,6 +154,13 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         {
             url = args[i];
         }
+        else
+        {
+            Console::Instance().Error(Texts::WrongArguments("open",
+                "Unexpected argument '" + args[i] + "'."));
+            mErrors++;
+            return false;
+        }
     }
 
     if (url.empty())
@@ -112,24 +172,11 @@ bool Script::OpenSite(const std::vector<std::string> & args)
     }
 
     std::string error;
-    SessionOptions parsed;
-    if (!ParseSiteUrl(url, parsed, error))
+    if (!ParseSiteUrl(url, options, error))
     {
         Console::Instance().Error(error);
         mErrors++;
         return false;
-    }
-
-    options.hostName = parsed.hostName;
-    options.portNumber = parsed.portNumber;
-    options.initialDirectory = parsed.initialDirectory;
-    if (!parsed.userName.empty())
-    {
-        options.userName = parsed.userName;
-    }
-    if (!parsed.password.empty())
-    {
-        options.password = parsed.password;
     }
     if (options.userName.empty())
     {
@@ -298,13 +345,18 @@ bool Script::ListRemote(const std::vector<std::string> & args)
         mErrors++;
         return false;
     }
+    int count = 0;
     for (int i = 0; i < names->count; i++)
     {
         std::string name = names->names[i].filename != NULL ?
             names->names[i].filename : "";
+        if (name == "." || name == "..")
+        {
+            continue;
+        }
         PrintRemoteEntry(name, names->names[i], longFormat);
+        count++;
     }
-    int count = names->count;
     lscp_sftp_free_names(names);
     Console::Instance().Status(Texts::DirectoryRead(count));
     return true;
@@ -424,6 +476,28 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             mErrors++;
             continue;
         }
+        if (sources.size() > 1 || args.size() > 2)
+        {
+            if (destinationInfo.exists && !destinationInfo.isDir)
+            {
+                Console::Instance().Error(Texts::LocalError("download to", destination,
+                    "A directory is required for multiple source files."));
+                mErrors++;
+                continue;
+            }
+            if (!destinationIsDir)
+            {
+                if (!CreateLocalDirectory(ExpandTilde(destination), error))
+                {
+                    Console::Instance().Error(Texts::LocalError("create directory",
+                        destination, error));
+                    mErrors++;
+                    continue;
+                }
+                destinationIsDir = true;
+                destinationInfo = StatLocal(ExpandTilde(destination));
+            }
+        }
         for (size_t n = 0; n < sources.size(); n++)
         {
             std::string localPath;
@@ -436,8 +510,63 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             {
                 localPath = ExpandTilde(destination);
             }
+
+            LocalFileInfo localInfo = StatLocal(localPath);
+            if (!localInfo.exists && localInfo.error != ENOENT &&
+                localInfo.error != ENOTDIR)
+            {
+                errno = localInfo.error;
+                Console::Instance().Error(Texts::LocalError("inspect destination",
+                    localPath, LastSystemError()));
+                mErrors++;
+                continue;
+            }
+            if (localInfo.isDir)
+            {
+                Console::Instance().Error(Texts::LocalError("download to", localPath,
+                    "The destination is a directory."));
+                mErrors++;
+                continue;
+            }
+            if (localInfo.exists && !localInfo.isRegular)
+            {
+                Console::Instance().Error(Texts::LocalError("download to", localPath,
+                    "The destination is not a regular file."));
+                mErrors++;
+                continue;
+            }
+            if (mConfirm && localInfo.exists)
+            {
+                ConfirmationResult confirmation = ConfirmDestructiveAction(
+                    "Overwrite local file '" + localPath + "'?");
+                if (confirmation != ConfirmationResult::Accepted)
+                {
+                    if (confirmation == ConfirmationResult::Unavailable)
+                    {
+                        mErrors++;
+                    }
+                    continue;
+                }
+            }
+
+            LscpAttrs sourceAttrs = {};
+            unsigned long long totalSize = 0;
+            if (lscp_sftp_stat(sources[n].c_str(), &sourceAttrs) ==
+                    LSCP_SFTP_STAT_EXISTS &&
+                (sourceAttrs.flags & LSCP_ATTR_PERMISSIONS) != 0 &&
+                (sourceAttrs.permissions & 0040000) != 0)
+            {
+                Console::Instance().Error(Texts::TransferFailed(sources[n],
+                    "Directories are not supported yet."));
+                mErrors++;
+                continue;
+            }
+            if ((sourceAttrs.flags & LSCP_ATTR_SIZE) != 0)
+            {
+                totalSize = sourceAttrs.size;
+            }
             unsigned long long size = 0;
-            Console::Instance().TransferStart(RemoteFileName(sources[n]), 0);
+            Console::Instance().TransferStart(RemoteFileName(sources[n]), totalSize);
             int result = lscp_sftp_get(sources[n].c_str(), localPath.c_str(), &size,
                 ProgressCallback, NULL);
             Console::Instance().TransferEnd(result == 0);
@@ -469,10 +598,19 @@ bool Script::PutFiles(const std::vector<std::string> & args)
         return false;
     }
     std::string destination = ResolveRemotePath(mRemoteDirectory, args[args.size() - 1]);
-    LscpAttrs destinationAttrs;
-    bool destinationIsDir = (lscp_sftp_stat(destination.c_str(), &destinationAttrs) == 0) &&
-        (destinationAttrs.flags & LSCP_ATTR_PERMISSIONS) &&
-        ((destinationAttrs.permissions & 0040000) != 0);
+    LscpAttrs destinationAttrs = {};
+    const int destinationStat = lscp_sftp_stat(destination.c_str(), &destinationAttrs);
+    if (destinationStat == LSCP_SFTP_STAT_ERROR)
+    {
+        Console::Instance().Error(Texts::RemoteError("inspect destination", destination,
+            lscp_sftp_error()));
+        mErrors++;
+        return false;
+    }
+    bool destinationExists = destinationStat == LSCP_SFTP_STAT_EXISTS;
+    bool destinationIsDir = destinationExists &&
+        (destinationAttrs.flags & LSCP_ATTR_PERMISSIONS) != 0 &&
+        (destinationAttrs.permissions & 0040000) != 0;
 
     bool any = false;
     for (size_t i = 0; i + 1 < args.size(); i++)
@@ -499,6 +637,28 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             mErrors++;
             continue;
         }
+        if (sources.size() > 1 || args.size() > 2)
+        {
+            if (destinationExists && !destinationIsDir)
+            {
+                Console::Instance().Error(Texts::RemoteError("upload to", destination,
+                    "A directory is required for multiple source files."));
+                mErrors++;
+                continue;
+            }
+            if (!destinationIsDir)
+            {
+                if (lscp_sftp_mkdir(destination.c_str(), -1) != 0)
+                {
+                    Console::Instance().Error(Texts::RemoteError("create the directory",
+                        destination, lscp_sftp_error()));
+                    mErrors++;
+                    continue;
+                }
+                destinationExists = true;
+                destinationIsDir = true;
+            }
+        }
         for (size_t n = 0; n < sources.size(); n++)
         {
             LocalFileInfo info = StatLocal(sources[n]);
@@ -509,9 +669,47 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                 mErrors++;
                 continue;
             }
+            if (info.exists && !info.isRegular)
+            {
+                Console::Instance().Error(Texts::LocalError("upload of", sources[n],
+                    "Only regular files can be uploaded."));
+                mErrors++;
+                continue;
+            }
             std::string remotePath = (destinationIsDir || sources.size() > 1 ||
                 args.size() > 2) ?
                 JoinRemotePath(destination, LocalFileName(sources[n])) : destination;
+            LscpAttrs remoteInfo = {};
+            const int remoteStat = lscp_sftp_stat(remotePath.c_str(), &remoteInfo);
+            if (remoteStat == LSCP_SFTP_STAT_ERROR)
+            {
+                Console::Instance().Error(Texts::RemoteError("inspect destination",
+                    remotePath, lscp_sftp_error()));
+                mErrors++;
+                continue;
+            }
+            const bool remoteExists = remoteStat == LSCP_SFTP_STAT_EXISTS;
+            if (remoteExists && (remoteInfo.flags & LSCP_ATTR_PERMISSIONS) != 0 &&
+                (remoteInfo.permissions & 0040000) != 0)
+            {
+                Console::Instance().Error(Texts::RemoteError("upload to", remotePath,
+                    "The destination is a directory."));
+                mErrors++;
+                continue;
+            }
+            if (mConfirm && remoteExists)
+            {
+                ConfirmationResult confirmation = ConfirmDestructiveAction(
+                    "Overwrite remote file '" + remotePath + "'?");
+                if (confirmation != ConfirmationResult::Accepted)
+                {
+                    if (confirmation == ConfirmationResult::Unavailable)
+                    {
+                        mErrors++;
+                    }
+                    continue;
+                }
+            }
             unsigned long long size = 0;
             Console::Instance().TransferStart(LocalFileName(sources[n]), info.size);
             int result = lscp_sftp_put(sources[n].c_str(), remotePath.c_str(), -1,
@@ -555,8 +753,30 @@ bool Script::RemoveRemote(const std::vector<std::string> & args)
             ok = false;
             continue;
         }
+        if (paths.empty())
+        {
+            Console::Instance().Error(Texts::RemoteError("find", args[i],
+                "No matching files."));
+            mErrors++;
+            ok = false;
+            continue;
+        }
         for (size_t n = 0; n < paths.size(); n++)
         {
+            if (mConfirm)
+            {
+                ConfirmationResult confirmation = ConfirmDestructiveAction(
+                    "Delete remote file '" + paths[n] + "'?");
+                if (confirmation != ConfirmationResult::Accepted)
+                {
+                    if (confirmation == ConfirmationResult::Unavailable)
+                    {
+                        mErrors++;
+                        ok = false;
+                    }
+                    continue;
+                }
+            }
             if (lscp_sftp_remove(paths[n].c_str()) != 0)
             {
                 Console::Instance().Error(Texts::RemoteError("remove", paths[n],
@@ -583,6 +803,20 @@ bool Script::RemoveRemoteDirectory(const std::vector<std::string> & args)
         return false;
     }
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
+    if (mConfirm)
+    {
+        ConfirmationResult confirmation = ConfirmDestructiveAction(
+            "Delete remote directory '" + path + "'?");
+        if (confirmation != ConfirmationResult::Accepted)
+        {
+            if (confirmation == ConfirmationResult::Unavailable)
+            {
+                mErrors++;
+                return false;
+            }
+            return true;
+        }
+    }
     if (lscp_sftp_rmdir(path.c_str()) != 0)
     {
         Console::Instance().Error(Texts::RemoteError("remove the directory", path,
@@ -632,6 +866,32 @@ bool Script::MoveRemote(const std::vector<std::string> & args)
     }
     std::string from = ResolveRemotePath(mRemoteDirectory, args[0]);
     std::string to = ResolveRemotePath(mRemoteDirectory, args[1]);
+    if (mConfirm)
+    {
+        LscpAttrs existing = {};
+        const int targetStat = lscp_sftp_stat(to.c_str(), &existing);
+        if (targetStat == LSCP_SFTP_STAT_ERROR)
+        {
+            Console::Instance().Error(Texts::RemoteError("inspect target", to,
+                lscp_sftp_error()));
+            mErrors++;
+            return false;
+        }
+        if (targetStat == LSCP_SFTP_STAT_EXISTS)
+        {
+            ConfirmationResult confirmation = ConfirmDestructiveAction(
+                "Overwrite remote file '" + to + "'?");
+            if (confirmation != ConfirmationResult::Accepted)
+            {
+                if (confirmation == ConfirmationResult::Unavailable)
+                {
+                    mErrors++;
+                    return false;
+                }
+                return true;
+            }
+        }
+    }
     if (lscp_sftp_rename(from.c_str(), to.c_str()) != 0)
     {
         Console::Instance().Error(Texts::RemoteError("move", from, lscp_sftp_error()));
@@ -654,11 +914,11 @@ bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
         mErrors++;
         return false;
     }
-    long permissions = strtol(args[0].c_str(), NULL, 8);
-    if (permissions <= 0 || permissions > 07777)
+    unsigned long permissions = 0;
+    if (!ParseOctalPermissions(args[0], permissions))
     {
         Console::Instance().Error(Texts::WrongArguments("chmod",
-            "Permissions must be an octal number, for example 644."));
+            "Permissions must be an octal number from 0 through 7777, for example 644."));
         mErrors++;
         return false;
     }
@@ -670,6 +930,14 @@ bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
         if (!ExpandRemote(args[i], paths, error))
         {
             Console::Instance().Error(Texts::RemoteError("read", args[i], error));
+            mErrors++;
+            ok = false;
+            continue;
+        }
+        if (paths.empty())
+        {
+            Console::Instance().Error(Texts::RemoteError("find", args[i],
+                "No matching files."));
             mErrors++;
             ok = false;
             continue;
@@ -898,14 +1166,42 @@ int Script::RunFile(const std::string & path)
         closeFile = true;
     }
 
-    char buffer[8192];
-    while (!mExit && fgets(buffer, sizeof(buffer), file) != NULL)
+    while (!mExit)
     {
-        ExecuteLine(buffer);
+        std::string line;
+        bool sawInput = false;
+        int c = EOF;
+        while ((c = fgetc(file)) != EOF)
+        {
+            sawInput = true;
+            if (c == '\n')
+            {
+                break;
+            }
+            if (c != '\r')
+            {
+                line += static_cast<char>(c);
+            }
+        }
+        if (!sawInput && c == EOF)
+        {
+            break;
+        }
+        ExecuteLine(line);
+        if (c == EOF)
+        {
+            break;
+        }
     }
-    if (closeFile)
+    if (ferror(file))
     {
-        fclose(file);
+        Console::Instance().Error("Error while reading the script file '" + path + "'.");
+        mErrors++;
+    }
+    if (closeFile && fclose(file) != 0)
+    {
+        Console::Instance().Error("Error while closing the script file '" + path + "'.");
+        mErrors++;
     }
     return mErrors != 0 ? 1 : 0;
 }
