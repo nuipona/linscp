@@ -1,0 +1,40 @@
+#!/usr/bin/make -f
+# Debian build rules for LinuxSCP.
+#
+# This package deliberately does not use debhelper: the whole build is one
+# plain Makefile (source/linux/Makefile), so the few targets are written out
+# here and the build dependency list stays at dpkg-dev.
+
+package := linuxscp
+destdir := debian/$(package)
+
+# dpkg-buildpackage calls clean, build and binary; make everything else a
+# no-op so that extra targets it may probe do not fail the build.
+%:
+	@:
+
+build: build-stamp
+
+build-stamp:
+	$(MAKE) -C source/linux all check
+	touch $@
+
+binary: build
+	rm -rf $(destdir)
+	install -d $(destdir)/usr/bin
+	install -d $(destdir)/usr/share/man/man1
+	install -d $(destdir)/usr/share/doc/$(package)
+	install -d $(destdir)/DEBIAN
+	install -m 0755 source/linux/build/linuxscp $(destdir)/usr/bin/linuxscp
+	install -m 0644 docs/linuxscp.1 $(destdir)/usr/share/man/man1/linuxscp.1
+	gzip -9f $(destdir)/usr/share/man/man1/linuxscp.1
+	install -m 0644 license.txt $(destdir)/usr/share/doc/$(package)/copyright
+	install -m 0644 docs/debian.md $(destdir)/usr/share/doc/$(package)/README.Debian
+	dpkg-shlibdeps -Tdebian/substvars $(destdir)/usr/bin/linuxscp
+	dpkg-gencontrol -p$(package) -P$(destdir)
+	dpkg-deb --build $(destdir) ..
+
+clean:
+	$(MAKE) -C source/linux clean
+	rm -f build-stamp
+	rm -rf $(destdir) debian/files debian/substvars

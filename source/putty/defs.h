@@ -12,12 +12,30 @@
 #define PUTTY_DEFS_H
 
 #ifdef FORK_BUILD
+/*
+ * The hardware-accelerated crypto in source/putty/crypto is guarded per
+ * toolchain (see the #if at the top of crypto/aes-ni.c), so a platform can
+ * turn any of these off from the command line when it does not compile the
+ * accelerated sources. [linuxscp-compat]
+ */
+#ifndef HAVE_AES_NI
 #define HAVE_AES_NI 1
+#endif
+#ifndef HAVE_SHA_NI
 #define HAVE_SHA_NI 0 // to be enabled
+#endif
+#ifndef HAVE_CLMUL
 #define HAVE_CLMUL 0 // to be enabled
+#endif
+#ifndef HAVE_NEON_CRYPTO
 #define HAVE_NEON_CRYPTO 0
+#endif
+#ifndef HAVE_NEON_SHA512
 #define HAVE_NEON_SHA512 0
+#endif
+#ifndef HAVE_NEON_PMULL
 #define HAVE_NEON_PMULL 0
+#endif
 #define HAVE_ARM_DIT 0
 #define HAVE_WMEMCHR 1
 #define HAVE_CMAKE_H 0

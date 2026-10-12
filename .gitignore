@@ -1,2 +1,9 @@
 # Build output for the native POSIX (Debian) port
 source/linux/build/
+source/linux/build-*/
+
+# Debian package build output
+build-stamp
+debian/files
+debian/substvars
+debian/linuxscp/
