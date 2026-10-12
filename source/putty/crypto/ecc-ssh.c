@@ -117,6 +117,7 @@ static void initialise_ecurve(
     curve->e.G_order = mp_copy(G_order);
 }
 
+#ifdef MPEXT
 #define FORK_CURVE_CLEANUP(TYPE) \
     if (ec_curve_cleanup) \
     { \
@@ -124,6 +125,10 @@ static void initialise_ecurve(
         initialised = 0; \
         return NULL; \
     }
+#else
+/* Curve cleanup at process exit is an MPEXT (Windows) feature only. */
+#define FORK_CURVE_CLEANUP(TYPE)
+#endif
 
 static struct ec_curve *ec_p256(void)
 {
