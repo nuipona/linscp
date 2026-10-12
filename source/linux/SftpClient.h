@@ -24,6 +24,13 @@ extern "C" {
 #define LSCP_ATTR_PERMISSIONS 0x00000004u
 #define LSCP_ATTR_ACMODTIME   0x00000008u
 
+enum
+{
+    LSCP_SFTP_STAT_ERROR = -1,
+    LSCP_SFTP_STAT_EXISTS = 0,
+    LSCP_SFTP_STAT_MISSING = 1
+};
+
 typedef struct LscpAttrs
 {
     unsigned long flags;
@@ -51,10 +58,13 @@ typedef struct LscpNames
 typedef void (*LscpProgressFn)(unsigned long long transferred,
     unsigned long long total, void * ctx);
 
-/* All functions return 0 on success and -1 on failure; the reason is then
+/* Integer operations return 0 on success and -1 on failure, except stat,
+ * which returns the values above to distinguish a missing path. Details are
  * available from lscp_sftp_error(). */
 
 int lscp_sftp_init(void);
+/* Release any outstanding request bookkeeping when a session is torn down. */
+void lscp_sftp_cleanup(void);
 const char * lscp_sftp_error(void);
 
 /* Returns a newly allocated absolute path, or NULL. */
@@ -64,6 +74,7 @@ char * lscp_sftp_realpath(const char * path);
 LscpNames * lscp_sftp_list_dir(const char * path);
 void lscp_sftp_free_names(LscpNames * names);
 
+/* Returns LSCP_SFTP_STAT_EXISTS, _MISSING or _ERROR. */
 int lscp_sftp_stat(const char * path, LscpAttrs * attrs);
 int lscp_sftp_mkdir(const char * path, int permissions);
 int lscp_sftp_rmdir(const char * path);

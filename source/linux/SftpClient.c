@@ -26,6 +26,11 @@
 
 static char g_error[1024];
 
+static void clear_error(void)
+{
+    g_error[0] = '\0';
+}
+
 static void set_error(const char * text)
 {
     snprintf(g_error, sizeof(g_error), "%s", text);
@@ -33,18 +38,28 @@ static void set_error(const char * text)
 
 static void set_error_path(const char * what, const char * path)
 {
-    snprintf(g_error, sizeof(g_error), "%s '%s': %s", what, path, fxp_error());
+    const char * reason = fxp_error();
+    snprintf(g_error, sizeof(g_error), "%s '%s': %s", what, path,
+        reason != NULL && reason[0] != '\0' ? reason : "unknown SFTP error");
 }
 
 static void set_system_error(const char * what, const char * path)
 {
+    const int errorNumber = errno != 0 ? errno : EIO;
+    const char * reason = strerror(errorNumber);
     snprintf(g_error, sizeof(g_error), "%s '%s': %s", what, path,
-        strerror(errno) != NULL ? strerror(errno) : "unknown error");
+        reason != NULL ? reason : "unknown error");
 }
 
 const char * lscp_sftp_error(void)
 {
     return g_error;
+}
+
+void lscp_sftp_cleanup(void)
+{
+    sftp_cleanup_request();
+    clear_error();
 }
 
 /* Receives the response to 'request'. Returns the packet, and the request
@@ -73,8 +88,9 @@ static struct sftp_packet * receive_response(struct sftp_request * request,
     return pktin;
 }
 
-/* Closes a handle, ignoring errors; used on both success and error paths. */
-static void close_handle(struct fxp_handle * handle)
+/* Closes a handle. The caller decides whether a close error replaces an
+ * earlier operation error or is itself fatal. */
+static bool close_handle(struct fxp_handle * handle)
 {
     struct sftp_request * request;
     struct sftp_request * found;
@@ -82,10 +98,11 @@ static void close_handle(struct fxp_handle * handle)
 
     sftp_register(request = fxp_close_send(handle));
     pktin = receive_response(request, &found);
-    if (pktin != NULL)
+    if (pktin == NULL)
     {
-        fxp_close_recv(pktin, found);
+        return false;
     }
+    return fxp_close_recv(pktin, found);
 }
 
 static void attrs_from_fxp(const struct fxp_attrs * attrs, LscpAttrs * out)
@@ -101,6 +118,7 @@ static void attrs_from_fxp(const struct fxp_attrs * attrs, LscpAttrs * out)
 
 int lscp_sftp_init(void)
 {
+    clear_error();
     if (!fxp_init())
     {
         const char * reason = fxp_error();
@@ -114,6 +132,7 @@ int lscp_sftp_init(void)
 
 char * lscp_sftp_realpath(const char * path)
 {
+    clear_error();
     struct sftp_request * request;
     struct sftp_request * found;
     struct sftp_packet * pktin;
@@ -135,6 +154,11 @@ char * lscp_sftp_realpath(const char * path)
 
 int lscp_sftp_stat(const char * path, LscpAttrs * attrs)
 {
+    clear_error();
+    if (attrs != NULL)
+    {
+        memset(attrs, 0, sizeof(*attrs));
+    }
     struct sftp_request * request;
     struct sftp_request * found;
     struct sftp_packet * pktin;
@@ -148,18 +172,21 @@ int lscp_sftp_stat(const char * path, LscpAttrs * attrs)
     }
     if (!fxp_stat_recv(pktin, found, &fxpAttrs))
     {
+        const int status = fxp_error_type();
         set_error_path("Getting the attributes of", path);
-        return -1;
+        return status == SSH_FX_NO_SUCH_FILE ?
+            LSCP_SFTP_STAT_MISSING : LSCP_SFTP_STAT_ERROR;
     }
     if (attrs != NULL)
     {
         attrs_from_fxp(&fxpAttrs, attrs);
     }
-    return 0;
+    return LSCP_SFTP_STAT_EXISTS;
 }
 
 LscpNames * lscp_sftp_list_dir(const char * path)
 {
+    clear_error();
     struct sftp_request * request;
     struct sftp_request * found;
     struct sftp_packet * pktin;
@@ -208,6 +235,7 @@ LscpNames * lscp_sftp_list_dir(const char * path)
                 break;
             }
             set_error_path("Reading the directory", path);
+            close_handle(dir);
             lscp_sftp_free_names(result);
             return NULL;
         }
@@ -231,7 +259,12 @@ LscpNames * lscp_sftp_list_dir(const char * path)
         fxp_free_names(names);
     }
 
-    close_handle(dir);
+    if (!close_handle(dir))
+    {
+        set_error_path("Closing the directory", path);
+        lscp_sftp_free_names(result);
+        return NULL;
+    }
     return result;
 }
 
@@ -272,6 +305,7 @@ static int simple_request(const char * what, const char * path,
 
 int lscp_sftp_mkdir(const char * path, int permissions)
 {
+    clear_error();
     struct fxp_attrs attrs = no_attrs;
     PUT_PERMISSIONS(attrs, permissions);
     sftp_register(fxp_mkdir_send(path, &attrs));
@@ -280,24 +314,28 @@ int lscp_sftp_mkdir(const char * path, int permissions)
 
 int lscp_sftp_rmdir(const char * path)
 {
+    clear_error();
     sftp_register(fxp_rmdir_send(path));
     return simple_request("Removing the directory", path, fxp_rmdir_recv);
 }
 
 int lscp_sftp_remove(const char * path)
 {
+    clear_error();
     sftp_register(fxp_remove_send(path));
     return simple_request("Removing", path, fxp_remove_recv);
 }
 
 int lscp_sftp_rename(const char * from, const char * to)
 {
+    clear_error();
     sftp_register(fxp_rename_send(from, to));
     return simple_request("Moving", from, fxp_rename_recv);
 }
 
 int lscp_sftp_set_permissions(const char * path, int permissions)
 {
+    clear_error();
     struct fxp_attrs attrs = no_attrs;
     PUT_PERMISSIONS(attrs, permissions);
     sftp_register(fxp_setstat_send(path, attrs));
@@ -306,24 +344,18 @@ int lscp_sftp_set_permissions(const char * path, int permissions)
 
 static unsigned long long local_file_size(FILE * file)
 {
-    long pos = ftell(file);
-    long end;
-    if (pos < 0)
+    struct stat st;
+    if (fstat(fileno(file), &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0)
     {
         return 0;
     }
-    if (fseek(file, 0, SEEK_END) != 0)
-    {
-        return 0;
-    }
-    end = ftell(file);
-    fseek(file, pos, SEEK_SET);
-    return end > 0 ? (unsigned long long)end : 0;
+    return (unsigned long long)st.st_size;
 }
 
 int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx)
 {
+    clear_error();
     struct sftp_request * request;
     struct sftp_request * found;
     struct sftp_packet * pktin;
@@ -333,15 +365,24 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long total = 0;
     unsigned long long transferred = 0;
     int result = 0;
+    bool canCloseHandle = true;
     LscpAttrs attrs;
 
     if (size != NULL)
     {
         *size = 0;
     }
-    if (lscp_sftp_stat(remotePath, &attrs) == 0 && (attrs.flags & SSH_FILEXFER_ATTR_SIZE))
+    if (lscp_sftp_stat(remotePath, &attrs) == LSCP_SFTP_STAT_EXISTS)
     {
-        total = attrs.size;
+        if (attrs.flags & SSH_FILEXFER_ATTR_SIZE)
+        {
+            total = attrs.size;
+        }
+    }
+    else
+    {
+        /* The open request below provides the authoritative failure. */
+        clear_error();
     }
 
     sftp_register(request = fxp_open_send(remotePath, SSH_FXF_READ, NULL));
@@ -375,6 +416,7 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
         {
             set_error("The connection has been closed by the server.");
             result = -1;
+            canCloseHandle = false;
             break;
         }
         got = xfer_download_gotpkt(xfer, pktin);
@@ -387,7 +429,6 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
         {
             set_error_path("Reading the file", remotePath);
             result = -1;
-            break;
         }
         for (;;)
         {
@@ -397,33 +438,45 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
             {
                 break;
             }
-            if (length > 0 && fwrite(buffer, 1, length, file) != (size_t)length)
+            if (result == 0 && length > 0 &&
+                fwrite(buffer, 1, (size_t)length, file) != (size_t)length)
             {
                 set_system_error("Writing the local file", localPath);
-                sfree(buffer);
                 result = -1;
-                break;
+                xfer_set_error(xfer);
             }
             sfree(buffer);
-            transferred += length;
-            if (progress != NULL)
+            if (result == 0)
             {
-                progress(transferred, total, progressCtx);
+                transferred += (unsigned long long)length;
+                if (progress != NULL)
+                {
+                    progress(transferred, total, progressCtx);
+                }
             }
         }
-        if (result != 0)
-        {
-            break;
-        }
         /*
-         * Refill the pipeline: xfer_download_init() only queues the first
-         * window's worth of read requests, and nothing else does.
+         * Refill the pipeline only while the transfer is healthy. If a
+         * local write or remote read fails, the remaining queued replies
+         * are drained below before the SFTP handle is closed.
          */
-        xfer_download_queue(xfer);
+        if (result == 0)
+        {
+            xfer_download_queue(xfer);
+        }
     }
     xfer_cleanup(xfer);
-    fclose(file);
-    close_handle(handle);
+    errno = 0;
+    if (fclose(file) != 0 && result == 0)
+    {
+        set_system_error("Closing the local file", localPath);
+        result = -1;
+    }
+    if (canCloseHandle && !close_handle(handle) && result == 0)
+    {
+        set_error_path("Closing the file", remotePath);
+        result = -1;
+    }
 
     if (result != 0)
     {
@@ -439,6 +492,7 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
 int lscp_sftp_put(const char * localPath, const char * remotePath, int permissions,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx)
 {
+    clear_error();
     struct sftp_request * request;
     struct sftp_request * found;
     struct sftp_packet * pktin;
@@ -449,7 +503,9 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
     char * buffer;
     unsigned long long total;
     unsigned long long transferred = 0;
+    size_t pendingWrites = 0;
     bool eof = false;
+    bool canCloseHandle = true;
     int result = 0;
 
     if (size != NULL)
@@ -495,7 +551,7 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
      */
     buffer = snewn(TRANSFER_CHUNK, char);
     xfer = xfer_upload_init(handle, 0);
-    while (!eof || !xfer_done(xfer))
+    while (!eof || pendingWrites != 0)
     {
         size_t read;
         int got;
@@ -514,13 +570,14 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
                 break;
             }
             xfer_upload_data(xfer, buffer, (int)read);
+            pendingWrites++;
             transferred += read;
             if (progress != NULL)
             {
                 progress(transferred, total, progressCtx);
             }
         }
-        if (result != 0)
+        if (result != 0 || (eof && pendingWrites == 0))
         {
             break;
         }
@@ -530,6 +587,7 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
         {
             set_error("The connection has been closed by the server.");
             result = -1;
+            canCloseHandle = false;
             break;
         }
         got = xfer_upload_gotpkt(xfer, pktin);
@@ -538,6 +596,10 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
             sftp_pkt_free(pktin);
             continue;
         }
+        if (pendingWrites > 0)
+        {
+            pendingWrites--;
+        }
         if (got < 0)
         {
             set_error_path("Writing the file", remotePath);
@@ -545,10 +607,50 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
             break;
         }
     }
+
+    /* A local read or server write failure does not cancel SFTP requests
+     * already in flight. Drain their replies so a later command cannot
+     * mistake them for the response to CLOSE or another operation. */
+    while (canCloseHandle && pendingWrites > 0)
+    {
+        int got;
+        pktin = sftp_recv();
+        if (pktin == NULL)
+        {
+            set_error("The connection has been closed by the server.");
+            result = -1;
+            canCloseHandle = false;
+            break;
+        }
+        got = xfer_upload_gotpkt(xfer, pktin);
+        if (got == INT_MIN)
+        {
+            sftp_pkt_free(pktin);
+            continue;
+        }
+        pendingWrites--;
+        if (got < 0)
+        {
+            if (result == 0)
+            {
+                set_error_path("Writing the file", remotePath);
+            }
+            result = -1;
+        }
+    }
     xfer_cleanup(xfer);
     sfree(buffer);
-    fclose(file);
-    close_handle(handle);
+    errno = 0;
+    if (fclose(file) != 0 && result == 0)
+    {
+        set_system_error("Closing the local file", localPath);
+        result = -1;
+    }
+    if (canCloseHandle && !close_handle(handle) && result == 0)
+    {
+        set_error_path("Closing the file", remotePath);
+        result = -1;
+    }
 
     if (result != 0)
     {

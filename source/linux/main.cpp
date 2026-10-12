@@ -5,9 +5,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <climits>
 #include <string>
 
 #include "Console.h"
+#include "PathUtil.h"
 #include "Script.h"
 #include "Session.h"
 #include "Texts.h"
@@ -30,6 +32,35 @@ bool StartsWith(const char * text, const char * prefix, const char ** value)
     return true;
 }
 
+bool ParsePositiveInteger(const char * text, int maximum, int * result)
+{
+    if (text == NULL || text[0] == '\0')
+    {
+        return false;
+    }
+    unsigned int value = 0;
+    for (const unsigned char * p =
+             reinterpret_cast<const unsigned char *>(text); *p != '\0'; p++)
+    {
+        if (*p < '0' || *p > '9')
+        {
+            return false;
+        }
+        const unsigned int digit = *p - '0';
+        if (value > (static_cast<unsigned int>(maximum) - digit) / 10U)
+        {
+            return false;
+        }
+        value = value * 10U + digit;
+    }
+    if (value == 0 || value > static_cast<unsigned int>(maximum))
+    {
+        return false;
+    }
+    *result = static_cast<int>(value);
+    return true;
+}
+
 } // namespace
 
 int main(int argc, char ** argv)
@@ -43,6 +74,8 @@ int main(int argc, char ** argv)
     bool batch = false;
     bool help = false;
     bool version = false;
+    bool scriptSpecified = false;
+    bool commandSpecified = false;
     const char * value = NULL;
 
     for (int i = 1; i < argc; i++)
@@ -50,10 +83,12 @@ int main(int argc, char ** argv)
         const char * arg = argv[i];
         if (StartsWith(arg, "-script=", &value))
         {
-            scriptFile = value;
+            scriptSpecified = true;
+            scriptFile = linuxscp::ExpandTilde(value);
         }
         else if (StartsWith(arg, "-command=", &value))
         {
+            commandSpecified = true;
             command = value;
         }
         else if (StartsWith(arg, "-hostkey=", &value))
@@ -74,15 +109,25 @@ int main(int argc, char ** argv)
         }
         else if (StartsWith(arg, "-port=", &value))
         {
-            options.portNumber = atoi(value);
+            if (!ParsePositiveInteger(value, 65535, &options.portNumber))
+            {
+                console.Error("Invalid port number '" + std::string(value) +
+                    "' (expected 1 through 65535).");
+                return 1;
+            }
         }
         else if (StartsWith(arg, "-timeout=", &value))
         {
-            options.timeoutSecs = atoi(value);
+            if (!ParsePositiveInteger(value, INT_MAX / 1000, &options.timeoutSecs))
+            {
+                console.Error("Invalid timeout '" + std::string(value) +
+                    "' (expected a positive number of seconds).");
+                return 1;
+            }
         }
         else if (StartsWith(arg, "-log=", &value))
         {
-            logFile = value;
+            logFile = linuxscp::ExpandTilde(value);
         }
         else if (strcmp(arg, "-batch") == 0)
         {
@@ -128,6 +173,27 @@ int main(int argc, char ** argv)
         console.WriteLine(linuxscp::Texts::Usage());
         return 0;
     }
+    if (scriptSpecified && commandSpecified)
+    {
+        console.Error("Choose either -script or -command, not both.");
+        return 1;
+    }
+    if (scriptSpecified && scriptFile.empty())
+    {
+        console.Error("-script requires a file name (use -script=- for standard input).");
+        return 1;
+    }
+    if (commandSpecified && command.empty())
+    {
+        console.Error("-command requires at least one command.");
+        return 1;
+    }
+    if ((scriptSpecified || commandSpecified) && !url.empty())
+    {
+        console.Error("A site URL cannot be combined with -script or -command; "
+            "put an 'open' command in the script instead.");
+        return 1;
+    }
 
     if (options.password.empty())
     {
@@ -162,11 +228,11 @@ int main(int argc, char ** argv)
     script.SetDefaults(options);
 
     int result;
-    if (!scriptFile.empty())
+    if (scriptSpecified)
     {
         result = script.RunFile(scriptFile);
     }
-    else if (!command.empty())
+    else if (commandSpecified)
     {
         result = script.RunCommand(command);
     }

@@ -17,10 +17,13 @@ LocalFileInfo StatLocal(const std::string & path)
     struct stat st;
     if (stat(path.c_str(), &st) != 0)
     {
+        result.error = errno;
         return result;
     }
+    result.error = 0;
     result.exists = true;
     result.isDir = S_ISDIR(st.st_mode);
+    result.isRegular = S_ISREG(st.st_mode);
     result.size = static_cast<uint64_t>(st.st_size);
     result.mtime = static_cast<unsigned long>(st.st_mtime);
     result.permissions = static_cast<unsigned long>(st.st_mode);
@@ -31,6 +34,7 @@ bool ListLocalDirectory(const std::string & dir, std::vector<std::string> & name
     std::string & error)
 {
     names.clear();
+    error.clear();
     DIR * handle = opendir(dir.c_str());
     if (handle == NULL)
     {
@@ -38,6 +42,7 @@ bool ListLocalDirectory(const std::string & dir, std::vector<std::string> & name
         return false;
     }
     struct dirent * entry;
+    errno = 0;
     while ((entry = readdir(handle)) != NULL)
     {
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
@@ -45,8 +50,22 @@ bool ListLocalDirectory(const std::string & dir, std::vector<std::string> & name
             continue;
         }
         names.push_back(entry->d_name);
+        errno = 0;
     }
-    closedir(handle);
+    const int readError = errno;
+    if (closedir(handle) != 0 && readError == 0)
+    {
+        error = LastSystemError();
+        names.clear();
+        return false;
+    }
+    if (readError != 0)
+    {
+        errno = readError;
+        error = LastSystemError();
+        names.clear();
+        return false;
+    }
     return true;
 }
 
@@ -54,6 +73,7 @@ bool ExpandLocalWildcard(const std::string & path, std::vector<std::string> & na
     std::string & error)
 {
     names.clear();
+    error.clear();
     if (!HasWildcard(path))
     {
         LocalFileInfo info = StatLocal(path);
@@ -83,16 +103,34 @@ bool ExpandLocalWildcard(const std::string & path, std::vector<std::string> & na
 
 bool CreateLocalDirectory(const std::string & path, std::string & error)
 {
-    if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST)
+    error.clear();
+    if (mkdir(path.c_str(), 0777) == 0)
+    {
+        return true;
+    }
+    if (errno != EEXIST)
     {
         error = LastSystemError();
         return false;
     }
-    return true;
+
+    struct stat st;
+    if (stat(path.c_str(), &st) == 0)
+    {
+        if (S_ISDIR(st.st_mode))
+        {
+            return true;
+        }
+        error = "An object with this name already exists and is not a directory.";
+        return false;
+    }
+    error = LastSystemError();
+    return false;
 }
 
 bool RemoveLocalFile(const std::string & path, std::string & error)
 {
+    error.clear();
     if (unlink(path.c_str()) != 0)
     {
         error = LastSystemError();
@@ -103,6 +141,7 @@ bool RemoveLocalFile(const std::string & path, std::string & error)
 
 std::string GetLocalDirectory(std::string & error)
 {
+    error.clear();
     char buffer[PATH_MAX];
     if (getcwd(buffer, sizeof(buffer)) == NULL)
     {
@@ -114,6 +153,7 @@ std::string GetLocalDirectory(std::string & error)
 
 bool SetLocalDirectory(const std::string & path, std::string & error)
 {
+    error.clear();
     if (chdir(path.c_str()) != 0)
     {
         error = LastSystemError();

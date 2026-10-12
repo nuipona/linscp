@@ -9,6 +9,7 @@
  * exercised end to end instead (see docs/debian.md).
  */
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -147,6 +148,19 @@ void TestLocalPaths()
     }
     CHECK_EQ(ExpandTilde("/tmp"), "/tmp");
     CHECK_EQ(ExpandTilde(""), "");
+    const char * oldHomeValue = getenv("HOME");
+    const bool hadHome = oldHomeValue != NULL;
+    const std::string oldHome = hadHome ? oldHomeValue : "";
+    setenv("HOME", "/", 1);
+    CHECK_EQ(ExpandTilde("~/docs"), "/docs");
+    if (hadHome)
+    {
+        setenv("HOME", oldHome.c_str(), 1);
+    }
+    else
+    {
+        unsetenv("HOME");
+    }
 
     CHECK_EQ(LocalDirName("/tmp/file.txt"), "/tmp");
     CHECK_EQ(LocalDirName("file.txt"), ".");
@@ -232,6 +246,33 @@ void TestParseSiteUrl()
     CHECK_EQ(options.userName, "");
     CHECK_EQ(options.initialDirectory, "");
 
+    /* Global command-line settings survive URLs that omit those fields. */
+    options = SessionOptions();
+    options.portNumber = 2200;
+    options.userName = "default-user";
+    options.password = "default-password";
+    options.timeoutSecs = 30;
+    options.privateKeyFile = "/tmp/client.ppk";
+    options.hostKey = "SHA256:pinned";
+    options.verbose = true;
+    CHECK_TRUE(ParseSiteUrl("example.com", options, error));
+    CHECK_TRUE(options.portNumber == 2200);
+    CHECK_EQ(options.userName, "default-user");
+    CHECK_EQ(options.password, "default-password");
+    CHECK_TRUE(options.timeoutSecs == 30);
+    CHECK_EQ(options.privateKeyFile, "/tmp/client.ppk");
+    CHECK_EQ(options.hostKey, "SHA256:pinned");
+    CHECK_TRUE(options.verbose);
+
+    /* URI-escaped credentials and remote path are decoded. */
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl(
+        "sftp://url%40user:p%40ss%3Aword@example.com:2200/a%20b", options, error));
+    CHECK_EQ(options.userName, "url@user");
+    CHECK_EQ(options.password, "p@ss:word");
+    CHECK_TRUE(options.portNumber == 2200);
+    CHECK_EQ(options.initialDirectory, "/a b");
+
     /* No scheme at all. */
     options = SessionOptions();
     CHECK_TRUE(ParseSiteUrl("example.com:2222/tmp", options, error));
@@ -263,15 +304,38 @@ void TestParseSiteUrl()
     CHECK_TRUE(error.find("Invalid port") != std::string::npos);
     options = SessionOptions();
     CHECK_FALSE(ParseSiteUrl("sftp://[::1", options, error));
-    CHECK_TRUE(error.find("Malformed IPv6") != std::string::npos);
+    CHECK_TRUE(error.find("Malformed") != std::string::npos);
+    options = SessionOptions();
+    CHECK_FALSE(ParseSiteUrl("sftp://[::1]junk", options, error));
+    CHECK_TRUE(error.find("Invalid port") != std::string::npos);
+    options = SessionOptions();
+    CHECK_FALSE(ParseSiteUrl("sftp://example.com:22junk", options, error));
+    options = SessionOptions();
+    CHECK_FALSE(ParseSiteUrl("sftp://[::1]:2222x", options, error));
+    options = SessionOptions();
+    CHECK_FALSE(ParseSiteUrl("sftp://example.com/%XZ", options, error));
+    options = SessionOptions();
+    CHECK_FALSE(ParseSiteUrl("sftp://user:secret@example.com:22junk", options, error));
+    CHECK_TRUE(error.find("secret") == std::string::npos);
+    options = SessionOptions();
+    CHECK_FALSE(ParseSiteUrl("sftp://::1", options, error));
+    CHECK_TRUE(error.find("brackets") != std::string::npos);
 }
 
 void TestLocalFs()
 {
-    const std::string dir = "/tmp/linuxscp-unittest";
+    char dirTemplate[] = "/tmp/linuxscp-unittest.XXXXXX";
+    char * createdDir = mkdtemp(dirTemplate);
+    CHECK_TRUE(createdDir != NULL);
+    if (createdDir == NULL)
+    {
+        return;
+    }
+    const std::string dir(createdDir);
     std::string error;
 
     CHECK_TRUE(CreateLocalDirectory(dir, error));
+    CHECK_TRUE(error.empty());
     CHECK_TRUE(CreateLocalDirectory(dir + "/sub", error));
 
     FILE * file = fopen((dir + "/one.txt").c_str(), "w");
@@ -288,22 +352,33 @@ void TestLocalFs()
         fclose(file);
     }
 
+    /* EEXIST is success only when the existing object is a directory. */
+    CHECK_FALSE(CreateLocalDirectory(dir + "/one.txt", error));
+    CHECK_TRUE(!error.empty());
+
     LocalFileInfo info = StatLocal(dir + "/one.txt");
     CHECK_TRUE(info.exists);
+    CHECK_TRUE(info.error == 0);
     CHECK_FALSE(info.isDir);
+    CHECK_TRUE(info.isRegular);
     CHECK_TRUE(info.size == 6);
     CHECK_TRUE(info.mtime > 0);
     info = StatLocal(dir + "/sub");
     CHECK_TRUE(info.exists);
     CHECK_TRUE(info.isDir);
+    CHECK_FALSE(info.isRegular);
     info = StatLocal(dir + "/missing");
     CHECK_FALSE(info.exists);
+    CHECK_TRUE(info.error == ENOENT);
 
     std::vector<std::string> names;
     CHECK_TRUE(ListLocalDirectory(dir, names, error));
+    CHECK_TRUE(error.empty());
     CHECK_TRUE(names.size() == 3);
     CHECK_FALSE(ListLocalDirectory(dir + "/missing", names, error));
     CHECK_TRUE(!error.empty());
+    CHECK_TRUE(ListLocalDirectory(dir, names, error));
+    CHECK_TRUE(error.empty());
 
     names.clear();
     CHECK_TRUE(ExpandLocalWildcard(dir + "/*.txt", names, error));
@@ -324,16 +399,20 @@ void TestLocalFs()
     CHECK_TRUE(ExpandLocalWildcard(dir + "/one.txt", names, error));
     CHECK_TRUE(names.size() == 1);
 
-    /* The current local directory. */
+    /* The current local directory is restored, even after failed chdir. */
+    const std::string originalDirectory = GetLocalDirectory(error);
+    CHECK_TRUE(!originalDirectory.empty());
     CHECK_TRUE(SetLocalDirectory(dir, error));
     CHECK_EQ(GetLocalDirectory(error), dir);
     CHECK_FALSE(SetLocalDirectory(dir + "/missing", error));
     CHECK_TRUE(!error.empty());
-    CHECK_TRUE(SetLocalDirectory("/tmp", error));
+    CHECK_TRUE(SetLocalDirectory(originalDirectory, error));
 
+    CHECK_TRUE(RemoveLocalFile(dir + "/one.txt", error));
     CHECK_TRUE(RemoveLocalFile(dir + "/two.log", error));
-    CHECK_FALSE(StatLocal(dir + "/two.log").exists);
-    CHECK_FALSE(LastSystemError().empty());
+    CHECK_EQ(error, "");
+    CHECK_TRUE(rmdir((dir + "/sub").c_str()) == 0);
+    CHECK_TRUE(rmdir(dir.c_str()) == 0);
 }
 
 void TestSessionRegistry()

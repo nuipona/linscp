@@ -2,12 +2,7 @@ Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: LinuxSCP
 Source: https://github.com/nuipona/linuxscp
 
-Files: *
-Copyright: 2000-2026 Martin Prikryl and the WinSCP contributors
-           2026 the LinuxSCP contributors
-License: GPL-3+
-
-Files: libs/putty/*
+Files: source/putty/* libs/putty/*
 Copyright: 1997-2025 Simon Tatham and the PuTTY contributors
 License: MIT
  The PuTTY distribution as a whole is copyright Simon Tatham and
@@ -31,6 +26,16 @@ License: MIT
  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
 
+Files: logo/*
+Copyright: 2026 LinuxSCP contributors
+License: LicenseRef-LinuxSCP-Logo
+ This original artwork is not licensed under the GNU General Public License and
+ may not be redistributed with another program. Its inclusion in the LinuxSCP
+ source tree does not grant permission to use the artwork independently.
+
+Files: *
+Copyright: 2000-2026 Martin Prikryl and the WinSCP contributors
+           2026 the LinuxSCP contributors
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify it
  under the terms of the GNU General Public License as published by the Free

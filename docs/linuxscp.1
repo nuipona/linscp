@@ -39,7 +39,8 @@ Several commands may be given, separated by
 .BI \-hostkey= fingerprint
 Accept only the host key with this fingerprint. Use
 .B *
-to accept any key. Without this option an unknown host key is accepted only
+to accept any key for this connection only; it is not added to the persistent
+host-key cache. Without this option an unknown host key is accepted only
 after the client has been able to ask; in
 .B \-batch
 mode the connection fails instead.
@@ -59,17 +60,21 @@ environment variable is used when this option is not given, which keeps the
 password out of the command line.
 .TP
 .BI \-port= number
-Port to connect to. The default is 22.
+Port to connect to (1 through 65535). The default is 22.
 .TP
 .BI \-timeout= seconds
-Connection timeout. The default is 15 seconds.
+Positive connection timeout in seconds. The default is 15 seconds.
 .TP
 .BI \-log= file
 Write the session log to
 .IR file .
 .TP
 .B \-batch
-Never ask a question. Anything that would need an answer fails instead.
+Never ask a question. Operations that require an answer fail instead. To
+disable overwrite and delete confirmations in a trusted automation script,
+run
+.B option confirm off
+before those operations.
 .TP
 .B \-verbose
 Print what the SSH connection layer does as it happens.
@@ -94,11 +99,12 @@ and
 are all accepted, as is a bare
 .IR host [ :port ].
 The path is the directory the client changes to after connecting. The
-password is optional in the URL; prefer
+password is optional in the URL; percent-encode reserved characters in URL
+credentials and paths. Prefer
 .B \-password=
 or
 .B LINUXSCP_PASSWORD
-so that it is not written into a script file.
+so that the password is not written into a script file.
 .SH COMMANDS
 .TP
 .BI open " site"
@@ -131,10 +137,14 @@ Change the local directory.
 Print the local directory.
 .TP
 .BI get " remote local"
-Download a file, or every file matching a mask.
+Download a file, or every file matching a mask. The final argument is a local
+file path for one source file and a directory for multiple sources. An absent
+destination directory is created when multiple sources are selected.
 .TP
 .BI put " local remote"
-Upload a file, or every file matching a mask.
+Upload a file, or every file matching a mask. The final argument is a remote
+file path for one source file and a directory for multiple sources. An absent
+remote destination directory is created when multiple sources are selected.
 .TP
 .BI rm " file"
 Remove remote files.
@@ -155,7 +165,15 @@ Change the permissions of a remote file, given in octal.
 Print the attributes of a remote file.
 .TP
 .BI option " name value"
-Change a transfer option.
+Control confirmations with
+.BR option\ confirm\ on
+or
+.BR option\ confirm\ off .
+The default is
+.BR on ,
+which asks before overwriting local or remote files and before deleting remote
+files. In a non-interactive run, a required confirmation fails without
+consuming script input.
 .TP
 .B help
 List the commands.
@@ -212,9 +230,10 @@ linuxscp \-batch \-script=sync.txt
 .fi
 .RE
 .SH LIMITATIONS
-The POSIX client speaks SFTP only. The SCP protocol, FTP, FTPS, WebDAV and
-Amazon S3 sessions, local-to-local transfers, resuming interrupted
-transfers and any graphical interface are not implemented.
+The Debian client is an SFTP command-line client. It does not yet implement
+recursive directory transfers, the SCP protocol, FTP, FTPS, WebDAV, Amazon S3,
+local-to-local transfers, resuming interrupted transfers or a graphical
+interface.
 .SH SEE ALSO
 .BR sftp (1),
 .BR ssh (1),

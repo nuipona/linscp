@@ -1,9 +1,12 @@
 #include "Session.h"
 
 #include "Console.h"
+#include "PathUtil.h"
+#include "SftpClient.h"
 #include "Texts.h"
 
 #include <cctype>
+#include <climits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +24,16 @@ struct ScpSeat : public Seat
 {
     Session * session;
 };
+
+std::string LowerCaseAscii(const std::string & text)
+{
+    std::string result = text;
+    for (size_t i = 0; i < result.size(); i++)
+    {
+        result[i] = static_cast<char>(tolower(static_cast<unsigned char>(result[i])));
+    }
+    return result;
+}
 
 struct ScpLogPolicy : public LogPolicy
 {
@@ -115,14 +128,14 @@ SeatPromptResult seat_get_userpass_input(Seat * seat, prompts_t * prompts)
         std::string text = prompt->prompt != NULL ? prompt->prompt : "";
         std::string answer;
 
+        const std::string lowerPrompt = LowerCaseAscii(text);
         bool isUserName = prompt->echo &&
-            (text.find("username") != std::string::npos ||
-             text.find("sername") != std::string::npos ||
-             text.find("login") != std::string::npos ||
-             text.find("Login") != std::string::npos);
+            (lowerPrompt.find("username") != std::string::npos ||
+             lowerPrompt.find("user name") != std::string::npos ||
+             lowerPrompt.find("login") != std::string::npos);
         bool isPassword = !prompt->echo &&
-            (text.find("assword") != std::string::npos ||
-             text.find("passphrase") != std::string::npos);
+            (lowerPrompt.find("password") != std::string::npos ||
+             lowerPrompt.find("passphrase") != std::string::npos);
 
         if (isUserName && !options.userName.empty() && session->UserName().empty())
         {
@@ -134,7 +147,9 @@ SeatPromptResult seat_get_userpass_input(Seat * seat, prompts_t * prompts)
         }
         else if (console.IsInteractive())
         {
-            if (!console.ReadLine(prompt->echo ? text : text, answer))
+            const bool read = prompt->echo ?
+                console.ReadLine(text, answer) : console.ReadPassword(text, answer);
+            if (!read)
             {
                 return make_spr_sw_abort_static("No more input available");
             }
@@ -192,17 +207,8 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
         fingerprint = "(no fingerprint available)";
     }
 
-    if (already_verified)
-    {
-        return SPR_OK;
-    }
-
-    if (session->AcceptAnyHostKey())
-    {
-        store_host_key(seat, host, port, keytype, keystr);
-        return SPR_OK;
-    }
-
+    /* An explicit pin must be checked even if the core can also establish
+     * trust from its cache or a host certificate. */
     if (session->ExpectHostKey())
     {
         if (session->HostKeyMatches(fingerprints))
@@ -213,6 +219,18 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
         console.Error(Texts::HostKeyUnexpected(host, port, keytype, fingerprint,
             session->ExpectedHostKey()));
         return make_spr_sw_abort_static("The host key does not match the expected one");
+    }
+
+    /* '*' is a deliberate one-session override, not a trust decision: do
+     * not poison the persistent host-key cache with an unchecked key. */
+    if (session->AcceptAnyHostKey())
+    {
+        return SPR_OK;
+    }
+
+    if (already_verified)
+    {
+        return SPR_OK;
     }
 
     if (have_ssh_host_key(seat, host, port, keytype))
@@ -359,8 +377,98 @@ SessionOptions::SessionOptions() :
 {
 }
 
+namespace {
+
+bool ParsePortNumber(const std::string & text, int & port)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    unsigned int value = 0;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c < '0' || c > '9')
+        {
+            return false;
+        }
+        const unsigned int digit = c - '0';
+        if (value > (65535U - digit) / 10U)
+        {
+            return false;
+        }
+        value = value * 10U + digit;
+    }
+    if (value == 0)
+    {
+        return false;
+    }
+    port = static_cast<int>(value);
+    return true;
+}
+
+int HexDigit(unsigned char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool PercentDecode(const std::string & input, std::string & output)
+{
+    output.clear();
+    for (size_t i = 0; i < input.size(); i++)
+    {
+        if (input[i] != '%')
+        {
+            output += input[i];
+            continue;
+        }
+        if (i + 2 >= input.size())
+        {
+            return false;
+        }
+        const int high = HexDigit(static_cast<unsigned char>(input[i + 1]));
+        const int low = HexDigit(static_cast<unsigned char>(input[i + 2]));
+        if (high < 0 || low < 0)
+        {
+            return false;
+        }
+        const char decoded = static_cast<char>((high << 4) | low);
+        if (decoded == '\0')
+        {
+            return false;
+        }
+        output += decoded;
+        i += 2;
+    }
+    return true;
+}
+
+bool HasWhitespaceOrControl(const std::string & text)
+{
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        if (c <= 0x20 || c == 0x7f)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
+
 bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string & error)
 {
+    error.clear();
+    SessionOptions parsed = options;
+    parsed.hostName.clear();
+    parsed.initialDirectory.clear();
+
     std::string rest = url;
     std::string scheme;
     std::string::size_type pos = rest.find("://");
@@ -375,7 +483,7 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
     }
     for (size_t i = 0; i < scheme.size(); i++)
     {
-        scheme[i] = static_cast<char>(tolower(scheme[i]));
+        scheme[i] = static_cast<char>(tolower(static_cast<unsigned char>(scheme[i])));
     }
     if (scheme != "sftp" && scheme != "ssh" && scheme != "scp")
     {
@@ -383,79 +491,133 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
             "'. The Debian port currently supports SFTP only.";
         return false;
     }
+    if (url.empty())
+    {
+        error = "No host name in site URL.";
+        return false;
+    }
 
-    /* Split off the path. */
+    /* Query and fragment syntax is not meaningful for an SFTP site. */
+    if (rest.find('?') != std::string::npos || rest.find('#') != std::string::npos)
+    {
+        error = "Site URLs must not contain a query or fragment; encode reserved characters with percent escapes.";
+        return false;
+    }
+
+    /* Split off the path and decode its URI escapes. */
     std::string path;
     pos = rest.find('/');
     if (pos != std::string::npos)
     {
-        path = rest.substr(pos);
+        const std::string encodedPath = rest.substr(pos);
         rest = rest.substr(0, pos);
-    }
-
-    /* Split off the credentials. */
-    std::string auth;
-    pos = rest.rfind('@');
-    if (pos != std::string::npos)
-    {
-        auth = rest.substr(0, pos);
-        rest = rest.substr(pos + 1);
-    }
-    if (!auth.empty())
-    {
-        pos = auth.find(':');
-        if (pos != std::string::npos)
+        if (!PercentDecode(encodedPath, path))
         {
-            options.userName = auth.substr(0, pos);
-            options.password = auth.substr(pos + 1);
-        }
-        else
-        {
-            options.userName = auth;
-        }
-    }
-
-    /* Host and port. IPv6 literals are written as [::1] or [::1]:22. */
-    if (!rest.empty() && rest[0] == '[')
-    {
-        std::string::size_type close = rest.find(']');
-        if (close == std::string::npos)
-        {
-            error = "Malformed IPv6 address in '" + url + "'.";
+            error = "Invalid percent escape in site URL path.";
             return false;
         }
-        options.hostName = rest.substr(1, close - 1);
-        std::string tail = rest.substr(close + 1);
-        if (!tail.empty() && tail[0] == ':')
+    }
+
+    /* Split off credentials. A literal '@' in user information must be escaped. */
+    std::string::size_type at = rest.find('@');
+    if (at != std::string::npos)
+    {
+        if (rest.find('@', at + 1) != std::string::npos)
         {
-            options.portNumber = atoi(tail.c_str() + 1);
+            error = "Invalid site URL authority; escape '@' in credentials as '%40'.";
+            return false;
+        }
+        const std::string auth = rest.substr(0, at);
+        rest = rest.substr(at + 1);
+        const std::string::size_type colon = auth.find(':');
+        std::string user;
+        std::string password;
+        const std::string encodedUser = auth.substr(0, colon);
+        if (encodedUser.empty() || !PercentDecode(encodedUser, user) ||
+            user.empty())
+        {
+            error = "Invalid user name in site URL.";
+            return false;
+        }
+        parsed.userName = user;
+        if (colon != std::string::npos)
+        {
+            if (!PercentDecode(auth.substr(colon + 1), password))
+            {
+                error = "Invalid percent escape in site URL credentials.";
+                return false;
+            }
+            parsed.password = password;
+        }
+    }
+
+    /* Host and port. IPv6 literals must be bracketed. */
+    std::string encodedHost;
+    if (!rest.empty() && rest[0] == '[')
+    {
+        const std::string::size_type close = rest.find(']');
+        if (close == std::string::npos || close == 1)
+        {
+            error = "Malformed bracketed IPv6 address in site URL.";
+            return false;
+        }
+        encodedHost = rest.substr(1, close - 1);
+        const std::string tail = rest.substr(close + 1);
+        if (!tail.empty())
+        {
+            if (tail[0] != ':' || !ParsePortNumber(tail.substr(1), parsed.portNumber))
+            {
+                error = "Invalid port or characters after bracketed host in site URL.";
+                return false;
+            }
         }
     }
     else
     {
-        pos = rest.rfind(':');
-        if (pos != std::string::npos)
+        const std::string::size_type colon = rest.find(':');
+        if (colon != std::string::npos)
         {
-            options.hostName = rest.substr(0, pos);
-            options.portNumber = atoi(rest.c_str() + pos + 1);
+            if (rest.find(':', colon + 1) != std::string::npos)
+            {
+                error = "IPv6 addresses in site URLs must be enclosed in brackets.";
+                return false;
+            }
+            encodedHost = rest.substr(0, colon);
+            if (!ParsePortNumber(rest.substr(colon + 1), parsed.portNumber))
+            {
+                error = "Invalid port number in site URL.";
+                return false;
+            }
         }
         else
         {
-            options.hostName = rest;
+            encodedHost = rest;
         }
     }
 
-    if (options.hostName.empty())
+    if (!PercentDecode(encodedHost, parsed.hostName))
     {
-        error = "No host name in '" + url + "'.";
+        error = "Invalid percent escape in site URL host name.";
         return false;
     }
-    if (options.portNumber <= 0 || options.portNumber > 65535)
+    if (parsed.hostName.empty())
     {
-        error = "Invalid port number in '" + url + "'.";
+        error = "No host name in site URL.";
         return false;
     }
-    options.initialDirectory = path;
+    if (HasWhitespaceOrControl(parsed.hostName))
+    {
+        error = "Invalid whitespace or control character in site URL host name.";
+        return false;
+    }
+    if (parsed.portNumber <= 0 || parsed.portNumber > 65535)
+    {
+        error = "Invalid port number in site URL.";
+        return false;
+    }
+
+    parsed.initialDirectory = path;
+    options = parsed;
     return true;
 }
 
@@ -643,6 +805,22 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
 
 bool Session::Open(const SessionOptions & options, std::string & error)
 {
+    if (options.hostName.empty())
+    {
+        error = "No host name was specified.";
+        return false;
+    }
+    if (options.portNumber <= 0 || options.portNumber > 65535)
+    {
+        error = "The port number must be between 1 and 65535.";
+        return false;
+    }
+    if (options.timeoutSecs <= 0 || options.timeoutSecs > INT_MAX / 1000)
+    {
+        error = "The connection timeout must be a positive number of seconds.";
+        return false;
+    }
+
     Close();
 
     mOptions = options;
@@ -674,7 +852,8 @@ bool Session::Open(const SessionOptions & options, std::string & error)
     }
     if (!mOptions.privateKeyFile.empty())
     {
-        Filename * fileName = filename_from_str(mOptions.privateKeyFile.c_str());
+        const std::string keyFile = ExpandTilde(mOptions.privateKeyFile);
+        Filename * fileName = filename_from_str(keyFile.c_str());
         conf_set_filename(conf, CONF_keyfile, fileName);
         filename_free(fileName);
     }
@@ -728,6 +907,10 @@ bool Session::Open(const SessionOptions & options, std::string & error)
 
 void Session::Close()
 {
+    /* A failed transfer can leave request IDs queued in the SFTP core. The
+     * connection is being discarded, so release that state before another
+     * session can start reusing it. */
+    lscp_sftp_cleanup();
     if (g_currentSession == this)
     {
         SetCurrentSession(NULL);

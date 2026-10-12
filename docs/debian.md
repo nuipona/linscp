@@ -84,7 +84,7 @@ linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 | --- | --- |
 | `-script=<file>` | read commands from a file, one per line |
 | `-command="<cmd1>;<cmd2>"` | run the given commands (`;` separated) |
-| `-hostkey=<fingerprint>` | accept only this host key; `*` accepts any |
+| `-hostkey=<fingerprint>` | pin the host key; `*` accepts any for this connection only |
 | `-privatekey=<file>` | private key for public key authentication |
 | `-username=<name>` | user name |
 | `-password=<password>` | password (also read from `LINUXSCP_PASSWORD`) |
@@ -105,7 +105,15 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 `put`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`, `option`, `help`, `exit`.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
-transfers every match. The exit status is non-zero if any command failed.
+transfers every match. The exit status is non-zero if any command failed. When a
+transfer selects multiple source files, the destination is treated as a
+directory and created if it does not exist. Directories themselves are not
+transferred recursively.
+
+Overwrite and delete confirmations are enabled by default. Interactive runs
+ask before replacing or removing data. In `-batch` or other non-interactive
+runs, an operation that needs confirmation fails without reading from stdin;
+put `option confirm off` in a trusted script to disable those checks.
 
 `call` and `show` are rejected on purpose: the connection runs the SFTP
 subsystem only, so there is no remote shell to execute a command in.
@@ -136,33 +144,41 @@ open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
 ### Host keys
 
 `-hostkey=` compares the fingerprint the server presents with the one you
-gave. `*` accepts any key and is meant for throwaway targets only. With no
+gave. `*` accepts any key for that connection only, is meant for throwaway
+targets, and does not add the key to the persistent cache. With no
 `-hostkey=`, an unknown key is accepted only when the client can ask you; in
 `-batch` mode the connection fails.
 
 ## What is verified
 
-The client is built and exercised against a local OpenSSH server (see below
-for the recipe). Covered end to end: connection and key exchange, ssh-agent
-authentication, host key checking (both the matching and the mismatching
-`-hostkey=`), `open`/`cd`/`pwd`/`ls` with its options, directory creation and
-removal, `put` and `get` (a 2 MB file round-trips byte for byte), `chmod`,
-`stat`, `mv`, `rm`, `lcd`/`lpwd`, wildcard expansion, `-command` with `;`
-separated commands, `-log=`, and the exit status. The unit tests in
-`source/linux/tests/UnitTest.cpp` (152 checks) cover command line and command
-sequence splitting, path handling, file masks, the output formatting helpers,
-site URL parsing and local file system access.
+`make -C source/linux clean all check` builds the client and runs the unit
+tests in `source/linux/tests/UnitTest.cpp` (189 checks), covering command-line
+and command-sequence splitting, path handling, file masks, output formatting,
+strict site URL parsing, and local filesystem access. The Debian binary package
+also builds with `dpkg-buildpackage -b -us -uc`; its contents and extracted
+binary were checked.
 
-Password authentication is implemented but was not exercised: the test server
-in this recipe only offers public key and keyboard-interactive methods.
+A live end-to-end run against an in-process Paramiko SFTP server passed with
+ssh-agent authentication. It covered listing, directory creation, multi-source
+and wildcard uploads/downloads, empty-file and 2 MiB round trips, and `stat`,
+`chmod`, `mv`, `rm` and `rmdir`. The OpenSSH recipe below was not run here
+because `sshd` is not installed. Password authentication, pinned/mismatched
+host keys, and behavior across different OpenSSH server versions still need
+separate integration tests; the recipe's server offers public-key
+authentication only.
 
 ### Reproducing the live test
+
+Install `openssh-server` and run the server commands with `sudo` (the
+client-side commands run as your normal user):
 
 ```sh
 mkdir -p /tmp/sshtest && cd /tmp/sshtest
 ssh-keygen -q -t ed25519 -f id_client -N ""
 cp id_client.pub authorized_keys && chmod 600 authorized_keys
 printf 'hello from LinuxSCP\n' > hello.txt
+: > empty.txt
+dd if=/dev/urandom of=large.bin bs=1M count=2 status=none
 ssh-keygen -q -t rsa -b 2048 -f host_key -N ""
 cat > sshd_config <<'EOF'
 Port 2222
@@ -176,18 +192,29 @@ PubkeyAuthentication yes
 Subsystem sftp /usr/lib/openssh/sftp-server
 LogLevel DEBUG1
 EOF
-/usr/sbin/sshd -f /tmp/sshtest/sshd_config
+sudo install -d -m 0755 /run/sshd
+sudo /usr/sbin/sshd -t -f /tmp/sshtest/sshd_config
+sudo /usr/sbin/sshd -f /tmp/sshtest/sshd_config
 
 eval "$(ssh-agent -s)" && ssh-add ./id_client
 cat > script.txt <<'EOF'
+option confirm off
 open sftp://localhost:2222/tmp/sshtest -hostkey=*
 pwd
 ls
 put hello.txt .
 get hello.txt downloaded.txt
+put empty.txt .
+get empty.txt empty.download
+put large.bin .
+get large.bin large.download
+rm hello.txt empty.txt large.bin
 exit
 EOF
 ../../source/linux/build/linuxscp -batch -script=script.txt
+cmp hello.txt downloaded.txt && cmp empty.txt empty.download && cmp large.bin large.download
+sudo kill "$(cat /tmp/sshtest/sshd.pid)"
+ssh-agent -k
 ```
 
 ## Troubleshooting
@@ -205,7 +232,7 @@ layer's events to standard output as they happen.
 
 ## Not ported yet
 
-The POSIX client is SFTP only. Still to come: the SCP protocol, FTP/FTPS,
-WebDAV and Amazon S3 sessions, transferring between two local directories,
-resuming interrupted transfers, and any graphical interface. See the roadmap
-in the top-level readme.
+The Debian client is an SFTP-only command-line subset. Still to come:
+recursive directory transfers, SCP, FTP/FTPS, WebDAV and Amazon S3 sessions,
+transferring between two local directories, resuming interrupted transfers,
+and a graphical interface. See the scope notes in the top-level readme.

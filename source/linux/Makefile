@@ -94,13 +94,13 @@ PUTTY_INCLUDES := \
 DEPFLAGS := -MMD -MP
 
 CFLAGS_PUTTY := -std=gnu99 $(OPT) -g $(WARN) -Wno-unused-parameter $(DEPFLAGS) \
-	$(PUTTY_DEFS) $(PUTTY_INCLUDES) -pthread $(CFLAGS)
+	-D_FILE_OFFSET_BITS=64 $(PUTTY_DEFS) $(PUTTY_INCLUDES) -pthread $(CFLAGS)
 
 # The front end includes the core headers, so it must be compiled with the
 # same $(PUTTY_DEFS) as the core itself (MPEXT in particular changes the
 # signatures the core exposes).
 CXXFLAGS_APP := -std=gnu++17 $(OPT) -g $(WARN) -pthread $(DEPFLAGS) \
-	$(PUTTY_DEFS) \
+	-D_FILE_OFFSET_BITS=64 $(PUTTY_DEFS) \
 	-I. -I../core -I$(TOP)/source/putty -I$(TOP)/libs/putty/unix \
 	-I$(TOP)/libs/putty -I$(TOP)/libs/putty/charset $(CXXFLAGS)
 

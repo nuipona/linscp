@@ -39,7 +39,7 @@ std::string Usage()
 "Options:\n"
 "  -script=FILE      execute commands from FILE ('-' reads stdin)\n"
 "  -command=CMD      execute commands (separate several with ';')\n"
-"  -hostkey=KEY      accept only this host key (fingerprint or '*' for any)\n"
+"  -hostkey=KEY      pin the host key (fingerprint or '*' for this connection)\n"
 "  -password=PWD     password to use (prefer the LINUXSCP_PASSWORD variable)\n"
 "  -privatekey=FILE  private key file for public key authentication\n"
 "  -username=NAME    user name to authenticate with\n"
@@ -67,7 +67,7 @@ std::string Usage()
 "  mv FROM TO        move/rename a remote file\n"
 "  chmod PERMS FILE  change remote permissions\n"
 "  stat FILE         print remote file attributes\n"
-"  option NAME VAL   change a transfer option\n"
+"  option confirm on|off  control overwrite and delete confirmations\n"
 "  help              list the commands\n"
 "  exit              end the session\n";
 }

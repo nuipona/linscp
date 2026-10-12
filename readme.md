@@ -40,6 +40,21 @@ feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
     linuxscp -batch -script=script.txt
     linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 
+## Linux port scope and roadmap
+
+The Debian build is currently a **console SFTP client**, not a feature-complete
+port of the Windows application. It supports SSH/SFTP sessions, host-key
+checking, ssh-agent/private-key/password authentication, scripted and
+interactive commands, and single-file or wildcard transfers. The supported
+commands and current validation status are listed in
+[`docs/debian.md`](docs/debian.md).
+
+Not ported yet: recursive directory transfers, SCP, FTP/FTPS, WebDAV, Amazon
+S3, local-to-local copies, transfer resume, and a graphical interface. This
+repository contains the Debian front end and shared protocol core, but no
+Windows application source or Windows feature/test matrix to use as a complete
+parity baseline.
+
 ## Repository layout
 
     /debian                 Debian packaging (control, rules, changelog, copyright)

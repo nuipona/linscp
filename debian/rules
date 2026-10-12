@@ -28,7 +28,8 @@ binary: build
 	install -m 0755 source/linux/build/linuxscp $(destdir)/usr/bin/linuxscp
 	install -m 0644 docs/linuxscp.1 $(destdir)/usr/share/man/man1/linuxscp.1
 	gzip -9f $(destdir)/usr/share/man/man1/linuxscp.1
-	install -m 0644 license.txt $(destdir)/usr/share/doc/$(package)/copyright
+	install -m 0644 debian/copyright $(destdir)/usr/share/doc/$(package)/copyright
+	install -m 0644 license.txt $(destdir)/usr/share/doc/$(package)/LICENSE.txt
 	install -m 0644 docs/debian.md $(destdir)/usr/share/doc/$(package)/README.Debian
 	dpkg-shlibdeps -Tdebian/substvars $(destdir)/usr/bin/linuxscp
 	dpkg-gencontrol -p$(package) -P$(destdir)
