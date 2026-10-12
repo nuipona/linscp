@@ -15,5 +15,5 @@ Description: secure file transfer client for the command line
  local file system, either from a script, from a command line, or
  interactively.
  .
- The SSH and SFTP protocol code is the PuTTY core that the Windows build of
- LinuxSCP uses, driven by a native POSIX front end.
+ The SSH and SFTP protocol code is the PuTTY core, driven by a native POSIX
+ front end.

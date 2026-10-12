@@ -1,13 +1,12 @@
 # LinuxSCP on Debian/Linux
 
-This directory documents the native POSIX port of LinuxSCP. It builds a single
-console client, `linuxscp`, from the same platform-neutral PuTTY core the
-Windows build uses (`source/putty`), a POSIX platform layer vendored from
-upstream PuTTY 0.85 (`libs/putty/unix`, `libs/putty/charset`) and the LinuxSCP
-front end in `source/linux`.
+This document covers the Debian build of LinuxSCP. It builds a single console
+client, `linuxscp`, from the platform-neutral PuTTY core (`source/putty`), a
+POSIX platform layer vendored from upstream PuTTY 0.85 (`libs/putty/unix`,
+`libs/putty/charset`) and the LinuxSCP front end in `source/linux`.
 
-Nothing here is needed to build the Windows application; see the top-level
-[readme.md](../readme.md) for that.
+The whole repository is the Debian application; see the top-level
+[readme.md](../readme.md) for an overview.
 
 ## Requirements
 
@@ -188,7 +187,7 @@ put hello.txt .
 get hello.txt downloaded.txt
 exit
 EOF
-../../winscp-linux/source/linux/build/linuxscp -batch -script=script.txt
+../../source/linux/build/linuxscp -batch -script=script.txt
 ```
 
 ## Troubleshooting

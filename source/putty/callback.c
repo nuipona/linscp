@@ -59,8 +59,12 @@ void queue_idempotent_callback(struct IdempotentCallback *ic)
 #endif
 }
 
+#ifdef __clang__
 #pragma clang diagnostic push
+#endif
+#ifdef __clang__
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
+#endif
 
 void delete_callbacks(
     CALLBACK_SET
@@ -185,4 +189,6 @@ bool is_idempotent_callback_pending(CALLBACK_SET struct IdempotentCallback *ic)
       (cbhead->ctx == ic);
 }
 
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
