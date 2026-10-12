@@ -235,9 +235,9 @@ SockAddr *sk_addr_dup(SockAddr *addr);
 /* NB, control of 'addr' is passed via sk_new, which takes responsibility
  * for freeing it, as for new_connection() */
 Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
-               bool nodelay, bool keepalive, Plug *p
+               bool nodelay, bool keepalive, Plug *p,
 #ifdef MPEXT
-              , int timeout,
+              int timeout,
               int sndbuf,
               const char *srcaddr
 #endif

@@ -26,7 +26,7 @@ int have_any_ssh2_hostkey(Seat * seat, const char * host, int port);
 
 // from wingss.c
 
-#include "ssh/gss.h"
+#include "ssh\gss.h"
 
 void wingss_cleanup(void);
 
@@ -37,10 +37,7 @@ Seat * get_pfwd_seat(Plug * plug);
 
 // from winnet.c
 
-#ifdef _WIN32
-/* Windows' front end drives socket results through window messages. */
 void select_result(WPARAM wParam, LPARAM lParam);
-#endif
 
 // from sshaesold.c
 

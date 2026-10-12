@@ -53,10 +53,8 @@ void queue_idempotent_callback(struct IdempotentCallback *ic)
     ic->queued = true;
 #ifdef MPEXT
     assert(ic->set != NULL);
-    queue_toplevel_callback(ic->set, run_idempotent_callback, ic);
-#else
-    queue_toplevel_callback(run_idempotent_callback, ic);
 #endif
+    queue_toplevel_callback(ic->set, run_idempotent_callback, ic);
 }
 
 #pragma clang diagnostic push
@@ -101,11 +99,7 @@ static bool callback_is_for_context(
 
 void delete_callbacks_for_context(CALLBACK_SET void *ctx)
 {
-#ifdef MPEXT
     delete_callbacks(CALLBACK_SET_VAR, callback_is_for_context, ctx);
-#else
-    delete_callbacks(callback_is_for_context, ctx);
-#endif
 }
 
 void queue_toplevel_callback(CALLBACK_SET toplevel_callback_fn_t fn, void *ctx)
