@@ -7,6 +7,7 @@
 #define WebForum WebRoot+"issues/"
 #define WebDocumentation WebRoot+"wiki/"
 #define WebReport ""
+#define WebDonate "https://github.com/sponsors/nuipona"
 #define Year 2026
 #define EnglishLang "English"
 #define SetupTypeData "SetupType"
@@ -96,7 +97,7 @@ AppName=LinuxSCP
 AppPublisher=nuipona
 AppPublisherURL={#WebRoot}
 AppSupportURL={#WebForum}
-AppUpdatesURL={#WebRoot}eng/download.php
+AppUpdatesURL={#WebRoot}releases
 VersionInfoCompany=nuipona
 VersionInfoDescription=LinuxSCP {#Version} Setup (file transfer client)
 VersionInfoVersion={#Major}.{#Minor}.{#Rev}.{#Build}
@@ -702,7 +703,7 @@ end;
 
 procedure AboutDonationsLinkClick(Sender: TObject);
 begin
-  OpenBrowser('{#WebRoot}eng/donate.php?' + ExpandConstant('{#WebArguments}'));
+  OpenBrowser('{#WebDonate}');
   Donated := true;
 end;
 
@@ -711,7 +712,8 @@ var
   Control: TControl;
 begin
   Control := TControl(Sender);
-  OpenBrowser('{#WebRoot}eng/donate.php?amount=' + IntToStr(Control.Tag) + '&currency=' + CustomMessage('Currency') + '&' + ExpandConstant('{#WebArguments}'));
+  // The sponsor page has no amount or currency parameter of its own.
+  OpenBrowser('{#WebDonate}');
   Donated := true;
 end;
 

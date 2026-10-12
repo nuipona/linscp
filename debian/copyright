@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: LinuxSCP
-Source: https://github.com/nuipona/winscp-linux
+Source: https://github.com/nuipona/linuxscp
 
 Files: *
 Copyright: 2000-2026 Martin Prikryl and the WinSCP contributors

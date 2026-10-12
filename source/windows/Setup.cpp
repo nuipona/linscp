@@ -910,76 +910,96 @@ UnicodeString GetUpdatesCertificate()
   return Result;
 }
 //---------------------------------------------------------------------------
+// This fork ships without an update server, so UPDATES_URL is empty by
+// default. Section C of license.txt describes how to point it at an endpoint
+// of your own; while it is empty the client must not contact anything -
+// neither to check for updates, nor to upload the usage statistics that the
+// check would otherwise post along with itself.
+static bool __fastcall HaveUpdatesServer()
+{
+  return !LoadStr(UPDATES_URL).Trim().IsEmpty();
+}
+//---------------------------------------------------------------------------
 static bool __fastcall DoQueryUpdates(TUpdatesConfiguration & Updates, bool CollectUsage)
 {
   bool Complete = false;
   UnicodeString Response;
-  THttp * CheckForUpdatesHTTP = CreateHttp(Updates);
-  try
+  if (!HaveUpdatesServer())
   {
-    UnicodeString URL = ProgramUrl(LoadStr(UPDATES_URL));
-    URL = WantBetaUrl(URL, false);
-    URL += L"&dotnet=" + Updates.DotNetVersion;
-    URL += L"&console=" + Updates.ConsoleVersion;
-    UnicodeString LocaleVersion = WinConfiguration->AppliedLocaleVersion();
-    if (!LocaleVersion.IsEmpty())
-    {
-      URL += L"&localever=" + LocaleVersion;
-      URL += L"&localecompl=" + LoadStr(TRANSLATION_COMPLETENESS);
-    }
-    URL += L"&firstrun=" + EncodeUrlString(WinConfiguration->FirstRun);
-    if (!IsUWP())
-    {
-      // Even if donor email is inherited from normal installation,
-      // do not use it as this all is merely to report usage statistics, not to check for updates, in UWP.
-      if (!Updates.AuthenticationEmail.IsEmpty())
-      {
-        RawByteString AuthenticationEmailBuf = RawByteString(UTF8String(Updates.AuthenticationEmail.LowerCase()));
-        URL += L"&authentication=" + Sha256(AuthenticationEmailBuf.c_str(), AuthenticationEmailBuf.Length()).LowerCase();
-      }
-    }
-    else
-    {
-      URL += L"&package=" + EncodeUrlString(GetPackageName());
-    }
-    if (!Updates.Mode.IsEmpty())
-    {
-      URL += L"&mode=" + EncodeUrlString(Updates.Mode);
-    }
-
-    AppLogFmt(L"Updates check URL: %s", (URL));
-    CheckForUpdatesHTTP->URL = URL;
-    // sanity check
-    CheckForUpdatesHTTP->ResponseLimit = BasicHttpResponseLimit;
-    CheckForUpdatesHTTP->Certificate = GetUpdatesCertificate();
+    AppLog(L"Skipping the updates check, no update server is configured");
+    // The response parser below understands this line and treats it as a
+    // complete answer: with no update server, no updates are available here.
+    Response = L"Disabled=1\n";
+  }
+  else
+  {
+    THttp * CheckForUpdatesHTTP = CreateHttp(Updates);
     try
     {
-      if (CollectUsage)
+      UnicodeString URL = ProgramUrl(LoadStr(UPDATES_URL));
+      URL = WantBetaUrl(URL, false);
+      URL += L"&dotnet=" + Updates.DotNetVersion;
+      URL += L"&console=" + Updates.ConsoleVersion;
+      UnicodeString LocaleVersion = WinConfiguration->AppliedLocaleVersion();
+      if (!LocaleVersion.IsEmpty())
       {
-        UnicodeString Usage = Configuration->Usage->Serialize();
-
-        CheckForUpdatesHTTP->Post(Usage);
+        URL += L"&localever=" + LocaleVersion;
+        URL += L"&localecompl=" + LoadStr(TRANSLATION_COMPLETENESS);
+      }
+      URL += L"&firstrun=" + EncodeUrlString(WinConfiguration->FirstRun);
+      if (!IsUWP())
+      {
+        // Even if donor email is inherited from normal installation,
+        // do not use it as this all is merely to report usage statistics, not to check for updates, in UWP.
+        if (!Updates.AuthenticationEmail.IsEmpty())
+        {
+          RawByteString AuthenticationEmailBuf = RawByteString(UTF8String(Updates.AuthenticationEmail.LowerCase()));
+          URL += L"&authentication=" + Sha256(AuthenticationEmailBuf.c_str(), AuthenticationEmailBuf.Length()).LowerCase();
+        }
       }
       else
       {
-        CheckForUpdatesHTTP->Get();
+        URL += L"&package=" + EncodeUrlString(GetPackageName());
       }
-    }
-    catch (...)
-    {
-      if (CheckForUpdatesHTTP->IsCertificateError())
+      if (!Updates.Mode.IsEmpty())
       {
-        AppLog(L"Certificate error detected.");
-        Configuration->Usage->Inc(L"UpdateCertificateErrors");
+        URL += L"&mode=" + EncodeUrlString(Updates.Mode);
       }
-      throw;
+
+      AppLogFmt(L"Updates check URL: %s", (URL));
+      CheckForUpdatesHTTP->URL = URL;
+      // sanity check
+      CheckForUpdatesHTTP->ResponseLimit = BasicHttpResponseLimit;
+      CheckForUpdatesHTTP->Certificate = GetUpdatesCertificate();
+      try
+      {
+        if (CollectUsage)
+        {
+          UnicodeString Usage = Configuration->Usage->Serialize();
+
+          CheckForUpdatesHTTP->Post(Usage);
+        }
+        else
+        {
+          CheckForUpdatesHTTP->Get();
+        }
+      }
+      catch (...)
+      {
+        if (CheckForUpdatesHTTP->IsCertificateError())
+        {
+          AppLog(L"Certificate error detected.");
+          Configuration->Usage->Inc(L"UpdateCertificateErrors");
+        }
+        throw;
+      }
+      Response = CheckForUpdatesHTTP->Response;
+      AppLogFmt(L"Updates check response: %s", (Response));
     }
-    Response = CheckForUpdatesHTTP->Response;
-    AppLogFmt(L"Updates check response: %s", (Response));
-  }
-  __finally
-  {
-    delete CheckForUpdatesHTTP;
+    __finally
+    {
+      delete CheckForUpdatesHTTP;
+    }
   }
 
   int CurrentCompoundVer = Configuration->CompoundVersion;
@@ -1141,8 +1161,13 @@ static void __fastcall DoQueryUpdates(bool CollectUsage)
       EXCEPTION;
     }
 
-    Configuration->Usage->Reset();
-    Configuration->Usage->Inc(L"UpdateChecksSucceeded");
+    if (HaveUpdatesServer())
+    {
+      // The counters have just been uploaded, so start collecting afresh.
+      // Without a server they were never sent, so keep them.
+      Configuration->Usage->Reset();
+      Configuration->Usage->Inc(L"UpdateChecksSucceeded");
+    }
   }
   catch(Exception & E)
   {

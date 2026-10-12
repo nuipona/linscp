@@ -161,6 +161,9 @@ in this recipe only offers public key and keyboard-interactive methods.
 
 ```sh
 mkdir -p /tmp/sshtest && cd /tmp/sshtest
+# the client you just built; adjust to wherever you checked the source out
+LINUXSCP="$HOME/linuxscp/source/linux/build/linuxscp"
+
 ssh-keygen -q -t ed25519 -f id_client -N ""
 cp id_client.pub authorized_keys && chmod 600 authorized_keys
 printf 'hello from LinuxSCP\n' > hello.txt
@@ -188,7 +191,7 @@ put hello.txt .
 get hello.txt downloaded.txt
 exit
 EOF
-../../winscp-linux/source/linux/build/linuxscp -batch -script=script.txt
+"$LINUXSCP" -batch -script=script.txt
 ```
 
 ## Troubleshooting

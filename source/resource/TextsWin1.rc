@@ -224,7 +224,7 @@ BEGIN
         BALLOON_QUEUE_EMPTY, "Transfer queue is empty."
         LOG_FILE_HINT3, "!Y year\n!M month\n!D day\n!T time\n!P process ID\n!@ hostname\n!S session name\nExample: C:\\!S!T.log"
         FTP_PASV_MODE_REQUIRED, "Passive mode must be enabled when FTP connection through proxy is selected."
-        UPDATE_DISABLED, "Check for application updates is temporarily disabled. Please try again later."
+        UPDATE_DISABLED, "Checking for application updates is turned off in this build, which has no update server to ask. New releases are published in the project repository."
         UPDATE_URL_BUTTON, "&Go To"
         WHATS_NEW_BUTTON, "What's New"
         BALLOON_OPERATION_COMPLETE, "Operation was completed"
@@ -730,16 +730,25 @@ BEGIN
         HOMEPAGE_URL, "https://github.com/nuipona/linuxscp/"
         HISTORY_URL, "https://github.com/nuipona/linuxscp/releases"
         FORUM_URL, "https://github.com/nuipona/linuxscp/issues"
-        UPDATES_URL, "https://github.com/nuipona/linuxscp/releases/latest"
+        // Empty on purpose: this fork has no update server. An empty
+        // UPDATES_URL makes the client skip the check altogether, instead of
+        // calling an address that cannot answer it - and with the check goes
+        // the usage statistics upload that shares this code path. Set it to an
+        // endpoint of your own to bring the check back (see license.txt, C.).
+        UPDATES_URL, ""
         DOWNLOAD_URL, "https://github.com/nuipona/linuxscp/releases"
         DONATE_URL, "https://github.com/sponsors/nuipona"
         DOCUMENTATION_URL2, "https://github.com/nuipona/linuxscp/wiki/?ver=%s&lang=%s"
         DOCUMENTATION_KEYWORD_URL2, "https://github.com/nuipona/linuxscp/wiki/%s?ver=%s&lang=%s"
         LOCALES_URL, "https://github.com/nuipona/linuxscp/tree/master/translations"
-        DOCUMENTATION_SEARCH_URL3, "https://github.com/nuipona/linuxscp/search?q=%s"
+        // The caller passes (version, language, search text) in this order and
+        // keeps the search text last, so that a long one is what gets
+        // truncated by the URL length limit. Pick it explicitly with %2:s,
+        // otherwise the version ends up in the query.
+        DOCUMENTATION_SEARCH_URL3, "https://github.com/nuipona/linuxscp/search?q=%2:s"
         ERROR_REPORT_URL2, "https://github.com/nuipona/linuxscp/issues/new?title=[ver %s / %s]&body=%s"
         UPGRADE_URL, "https://github.com/sponsors/nuipona"
-        STORE_URL, "https://github.com/nuipona/linuxscp/releases/latest"
+        STORE_URL, "https://github.com/nuipona/linuxscp/releases/latest?from=%s"
         ABOUT_STORE_URL, "https://github.com/nuipona/linuxscp/README.md"
         STORE_GET_IMG_URL, "https://github.com/nuipona/linuxscp/opengraph-image"
 

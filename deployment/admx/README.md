@@ -22,7 +22,7 @@ Under **Computer Configuration > Administrative Templates > LinuxSCP**:
 
 The template follows the current LinuxSCP administration documentation and writes the values beneath:
 
-`HKLM\SOFTWARE\Wow6432Node\Martin Prikryl\LinuxSCP 2`
+`HKLM\SOFTWARE\Wow6432Node\nuipona\LinuxSCP 2`
 
 The current LinuxSCP administration documentation explicitly uses the 32-bit registry view (`Wow6432Node`) on 64-bit Windows, so this template targets that documented path.
 
