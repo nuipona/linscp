@@ -6,7 +6,9 @@ POSIX platform layer vendored from upstream PuTTY 0.85 (`libs/putty/unix`,
 `libs/putty/charset`) and the LinuxSCP front end in `source/linux`.
 
 The whole repository is the Debian application; see the top-level
-[readme.md](../readme.md) for an overview.
+[readme.md](../readme.md) for an overview. For the Windows build of the
+same front end, see [windows.md](windows.md) instead; everything below
+is specific to Debian/Linux.
 
 ## Requirements
 
@@ -180,7 +182,7 @@ targets, and does not add the key to the persistent cache. With no
 ## What is verified
 
 `make -C source/linux clean all check` builds the client and runs the unit
-tests in `source/linux/tests/UnitTest.cpp` (189 checks), covering command-line
+tests in `source/linux/tests/UnitTest.cpp` (234 checks), covering command-line
 and command-sequence splitting, path handling, file masks, output formatting,
 strict site URL parsing, and local filesystem access. The Debian binary package
 also builds with `dpkg-buildpackage -b -us -uc`; its contents and extracted

@@ -11,31 +11,65 @@ import json
 import time
 import shutil
 import stat
+import getpass
 import subprocess
 import threading
 import urllib.parse
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 PORT = 8080
 HOST = "0.0.0.0"
+IS_WINDOWS = os.name == "nt"
+EXE_SUFFIX = ".exe" if IS_WINDOWS else ""
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
 if not os.path.isdir(WEB_DIR):
-    WEB_DIR = "/usr/share/linuxscp/gui"
+    fallbacks = ["/usr/share/linuxscp/gui"]
+    if IS_WINDOWS:
+        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if root:
+                fallbacks.append(os.path.join(root, "LinuxSCP", "web"))
+                fallbacks.append(os.path.join(root, "LinuxSCP", "bin", "web"))
+    for candidate in fallbacks:
+        if os.path.isdir(candidate):
+            WEB_DIR = candidate
+            break
+
+def _default_user():
+    try:
+        return getpass.getuser() or "user"
+    except Exception:
+        return "user"
+
 
 def find_linuxscp_binary():
-    candidates = [
-        os.path.join(BASE_DIR, "..", "linux", "build", "linuxscp"),
-        os.path.join(BASE_DIR, "..", "..", "source", "linux", "build", "linuxscp"),
-        "/usr/bin/linuxscp",
-        "/usr/local/bin/linuxscp",
-        shutil.which("linuxscp")
-    ]
+    names = ["linuxscp" + EXE_SUFFIX, "linuxscp"]
+    candidates = []
+    # Next to the GUI script / installed next to linuxscp.exe.
+    for name in names:
+        candidates.append(os.path.join(BASE_DIR, name))
+        candidates.append(os.path.join(BASE_DIR, "..", "linux", "build", name))
+        candidates.append(os.path.join(BASE_DIR, "..", "..", "source", "linux", "build", name))
+        candidates.append(os.path.join(BASE_DIR, "..", "..", "build-windows", name))
+        candidates.append(os.path.join(BASE_DIR, "..", "..", "build", name))
+    if IS_WINDOWS:
+        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"),
+                     os.environ.get("LOCALAPPDATA")):
+            if root:
+                candidates.append(os.path.join(root, "LinuxSCP", "linuxscp.exe"))
+                candidates.append(os.path.join(root, "LinuxSCP", "bin", "linuxscp.exe"))
+    else:
+        candidates.append("/usr/bin/linuxscp")
+        candidates.append("/usr/local/bin/linuxscp")
+    for name in names:
+        found = shutil.which(name)
+        if found:
+            candidates.append(found)
     for c in candidates:
-        if c and os.path.isfile(c) and os.access(c, os.X_OK):
+        if c and os.path.isfile(c) and (IS_WINDOWS or os.access(c, os.X_OK)):
             return os.path.abspath(c)
-    return "linuxscp"
+    return "linuxscp" + EXE_SUFFIX
 
 LINUXSCP_BIN = find_linuxscp_binary()
 
@@ -46,7 +80,7 @@ STATE = {
         "protocol": "sftp",
         "host": "localhost",
         "port": 22,
-        "username": os.environ.get("USER", "user"),
+        "username": os.environ.get("USERNAME") or os.environ.get("USER") or _default_user(),
         "password": "",
         "keyfile": "",
         "hostkey": "*",
@@ -103,13 +137,32 @@ def run_linuxscp(command_script, session=None):
         cmd.append(f"-privatekey={key}")
     
     add_log(f"Executing: {command_script}", "cmd")
-    proc = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True
-    )
-    stdout, stderr = proc.communicate(timeout=60)
+    popen_kwargs = {
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+    }
+    if IS_WINDOWS:
+        # No console window flashing up for every operation.
+        popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        proc = subprocess.Popen(cmd, **popen_kwargs)
+    except OSError as exc:
+        message = (f"Cannot start the LinuxSCP core binary '{bin_path}': {exc}. "
+                   "Build it first (windows\build.cmd or make -C source/linux) "
+                   "or put linuxscp" + EXE_SUFFIX + " on PATH.")
+        add_log(message, "error")
+        return 1, "", message
+    try:
+        stdout, stderr = proc.communicate(timeout=120)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        stdout, stderr = proc.communicate()
+        message = "LinuxSCP core timed out after 120 seconds."
+        add_log(message, "error")
+        return 1, stdout or "", message
     add_log(f"Finished (exit code {proc.returncode})", "info" if proc.returncode == 0 else "error")
     if stderr.strip():
         add_log(stderr.strip(), "error")
@@ -154,7 +207,27 @@ def parse_ls_output(stdout):
     entries.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
     return entries
 
+def list_windows_drives():
+    import string
+    entries = []
+    for letter in string.ascii_uppercase:
+        root = f"{letter}:\\"
+        if os.path.exists(root):
+            entries.append({
+                "name": root,
+                "is_dir": True,
+                "size": 0,
+                "permissions": "drwxr-xr-x",
+                "date": "",
+                "mtime": 0,
+                "owner": ""
+            })
+    return entries
+
+
 def list_local_directory(path):
+    if IS_WINDOWS and path in ("/", "\\\\", ""):
+        return list_windows_drives(), None
     if not os.path.isabs(path):
         path = os.path.abspath(os.path.join(STATE["local_dir"], path))
     if not os.path.exists(path):
@@ -535,8 +608,8 @@ def main():
                 pass
 
     server_address = (HOST, port)
-    httpd = HTTPServer(server_address, LinuxScpGuiHandler)
-    print(f"LinuxSCP Commander GUI running at http://{HOST}:{port}/")
+    httpd = ThreadingHTTPServer(server_address, LinuxScpGuiHandler)
+    print(f"LinuxSCP Commander GUI running at http://localhost:{port}/")
     print(f"Serving web client from: {WEB_DIR}")
     print(f"LinuxSCP core binary: {LINUXSCP_BIN}")
     sys.stdout.flush()
@@ -548,4 +621,6 @@ def main():
         httpd.server_close()
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

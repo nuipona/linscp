@@ -1,0 +1,5 @@
+// Resource script for the Windows build (MinGW windres).
+// Embeds the application manifest (long paths + UTF-8 code page).
+// With MSVC the manifest is passed to the linker directly instead
+// (see CMakeLists.txt), so this file is MinGW-only.
+1 24 "linuxscp.manifest"

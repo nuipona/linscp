@@ -1,5 +1,5 @@
 /*
- * main: command line entry point of the POSIX front end.
+ * main: command line entry point of the front end (POSIX and Windows).
  */
 
 #include <cstdio>
@@ -8,15 +8,17 @@
 #include <climits>
 #include <cerrno>
 #include <string>
-#include <unistd.h>
 
 #include "Console.h"
 #include "PathUtil.h"
+#include "Platform.h"
 #include "Script.h"
 #include "Session.h"
 #include "Texts.h"
 
+#if !defined(_WIN32)
 #include "PuttyCompat.h"
+#endif
 
 namespace {
 
@@ -67,6 +69,7 @@ bool ParsePositiveInteger(const char * text, int maximum, int * result)
 
 int main(int argc, char ** argv)
 {
+    linuxscp::InitConsole();
     linuxscp::Console & console = linuxscp::Console::Instance();
     linuxscp::SessionOptions options;
     std::string scriptFile;
@@ -81,9 +84,34 @@ int main(int argc, char ** argv)
     bool commandSpecified = false;
     const char * value = NULL;
 
+    std::string normalizedArg;
     for (int i = 1; i < argc; i++)
     {
         const char * arg = argv[i];
+#if defined(_WIN32)
+        if (arg[0] == '/' && arg[1] != '\0')
+        {
+            static const char * known[] = {
+                "script=", "command=", "hostkey=", "password=", "privatekey=",
+                "username=", "port=", "timeout=", "log=",
+                "batch", "batch=on", "batch=off", "gui", "verbose",
+                "version", "help", "h"
+            };
+            const char * rest = arg + 1;
+            for (size_t k = 0; k < sizeof(known) / sizeof(known[0]); k++)
+            {
+                size_t len = strlen(known[k]);
+                bool valueForm = len > 0 && known[k][len - 1] == '=';
+                if (strncmp(rest, known[k], len) == 0 &&
+                    (valueForm || rest[len] == '\0'))
+                {
+                    normalizedArg = std::string("-") + rest;
+                    arg = normalizedArg.c_str();
+                    break;
+                }
+            }
+        }
+#endif
         if (StartsWith(arg, "-script=", &value))
         {
             scriptSpecified = true;
@@ -176,14 +204,13 @@ int main(int argc, char ** argv)
 
     if (launchGui)
     {
-        const char * guiBin = "/usr/bin/linuxscp-gui";
-        if (access(guiBin, X_OK) != 0)
+        std::string guiError;
+        if (!linuxscp::LaunchGuiApplication(guiError))
         {
-            guiBin = "linuxscp-gui";
+            console.Error(guiError);
+            return 1;
         }
-        execlp(guiBin, guiBin, NULL);
-        console.Error("Failed to launch LinuxSCP GUI: " + std::string(strerror(errno)));
-        return 1;
+        return 0;
     }
 
     if (version)
@@ -240,12 +267,14 @@ int main(int argc, char ** argv)
     console.SetBatchMode(batch);
     console.SetVerbose(options.verbose);
 
+#if !defined(_WIN32)
     /* The platform layer of the PuTTY core needs these before any socket
      * or file descriptor is registered, and before any critical section
      * can be taken. */
     linuxscp_platform_init();
     sk_init();
     uxsel_init();
+#endif
 
     linuxscp::Script script;
     script.SetDefaults(options);
@@ -271,6 +300,8 @@ int main(int argc, char ** argv)
         result = script.RunInteractive(url);
     }
 
+#if !defined(_WIN32)
     sk_cleanup();
+#endif
     return result;
 }

@@ -147,7 +147,7 @@ std::string EscapeSessionName(const char * name)
 bool ReadFile(const std::string & path, std::vector<char> & contents)
 {
     contents.clear();
-    FILE * file = fopen(path.c_str(), "r");
+    FILE * file = fopen(path.c_str(), "rb");
     if (file == NULL)
     {
         return false;
@@ -192,7 +192,7 @@ bool ReadLines(const std::string & path, std::vector<std::string> & lines)
 bool WriteFile(const std::string & path, const std::string & contents)
 {
     MakeDirectoryTree(StorageRoot());
-    FILE * file = fopen(path.c_str(), "w");
+    FILE * file = fopen(path.c_str(), "wb");
     if (file == NULL)
     {
         return false;

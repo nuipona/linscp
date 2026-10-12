@@ -148,6 +148,7 @@ APP_SRCS := \
 	Console.cpp \
 	LocalFs.cpp \
 	PathUtil.cpp \
+	Platform.cpp \
 	Texts.cpp \
 	main.cpp
 

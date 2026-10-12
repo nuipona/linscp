@@ -100,6 +100,7 @@ private:
     int RemoteRemoveDir(const std::string & path, std::string & error);
     int RemoteMakeDir(const std::string & path, int permissions, std::string & error);
     int RemoteRename(const std::string & from, const std::string & to, std::string & error);
+    int RemoteSetPermissions(const std::string & path, int permissions, std::string & error);
 
     SessionOptions mDefaults;
     Session mSession;

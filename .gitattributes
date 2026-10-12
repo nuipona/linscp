@@ -1,2 +1,8 @@
 libs/* linguist-vendored
 source/putty/* linguist-vendored
+
+# Windows scripts must keep CRLF so cmd.exe parses them reliably.
+# (Deliberately narrow: the vendored PuTTY tree uses CRLF and must
+# not be renormalised by a broad eol rule.)
+*.bat text eol=crlf
+*.cmd text eol=crlf
