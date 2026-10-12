@@ -540,13 +540,22 @@ typedef long LPARAM;
 
 /*
  * Critical sections protect PuTTY's random pool and its bignum code
- * (crypto/mpint.c, sshrand.c). POSIX mutexes provide the same thing.
+ * (crypto/mpint.c, sshrand.c). POSIX mutexes provide the same thing, but
+ * they must be _recursive_: a Win32 CRITICAL_SECTION can be taken twice by
+ * the same thread, and the core relies on that (random_ref() holds the
+ * section while noise_get_heavy() re-enters it through its callback).
+ * The wrappers are implemented in source/linux/PuttyGlue.cpp; call
+ * linuxscp_platform_init() before anything can take a section.
  */
 typedef pthread_mutex_t CRITICAL_SECTION;
-#define InitializeCriticalSection(cs)  pthread_mutex_init((cs), NULL)
+void linuxscp_platform_init(void);
+void linuxscp_critical_section_init(CRITICAL_SECTION *cs);
+void linuxscp_critical_section_enter(CRITICAL_SECTION *cs);
+void linuxscp_critical_section_leave(CRITICAL_SECTION *cs);
+#define InitializeCriticalSection(cs)  linuxscp_critical_section_init(cs)
 #define DeleteCriticalSection(cs)      pthread_mutex_destroy(cs)
-#define EnterCriticalSection(cs)       pthread_mutex_lock(cs)
-#define LeaveCriticalSection(cs)       pthread_mutex_unlock(cs)
+#define EnterCriticalSection(cs)       linuxscp_critical_section_enter(cs)
+#define LeaveCriticalSection(cs)       linuxscp_critical_section_leave(cs)
 
 /*
  * Each SSH session in the Windows build owns a `struct callback_set`

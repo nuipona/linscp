@@ -89,23 +89,46 @@ PUTTY_INCLUDES := \
 	-I$(TOP)/libs/putty \
 	-I$(TOP)/libs/putty/charset
 
-CFLAGS_PUTTY := -std=gnu99 $(OPT) -g $(WARN) -Wno-unused-parameter \
-	$(PUTTY_DEFS) $(PUTTY_INCLUDES) $(CFLAGS)
+# -MMD -MP: write a .d file next to every object, so that a change to a
+# header rebuilds the sources that include it.
+DEPFLAGS := -MMD -MP
 
-CXXFLAGS_APP := -std=gnu++17 $(OPT) -g $(WARN) \
+CFLAGS_PUTTY := -std=gnu99 $(OPT) -g $(WARN) -Wno-unused-parameter $(DEPFLAGS) \
+	$(PUTTY_DEFS) $(PUTTY_INCLUDES) -pthread $(CFLAGS)
+
+# The front end includes the core headers, so it must be compiled with the
+# same $(PUTTY_DEFS) as the core itself (MPEXT in particular changes the
+# signatures the core exposes).
+CXXFLAGS_APP := -std=gnu++17 $(OPT) -g $(WARN) -pthread $(DEPFLAGS) \
+	$(PUTTY_DEFS) \
 	-I. -I../core -I$(TOP)/source/putty -I$(TOP)/libs/putty/unix \
-	-I$(TOP)/libs/putty $(CXXFLAGS)
+	-I$(TOP)/libs/putty -I$(TOP)/libs/putty/charset $(CXXFLAGS)
 
 include putty-core.mk
+
+# Core sources that the POSIX platform layer replaces. The Windows build links
+# these; on POSIX the real implementation comes from libs/putty/unix and
+# keeping both would give duplicate symbols at link time:
+#
+#   ssh/nosharing.c       -> libs/putty/unix/sharing.c
+#                            (platform_ssh_share[_cleanup])
+PUTTY_CORE_REPLACED := \
+	$(TOP)/source/putty/ssh/nosharing.c
+
+PUTTY_CORE_SRCS := $(filter-out $(PUTTY_CORE_REPLACED),$(PUTTY_CORE_SRCS))
 
 # POSIX platform layer, vendored from upstream PuTTY 0.85.
 PUTTY_VEND_SRCS := \
 	$(wildcard $(TOP)/libs/putty/unix/*.c) \
 	$(wildcard $(TOP)/libs/putty/unix/utils/*.c) \
 	$(wildcard $(TOP)/libs/putty/unix/stubs/*.c) \
+	$(wildcard $(TOP)/libs/putty/utils/*.c) \
 	$(filter-out $(TOP)/libs/putty/charset/enum.c,$(wildcard $(TOP)/libs/putty/charset/*.c)) \
 	$(TOP)/libs/putty/ssh/sftp.c \
-	$(TOP)/libs/putty/psftpcommon.c
+	$(TOP)/libs/putty/ssh/sftpcommon.c \
+	$(TOP)/libs/putty/psftpcommon.c \
+	$(TOP)/libs/putty/pinger.c \
+	$(TOP)/libs/putty/timing.c
 
 PUTTY_ALL_SRCS := $(PUTTY_CORE_SRCS) $(PUTTY_VEND_SRCS)
 
@@ -114,10 +137,10 @@ putty_obj = $(OBJDIR)/$(patsubst $(TOP)/%.c,%.o,$(1))
 
 PUTTY_OBJS := $(foreach s,$(PUTTY_ALL_SRCS),$(call putty_obj,$(s)))
 
-# Front end (this directory) and the shared console code.
+# Front end (this directory). SftpClient.c is C on purpose, see its header.
 APP_SRCS := \
 	Session.cpp \
-	SftpClient.cpp \
+	SftpClient.c \
 	PuttyGlue.cpp \
 	Script.cpp \
 	Console.cpp \
@@ -126,7 +149,11 @@ APP_SRCS := \
 	Texts.cpp \
 	main.cpp
 
-APP_OBJS := $(addprefix $(OBJDIR)/linux/,$(APP_SRCS:.cpp=.o))
+app_obj = $(OBJDIR)/linux/$(patsubst %.c,%.o,$(patsubst %.cpp,%.o,$(1)))
+APP_OBJS := $(foreach s,$(APP_SRCS),$(call app_obj,$(s)))
+MAIN_OBJ := $(OBJDIR)/linux/main.o
+# Everything but main(), so that the unit tests can use the front end.
+APP_LIB_OBJS := $(filter-out $(MAIN_OBJ),$(APP_OBJS))
 TEST_OBJS := $(OBJDIR)/linux/tests/UnitTest.o
 
 PUTTY_LIB := $(BUILD)/libputty.a
@@ -147,6 +174,11 @@ $(OBJDIR)/source/%.o: $(TOP)/source/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_PUTTY) -c $< -o $@
 
+# be_list.c is compiled once per application and takes its name from the
+# command line. SSH/SERIAL/OTHERBACKENDS already come from defs.h under
+# FORK_BUILD, so only APPNAME is missing here.
+$(OBJDIR)/source/putty/be_list.o: CFLAGS_PUTTY += -DAPPNAME=LinuxSCP
+
 $(OBJDIR)/libs/%.o: $(TOP)/libs/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_PUTTY) -c $< -o $@
@@ -155,16 +187,23 @@ $(OBJDIR)/linux/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_APP) -c $< -o $@
 
+$(OBJDIR)/linux/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS_PUTTY) -I. -c $< -o $@
+
 $(OBJDIR)/linux/tests/%.o: tests/%.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_APP) -Itests -c $< -o $@
 
-$(BINDIR)/unittest: $(TEST_OBJS) $(PUTTY_LIB)
+$(BINDIR)/unittest: $(TEST_OBJS) $(APP_LIB_OBJS) $(PUTTY_LIB)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS_APP) -Itests -o $@ $(TEST_OBJS) $(PUTTY_LIB) $(LDFLAGS) $(LIBS)
+	$(CXX) $(CXXFLAGS_APP) -Itests -o $@ $(TEST_OBJS) $(APP_LIB_OBJS) $(PUTTY_LIB) $(LDFLAGS) $(LIBS)
 
 check: $(BINDIR)/unittest
 	$(BINDIR)/unittest
+
+# Pull in the generated dependencies, if this is not the first build.
+-include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
 clean:
 	rm -rf $(BUILD)
