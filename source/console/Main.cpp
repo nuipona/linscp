@@ -389,7 +389,7 @@ static void InitializeChild(const wchar_t* CommandLine, const wchar_t* InstanceN
     Len += FormatMessage(Flags, nullptr, Error, 0, reinterpret_cast<wchar_t *>(&Buffer2), 0, nullptr);
 
     wchar_t* Message = new wchar_t[Len];
-    wsprintf(Message, L"Cannot start WinSCP application \"%s\".", ChildPath);
+    wsprintf(Message, L"Cannot start LinuxSCP application \"%s\".", ChildPath);
     if (Buffer2 != nullptr)
     {
       wcscat(Message, L"\n");

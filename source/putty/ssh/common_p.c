@@ -55,13 +55,13 @@ void pq_base_push_front(PacketQueueBase *pqb, PacketQueueNode *node)
         queue_idempotent_callback(pqb->ic);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static PacketQueueNode pktin_freeq_head = {
     &pktin_freeq_head, &pktin_freeq_head, true
 };
 #endif
 
-/*WINSCP static*/ void pktin_free_queue_callback(void *vctx)
+/*FORK_BUILD static*/ void pktin_free_queue_callback(void *vctx)
 {
     struct callback_set * set = (struct callback_set *)vctx;
     while (set->pktin_freeq_head->next != set->pktin_freeq_head) {
@@ -74,7 +74,7 @@ static PacketQueueNode pktin_freeq_head = {
     set->pktin_freeq_head->prev = set->pktin_freeq_head;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static IdempotentCallback ic_pktin_free = {
     pktin_free_queue_callback, NULL, false
 };
@@ -105,7 +105,7 @@ static PktIn *pq_in_after(PacketQueueBase *pqb,
         return NULL;
 
     if (pop) {
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         struct callback_set * set = get_seat_callback_set(pqb->seat);
         assert(set != NULL);
         if (set->ic_pktin_free == NULL)
@@ -125,13 +125,13 @@ static PktIn *pq_in_after(PacketQueueBase *pqb,
 
         pq_unlink_common(pqb, node);
 
-        node->prev = set->pktin_freeq_head->prev; // WINSCP
-        node->next = set->pktin_freeq_head; // WINSCP
+        node->prev = set->pktin_freeq_head->prev; // FORK_BUILD
+        node->next = set->pktin_freeq_head; // FORK_BUILD
         node->next->prev = node;
         node->prev->next = node;
         node->on_free_queue = true;
 
-        queue_idempotent_callback(set->ic_pktin_free); // WINSCP
+        queue_idempotent_callback(set->ic_pktin_free); // FORK_BUILD
     }
 
     return container_of(node, PktIn, qnode);
@@ -153,7 +153,7 @@ static PktOut *pq_out_after(PacketQueueBase *pqb,
     return container_of(node, PktOut, qnode);
 }
 
-void pq_in_init(PktInQueue *pq, Seat * seat) // WINSCP
+void pq_in_init(PktInQueue *pq, Seat * seat) // FORK_BUILD
 {
     pq->pqb.ic = NULL;
     pq->pqb.seat = seat;
@@ -162,7 +162,7 @@ void pq_in_init(PktInQueue *pq, Seat * seat) // WINSCP
     pq->pqb.total_size = 0;
 }
 
-void pq_out_init(PktOutQueue *pq, Seat * seat) // WINSCP
+void pq_out_init(PktOutQueue *pq, Seat * seat) // FORK_BUILD
 {
     pq->pqb.ic = NULL;
     pq->pqb.seat = seat;
@@ -728,7 +728,7 @@ void ssh_ppl_replace(PacketProtocolLayer *old, PacketProtocolLayer *new)
 
 void ssh_ppl_free(PacketProtocolLayer *ppl)
 {
-    delete_callbacks_for_context(get_seat_callback_set(ppl->seat), ppl); // WINSCP
+    delete_callbacks_for_context(get_seat_callback_set(ppl->seat), ppl); // FORK_BUILD
     ppl->vt->free(ppl);
 }
 
@@ -759,8 +759,8 @@ void ssh_ppl_user_output_string_and_free(PacketProtocolLayer *ppl, char *text)
     /* Messages sent via this function are from the SSH layer, not
      * from the server-side process, so they always have the stderr
      * flag set. */
-    SeatOutputType stderrflag = (SeatOutputType)-1; // WINSCP
-    seat_output(ppl->seat, stderrflag, text, strlen(text)); // WINSCP
+    SeatOutputType stderrflag = (SeatOutputType)-1; // FORK_BUILD
+    seat_output(ppl->seat, stderrflag, text, strlen(text)); // FORK_BUILD
     sfree(text);
 }
 
@@ -809,8 +809,8 @@ static void ssh_bpp_output_packet_callback(void *context)
 
 void ssh_bpp_common_setup(BinaryPacketProtocol *bpp)
 {
-    pq_in_init(&bpp->in_pq, get_log_seat(bpp->logctx)); // WINSCP
-    pq_out_init(&bpp->out_pq, get_log_seat(bpp->logctx)); // WINSCP
+    pq_in_init(&bpp->in_pq, get_log_seat(bpp->logctx)); // FORK_BUILD
+    pq_out_init(&bpp->out_pq, get_log_seat(bpp->logctx)); // FORK_BUILD
     bpp->input_eof = false;
     bpp->ic_in_raw.fn = ssh_bpp_input_raw_data_callback;
     bpp->ic_in_raw.set = get_log_callback_set(bpp->logctx);
@@ -823,7 +823,7 @@ void ssh_bpp_common_setup(BinaryPacketProtocol *bpp)
 
 void ssh_bpp_free(BinaryPacketProtocol *bpp)
 {
-    // WINSCP
+    // FORK_BUILD
     delete_callbacks_for_context(get_log_callback_set(bpp->logctx), bpp);
     bpp->vt->free(bpp);
 }
@@ -950,7 +950,7 @@ SeatPromptResult verify_ssh_host_key(
     /*
      * Next, check the host key cache.
      */
-    int storage_status = 1; // WINSCP check_stored_host_key(host, port, keytype, keystr);
+    int storage_status = 1; // FORK_BUILD check_stored_host_key(host, port, keytype, keystr);
     if (storage_status == 0) /* matching key was found in the cache */
         return SPR_OK;
 
@@ -1001,7 +1001,7 @@ SeatPromptResult verify_ssh_host_key(
                     "pretending to be the server.");
             }
         } else {
-            // assert(storage_status == 2); WINSCP
+            // assert(storage_status == 2); FORK_BUILD
             seat_dialog_text_append(
                 text, SDT_PARA, "which does not match the certified key %s "
                 "had previously cached for this server.", appname);
@@ -1111,7 +1111,7 @@ SeatPromptResult verify_ssh_host_key(
 
     SeatPromptResult toret = seat_confirm_ssh_host_key(
         iseat, host, port, keytype, keystr, text, helpctx, callback, ctx,
-        fingerprints, key && ssh_key_alg(key)->is_certificate, ca_count, false); // WINSCP
+        fingerprints, key && ssh_key_alg(key)->is_certificate, ca_count, false); // FORK_BUILD
     seat_dialog_text_free(text);
     return toret;
 }
@@ -1176,7 +1176,7 @@ SeatPromptResult confirm_weak_crypto_primitive(
 
     SeatPromptResult toret = seat_confirm_weak_crypto_primitive(
         iseat, text, callback, ctx,
-        algtype, algname, wcr); // WINSCP
+        algtype, algname, wcr); // FORK_BUILD
     seat_dialog_text_free(text);
     return toret;
 }

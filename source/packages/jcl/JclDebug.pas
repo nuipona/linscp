@@ -64,9 +64,9 @@ uses
   {$ENDIF ~HAS_UNITSCOPE}
   JclBase, JclFileUtils, JclPeImage,
   {$IFDEF BORLAND}
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   JclTD32,
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
   {$ENDIF BORLAND}
   JclSynch;
 
@@ -77,7 +77,7 @@ procedure AssertKindOf(const ClassType: TClass; const Obj: TObject); overload;
 // use TraceMsg
 // procedure Trace(const Msg: string);
 procedure TraceMsg(const Msg: string);
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 procedure TraceFmt(const Fmt: string; const Args: array of const);
 {$ENDIF}
 procedure TraceLoc(const Msg: string);
@@ -357,7 +357,7 @@ function ConvertMapFileToJdbgFile(const MapFileName: TFileName; out LinkerBugUni
 function ConvertMapFileToJdbgFile(const MapFileName: TFileName; out LinkerBugUnit: string;
   out LineNumberErrors, MapFileSize, JdbgFileSize: Integer): Boolean; overload;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function InsertDebugDataIntoExecutableFile(const ExecutableFileName,
   MapFileName: TFileName; out LinkerBugUnit: string;
   out MapFileSize, JclDebugDataSize: Integer): Boolean; overload;
@@ -530,7 +530,7 @@ type
     function GetAddress(const UnitName, ProcName: string): Pointer; override;
   end;
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
 
   TJclDebugInfoBinary = class(TJclDebugInfoSource)
   private
@@ -582,7 +582,7 @@ type
     function GetLocationInfo(const Addr: Pointer; out Info: TJclLocationInfo): Boolean; override;
     function GetAddress(const UnitName, ProcName: string): Pointer; override;
   end;
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
 
 // Source location functions
 function Caller(Level: Integer = 0; FastStackWalk: Boolean = False): Pointer;
@@ -732,7 +732,7 @@ type
     property Raw: Boolean read FRaw;
   end;
 
-{$IFDEF WINSCP}
+{$IFDEF FORK_BUILD}
 procedure DoExceptionStackTrace(ExceptObj: TObject; ExceptAddr: Pointer; OSException: Boolean;
   BaseOfStack: Pointer);
 procedure DoExceptFrameTrace;
@@ -843,7 +843,7 @@ function JclCreateExceptFrameList(AIgnoreLevels: Integer): TJclExceptFrameList;
 function JclLastExceptFrameList: TJclExceptFrameList;
 function JclGetExceptFrameList(ThreadID: DWORD): TJclExceptFrameList;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function JclStartExceptionTracking: Boolean;
 function JclStopExceptionTracking: Boolean;
 {$ENDIF}
@@ -1014,17 +1014,17 @@ type
 
 function JclDebugThreadList: TJclDebugThreadList;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function JclHookThreads: Boolean;
 function JclUnhookThreads: Boolean;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 function JclThreadsHooked: Boolean;
 
 // Miscellanuous
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function EnableCrashOnCtrlScroll(const Enable: Boolean): Boolean;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function IsDebuggerAttached: Boolean;
 function IsHandleValid(Handle: THandle): Boolean;
 {$ENDIF MSWINDOWS}
@@ -1134,14 +1134,14 @@ uses
   {$ENDIF SUPPORTS_GENERICS}
   {$ENDIF ~HAS_UNITSCOPE}
   {$IFDEF MSWINDOWS}
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   JclRegistry,
   {$ELSE}
   System.AnsiStrings,
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
   {$ENDIF MSWINDOWS}
   JclHookExcept, JclAnsiStrings, JclStrings, JclSysInfo, JclSysUtils, JclWin32,
-  {$IFNDEF WINSCP}JclStringConversions,{$ENDIF ~WINSCP} JclResources;
+  {$IFNDEF FORK_BUILD}JclStringConversions,{$ENDIF ~FORK_BUILD} JclResources;
 
 //=== Helper assembler routines ==============================================
 
@@ -1233,7 +1233,7 @@ begin
   OutputDebugString(PChar(StrDoubleQuote(Msg)));
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 procedure TraceFmt(const Fmt: string; const Args: array of const);
 begin
   OutputDebugString(PChar(Format(StrDoubleQuote(Fmt), Args)));
@@ -1775,7 +1775,7 @@ begin
         ReadAddress(A);
         SkipWhiteSpace;
         L := ReadHexValue;
-        {$IFDEF CPU64} // WINSCP
+        {$IFDEF CPU64} // FORK_BUILD
         FindParam('S');
         {$ELSE}
         FindParam('C');
@@ -2672,7 +2672,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function InsertDebugDataIntoExecutableFile(const ExecutableFileName, MapFileName: TFileName;
   out LinkerBugUnit: string; out MapFileSize, JclDebugDataSize: Integer): Boolean;
 var
@@ -4119,25 +4119,25 @@ begin
   if not Assigned(InfoSourceClassList) then
   begin
     InfoSourceClassList := TList.Create;
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     {$IFNDEF DEBUG_NO_BINARY}
     InfoSourceClassList.Add(Pointer(TJclDebugInfoBinary));
     {$ENDIF !DEBUG_NO_BINARY}
     {$IFNDEF DEBUG_NO_TD32}
     InfoSourceClassList.Add(Pointer(TJclDebugInfoTD32));
     {$ENDIF !DEBUG_NO_TD32}
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
     {$IFNDEF DEBUG_NO_MAP}
     InfoSourceClassList.Add(Pointer(TJclDebugInfoMap));
     {$ENDIF !DEBUG_NO_MAP}
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     {$IFNDEF DEBUG_NO_SYMBOLS}
     InfoSourceClassList.Add(Pointer(TJclDebugInfoSymbols));
     {$ENDIF !DEBUG_NO_SYMBOLS}
     {$IFNDEF DEBUG_NO_EXPORTS}
     InfoSourceClassList.Add(Pointer(TJclDebugInfoExports));
     {$ENDIF !DEBUG_NO_EXPORTS}
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
   end;
 end;
 
@@ -4213,7 +4213,7 @@ begin
     FScanner := TJclMapScanner.Create(MapFileName, Module);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 //=== { TJclDebugInfoBinary } ================================================
 
@@ -4388,11 +4388,11 @@ begin
           if not IsAddressInThisExportedFunction(Addr, FModule + Items[I].Address) then
           begin
             //Info.UnitName := '[' + AnsiLowerCase(ExtractFileName(GetModulePath(FModule))) + ']'
-            {$IFNDEF WINSCP}
+            {$IFNDEF FORK_BUILD}
             Info.ProcedureName := Format(LoadResString(@RsUnknownFunctionAt), [Info.ProcedureName]);
             {$ELSE}
             Info.ProcedureName := '';
-            {$ENDIF ~WINSCP}
+            {$ENDIF ~FORK_BUILD}
           end;
 
           Break;
@@ -4936,7 +4936,7 @@ begin
   SymGetLineFromAddrWFunc := nil;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 //=== Source location functions ==============================================
 
@@ -5030,11 +5030,11 @@ var
   Info, StartProcInfo: TJclLocationInfo;
   OffsetStr, StartProcOffsetStr, FixedProcedureName, UnitNameWithoutUnitscope: string;
   Module: HMODULE;
-  {$IFDEF WINSCP}
+  {$IFDEF FORK_BUILD}
   MainModule: HMODULE;
   ModuleName: string;
   ModulePosition: Integer;
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
 begin
   OffsetStr := '';
   if GetLocationInfo(Addr, Info) then
@@ -5066,7 +5066,7 @@ begin
         else
           OffsetStr := Format(' - $%x', [-OffsetFromLineNumber])
       end;
-      {$IFDEF WINSCP}
+      {$IFDEF FORK_BUILD}
       Result := Format('[%p] %s (Line %u, "%s"%s)%s', [Addr, FixedProcedureName, LineNumber,
         SourceName, StartProcOffsetStr, OffsetStr]);
       {$ELSE}
@@ -5078,7 +5078,7 @@ begin
     begin
       if IncludeAddressOffset then
         OffsetStr := Format(' + $%x', [OffsetFromProcName]);
-      {$IFNDEF WINSCP}
+      {$IFNDEF FORK_BUILD}
       if UnitName <> '' then
         Result := Format('[%p] %s.%s%s', [Addr, UnitName, FixedProcedureName, OffsetStr])
       else
@@ -5104,7 +5104,7 @@ begin
       Result := OffsetStr + Result;
     end;
     if IncludeModuleName then
-    {$IFDEF WINSCP}
+    {$IFDEF FORK_BUILD}
     begin
       MainModule := GetModuleHandle(nil);
       if MainModule <> Module then
@@ -5127,7 +5127,7 @@ begin
     end;
     {$ELSE}
       Insert(Format('{%-12s}', [ExtractFileName(GetModulePath(Module))]), Result, 11 {$IFDEF CPU64}+8{$ENDIF});
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
   end;
 end;
 
@@ -5791,7 +5791,7 @@ begin
                   Pointer(GetThreadTopOfStack(ThreadHandle)));
     end;
     {$ENDIF CPU32}
-    // Fixed for WINSCP. Code mostly generated by Gemini based on .map files from C++Builder 11.
+    // Fixed for FORK_BUILD. Code mostly generated by Gemini based on .map files from C++Builder 11.
     {$IFDEF CPU64}
     Kernel32Handle := GetModuleHandle(kernel32);
     RtlVirtualUnwindFunc := GetProcAddress(Kernel32Handle, 'RtlVirtualUnwind');
@@ -7221,7 +7221,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function JclStartExceptionTracking: Boolean;
 begin
   {Increment the tracking count only if exceptions are already being tracked or tracking can be started
@@ -7260,7 +7260,7 @@ begin
     Result := False;
   end;
 end;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function JclExceptionTrackingActive: Boolean;
 begin
@@ -7320,7 +7320,7 @@ begin
   Kernel32_ExitThread(ExitCode);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function JclHookThreads: Boolean;
 var
   ProcAddrCache: Pointer;
@@ -7364,7 +7364,7 @@ begin
   else
     Result := True;
 end;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function JclThreadsHooked: Boolean;
 begin
@@ -8062,7 +8062,7 @@ end;
 
 {$IFDEF MSWINDOWS}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function EnableCrashOnCtrlScroll(const Enable: Boolean): Boolean;
 const
   CrashCtrlScrollKey = 'SYSTEM\CurrentControlSet\Services\i8042prt\Parameters';
@@ -8076,7 +8076,7 @@ begin
   RegWriteInteger(HKEY_LOCAL_MACHINE, CrashCtrlScrollKey, CrashCtrlScrollName, Enabled);
   Result := RegReadInteger(HKEY_LOCAL_MACHINE, CrashCtrlScrollKey, CrashCtrlScrollName) = Enabled;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function IsDebuggerAttached: Boolean;
 var
@@ -8305,9 +8305,9 @@ begin
   FreeAndNil(IgnoredExceptionClassNames);
   FreeAndNil(IgnoredExceptionClassNamesCritSect);
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   TJclDebugInfoSymbols.CleanupDebugSymbols;
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
 end;
 
 initialization
@@ -8328,7 +8328,7 @@ finalization
   UnregisterUnitVersion(HInstance);
   {$ENDIF UNITVERSIONING}
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   { TODO -oPV -cInvestigate : Calling JclStopExceptionTracking causes linking of various classes to
     the code without a real need. Although there doesn't seem to be a way to unhook exceptions
     safely because we need to be covered by JclHookExcept.Notifiers critical section }

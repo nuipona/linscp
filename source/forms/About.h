@@ -17,7 +17,7 @@ class TAboutDialog : public TForm
 __published:
   TLabel *ApplicationLabel;
   TLabel *VersionLabel;
-  TLabel *WinSCPCopyrightLabel;
+  TLabel *LinuxSCPCopyrightLabel;
   TStaticText *HomepageLabel;
   TLabel *ProductSpecificMessageLabel;
   TStaticText *ForumUrlLabel;

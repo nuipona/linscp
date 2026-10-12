@@ -36,8 +36,8 @@
 #pragma link "PathLabel"
 #pragma resource "*.dfm"
 //---------------------------------------------------------------------------
-#define WM_COMPONENT_HIDE (WM_WINSCP_USER + 4)
-#define WM_PASTE_FILES (WM_WINSCP_USER + 14)
+#define WM_COMPONENT_HIDE (WM_FORK_USER + 4)
+#define WM_PASTE_FILES (WM_FORK_USER + 14)
 static const int SessionPanelCount = 3;
 //---------------------------------------------------------------------------
 class TMutexGuard

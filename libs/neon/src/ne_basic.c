@@ -376,7 +376,7 @@ static const struct options_map {
     { "extended-mkcol", NE_CAP_EXT_MKCOL }
 };
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 const char * ne_capability_name(unsigned int cap)
 {
     unsigned n;

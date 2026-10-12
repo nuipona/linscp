@@ -70,7 +70,7 @@ int ne_has_support(int feature);
 #ifndef NE_DEBUGGING
 #define NE_DEBUG if (0) ne_debug
 #else /* DEBUGGING */
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #define NE_DEBUG(...) ne_debug(ne_debug_context, __VA_ARGS__)
 #else
 #define NE_DEBUG ne_debug
@@ -87,14 +87,14 @@ int ne_has_support(int feature);
 #define NE_DBG_XMLPARSE (1<<6) /* low-level XML parser */
 #define NE_DBG_HTTPBODY (1<<7) /* HTTP response body blocks */
 #define NE_DBG_SSL (1<<8) /* SSL/TLS */
-#ifdef WINSCP
-#define NE_DBG_WINSCP_HTTP_DETAIL (1<<29)
+#ifdef FORK_BUILD
+#define NE_DBG_FORK_HTTP_DETAIL (1<<29)
 #endif
 #define NE_DBG_FLUSH (1<<30) /* always flush debugging */
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
-#define NE_DEBUG_WINSCP_CONTEXT(SESSION) void * ne_debug_context = (SESSION)
+#define NE_DEBUG_FORK_CONTEXT(SESSION) void * ne_debug_context = (SESSION)
 
 extern void * ne_debug_context;
 
@@ -102,28 +102,28 @@ void ne_debug(void * context, int ch, const char * fmt, ...);
 
 #else
 
-#define NE_DEBUG_WINSCP_CONTEXT(SESSION)
+#define NE_DEBUG_FORK_CONTEXT(SESSION)
 
 /* Send debugging output to 'stream', for all of the given debug
  * channels.  To disable debugging, pass 'stream' as NULL and 'mask'
  * as 0. */
 void ne_debug_init(FILE *stream, int mask);
 
-#endif /* WINSCP */
+#endif /* FORK_BUILD */
 
 /* The current debug mask and stream set by the last call to
  * ne_debug_init. */
 NE_VAR int ne_debug_mask;
 NE_VAR FILE *ne_debug_stream;
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 
 /* Produce debug output if any of channels 'ch' is enabled for
  * debugging. */
 void ne_debug(int ch, const char *, ...) ne_attribute((format(printf, 2, 3)));
 
-#endif /* WINSCP */
+#endif /* FORK_BUILD */
 
 /* Storing an HTTP status result */
 typedef struct {

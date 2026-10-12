@@ -1,4 +1,4 @@
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /** **************************************************************************
  * s3.c
  *
@@ -4051,4 +4051,4 @@ int main(int argc, char **argv)
 
     return 0;
 }
-#endif // WINSCP
+#endif // FORK_BUILD

@@ -959,6 +959,6 @@ private:
 };
 //---------------------------------------------------------------------------
 extern TWinConfiguration * WinConfiguration;
-extern const UnicodeString WinSCPExtensionExt;
+extern const UnicodeString LinuxSCPExtensionExt;
 //---------------------------------------------------------------------------
 #endif

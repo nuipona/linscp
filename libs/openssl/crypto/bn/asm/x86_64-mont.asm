@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 EXTERN OPENSSL_ia32cap_P
@@ -1281,7 +1281,7 @@ DB 54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83
 DB 32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115
 DB 115,108,46,111,114,103,62,0
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 ALIGN 16
 EXTERN __imp_RtlVirtualUnwind
@@ -1453,4 +1453,4 @@ DB 9,0,0,0
  DD $L$mulx4x_prologue wrt ..imagebase,$L$mulx4x_body wrt ..imagebase,$L$mulx4x_epilogue wrt ..imagebase
 ALIGN 8
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

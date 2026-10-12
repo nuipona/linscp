@@ -184,7 +184,7 @@ __fastcall TConfiguration::TConfiguration()
     }
   }
 
-  FDefaultRandomSeedFile = IncludeTrailingBackslash(RandomSeedPath) + L"winscp.rnd";
+  FDefaultRandomSeedFile = IncludeTrailingBackslash(RandomSeedPath) + L"linuxscp.rnd";
 }
 //---------------------------------------------------------------------------
 void __fastcall TConfiguration::Default()

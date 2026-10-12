@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal static class Constants
     {

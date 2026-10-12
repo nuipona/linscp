@@ -17,7 +17,7 @@ using System.Text.RegularExpressions;
 using System.Linq;
 using System.Text;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     [Guid("38649D44-B839-4F2C-A9DC-5D45EEA4B5E9")]
     [ComVisible(true)]
@@ -283,7 +283,7 @@ namespace WinSCP
 
                     Logger.WriteLine("Waiting for XML log file");
 
-                    // Wait until the log file gets created or WinSCP terminates (in case of fatal error)
+                    // Wait until the log file gets created or LinuxSCP terminates (in case of fatal error)
                     do
                     {
                         string logExplanation;
@@ -306,7 +306,7 @@ namespace WinSCP
                         }
                         logExplanation +=
                             string.Format(CultureInfo.CurrentCulture,
-                                "Response log file {0} was not created. This could indicate lack of write permissions to the log folder or problems starting WinSCP itself.",
+                                "Response log file {0} was not created. This could indicate lack of write permissions to the log folder or problems starting LinuxSCP itself.",
                                 XmlLogPath);
 
                         if (_process.HasExited && !File.Exists(XmlLogPath))
@@ -323,14 +323,14 @@ namespace WinSCP
                             }
                             throw Logger.WriteException(
                                 new SessionLocalException(this,
-                                    string.Format(CultureInfo.CurrentCulture, "WinSCP process terminated with exit code {0}. ", exitCode) +
+                                    string.Format(CultureInfo.CurrentCulture, "LinuxSCP process terminated with exit code {0}. ", exitCode) +
                                     logExplanation));
                         }
 
                         Thread.Sleep(50);
 
                         CheckForTimeout(
-                            "WinSCP has not responded in time. " +
+                            "LinuxSCP has not responded in time. " +
                             logExplanation);
 
                     } while (!File.Exists(XmlLogPath));
@@ -2341,9 +2341,9 @@ namespace WinSCP
 
             if (DateTime.Now - _lastOutput > timeout)
             {
-                Logger.WriteLine("Timeout waiting for WinSCP to respond - asking for callstack");
+                Logger.WriteLine("Timeout waiting for LinuxSCP to respond - asking for callstack");
                 _process.RequestCallstack();
-                string message = "Timeout waiting for WinSCP to respond";
+                string message = "Timeout waiting for LinuxSCP to respond";
                 if (additional != null)
                 {
                     message += " - " + additional;
@@ -2863,7 +2863,7 @@ namespace WinSCP
             get { return GetType(); }
         }
 
-        internal const string Namespace = "http://winscp.net/schema/session/1.0";
+        internal const string Namespace = "https://github.com/nuipona/linuxscp/schema/session/1.0";
         internal Logger Logger { get; private set; }
         internal bool GuardProcessWithJobInternal { get { return _guardProcessWithJob; } set { CheckNotOpened(); _guardProcessWithJob = value; } }
         internal bool TestHandlesClosedInternal { get; set; }

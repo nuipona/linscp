@@ -463,7 +463,7 @@ typedef std::map<UnicodeString, unsigned long> TPuttyRegistryTypes;
 static TPuttyRegistryTypes PuttyRegistryTypes;
 static HKEY RandSeedFileStorage = reinterpret_cast<HKEY>(1);
 //---------------------------------------------------------------------------
-int reg_override_winscp()
+int reg_override_linuxscp()
 {
   return (PuttyRegistryMode != prmPass);
 }
@@ -484,7 +484,7 @@ void putty_registry_pass(bool enable)
   }
 }
 //---------------------------------------------------------------------------
-HKEY open_regkey_fn_winscp(bool Create, bool Write, HKEY Key, const char * Path, ...)
+HKEY open_regkey_fn_linuxscp(bool Create, bool Write, HKEY Key, const char * Path, ...)
 {
   DebugUsedParam(Write);
   HKEY Result;
@@ -554,7 +554,7 @@ HKEY open_regkey_fn_winscp(bool Create, bool Write, HKEY Key, const char * Path,
   return Result;
 }
 //---------------------------------------------------------------------------
-bool get_reg_dword_winscp(HKEY, const char * DebugUsedArg(Name), DWORD * DebugUsedArg(Out))
+bool get_reg_dword_linuxscp(HKEY, const char * DebugUsedArg(Name), DWORD * DebugUsedArg(Out))
 {
   bool Result;
   if (PuttyRegistryMode == prmFail)
@@ -573,7 +573,7 @@ bool get_reg_dword_winscp(HKEY, const char * DebugUsedArg(Name), DWORD * DebugUs
   return Result;
 }
 //---------------------------------------------------------------------------
-char * get_reg_sz_winscp(HKEY Key, const char * Name)
+char * get_reg_sz_linuxscp(HKEY Key, const char * Name)
 {
   char * Result;
   if (PuttyRegistryMode == prmCollect)
@@ -635,7 +635,7 @@ char * get_reg_sz_winscp(HKEY Key, const char * Name)
   return Result;
 }
 //---------------------------------------------------------------------------
-bool put_reg_dword_winscp(HKEY DebugUsedArg(Key), const char * Name, DWORD DebugUsedArg(Value))
+bool put_reg_dword_linuxscp(HKEY DebugUsedArg(Key), const char * Name, DWORD DebugUsedArg(Value))
 {
   bool Result;
   if (PuttyRegistryMode == prmCollect)
@@ -658,7 +658,7 @@ bool put_reg_dword_winscp(HKEY DebugUsedArg(Key), const char * Name, DWORD Debug
   return Result;
 }
 //---------------------------------------------------------------------------
-bool put_reg_sz_winscp(HKEY Key, const char * Name, const char * Str)
+bool put_reg_sz_linuxscp(HKEY Key, const char * Name, const char * Str)
 {
   UnicodeString ValueName = UTF8String(Name);
   bool Result;
@@ -688,12 +688,12 @@ bool put_reg_sz_winscp(HKEY Key, const char * Name, const char * Str)
   return Result;
 }
 //---------------------------------------------------------------------------
-void close_regkey_winscp(HKEY)
+void close_regkey_linuxscp(HKEY)
 {
   DebugAssert((PuttyRegistryMode == prmCollect) || (PuttyRegistryMode == prmRedirect));
 }
 //---------------------------------------------------------------------------
-strbuf * get_reg_multi_sz_winscp(HKEY, const char * DebugUsedArg(name))
+strbuf * get_reg_multi_sz_linuxscp(HKEY, const char * DebugUsedArg(name))
 {
   // Needed for CA
   DebugFail();

@@ -53,13 +53,13 @@ object GenerateUrlDialog: TGenerateUrlDialog
         TabOrder = 3
         OnClick = ControlChange
       end
-      object WinSCPSpecificCheck: TCheckBox
+      object LinuxSCPSpecificCheck: TCheckBox
         Tag = 16
         Left = 164
         Top = 28
         Width = 151
         Height = 17
-        Caption = '&WinSCP-specific'
+        Caption = '&LinuxSCP-specific'
         TabOrder = 4
         OnClick = ControlChange
       end

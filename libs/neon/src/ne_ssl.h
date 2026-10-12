@@ -84,7 +84,7 @@ const ne_ssl_dname *ne_ssl_cert_issuer(const ne_ssl_certificate *cert);
 /* Returns the distinguished name of the certificate subject. */
 const ne_ssl_dname *ne_ssl_cert_subject(const ne_ssl_certificate *cert);
 
-#define NE_SSL_DIGESTLEN (96) // WINSCP for SHA-256
+#define NE_SSL_DIGESTLEN (96) // FORK_BUILD for SHA-256
 
 /* Calculate the certificate digest ("fingerprint") and format it as a
  * NUL-terminated hex string in 'digest', of the form "aa:bb:...:ff".
@@ -127,7 +127,7 @@ void ne_ssl_cert_free(ne_ssl_certificate *cert);
  * "decrypted" state.  */
 typedef struct ne_ssl_client_cert_s ne_ssl_client_cert;
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 typedef struct x509_st X509;
 typedef struct evp_pkey_st EVP_PKEY;
 ne_ssl_client_cert * ne_ssl_clicert_create(X509 * cert, EVP_PKEY * pkey);

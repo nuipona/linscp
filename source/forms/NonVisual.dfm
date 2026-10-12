@@ -2270,7 +2270,7 @@ object NonVisualDataModule: TNonVisualDataModule
       Category = 'Help'
       Caption = 'Show &Tips'
       HelpKeyword = 'ui_tips'
-      Hint = 'Displays tips on using WinSCP'
+      Hint = 'Displays tips on using LinuxSCP'
       ImageIndex = 110
     end
     object ChangePasswordAction: TAction

@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 EXTERN OPENSSL_ia32cap_P
 global aesni_xts_avx512_eligible
@@ -8323,7 +8323,7 @@ $L$_done_1_EmbgEptodyewbFa:
  vmovdqu xmm8,xmm1
  jmp NEAR $L$_done_EmbgEptodyewbFa
 
-section .rodata align=8 ; WINSCP (rodata)
+section .rodata align=8 ; FORK_BUILD (rodata)
 ALIGN 16
 
 vpshufb_shf_table:
@@ -8346,4 +8346,4 @@ shufb_15_7:
 DB 15,0xff,0xff,0xff,0xff,0xff,0xff,0xff,7,0xff,0xff
 DB 0xff,0xff,0xff,0xff,0xff
 
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)

@@ -128,7 +128,7 @@
 #define in_addr_t                       unsigned int
 #endif
 
-// WINSCP
+// FORK_BUILD
 #define HAVE_CRYPTO_SET_IDPTR_CALLBACK
 #define NE_FMT_TIME_T "ld"
 

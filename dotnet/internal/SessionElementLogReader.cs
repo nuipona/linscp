@@ -1,4 +1,4 @@
-﻿namespace WinSCP
+﻿namespace LinuxSCP
 {
     internal class SessionElementLogReader : ElementLogReader
     {

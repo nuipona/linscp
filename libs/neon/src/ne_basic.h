@@ -137,7 +137,7 @@ int ne_options(ne_session *sess, const char *path,
  * describing the advertised resource capabilities. */
 int ne_options2(ne_session *sess, const char *path, unsigned int *caps);
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 const char * ne_capability_name(unsigned int cap);
 #endif
 

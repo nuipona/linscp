@@ -34,11 +34,11 @@
 #define LIBS3_H
 
 #include <stdint.h>
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #include <sys/select.h>
 #endif
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #define LIBS3_VER_MAJOR "4"
 #define LIBS3_VER_MINOR "1"
 #endif
@@ -140,7 +140,7 @@ extern "C" {
  **/
 #define S3_DEFAULT_HOSTNAME                "s3.amazonaws.com"
 
-#define S3_SERVICE                         "s3" // WINSCP
+#define S3_SERVICE                         "s3" // FORK_BUILD
 
 
 /**
@@ -159,7 +159,7 @@ extern "C" {
  * S3_MAX_METADATA_SIZE is the maximum number of bytes allowed for
  * x-amz-meta header names and values in any request passed to Amazon S3
  **/
-// WINSCP: Session token can have any size, but the documentation explicitly mentions 4096 bytes:
+// FORK_BUILD: Session token can have any size, but the documentation explicitly mentions 4096 bytes:
 // https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp_request.html
 // AWS itself does not support headers larger than 8192 (returns RequestHeaderSectionTooLarge)
 #define S3_MAX_METADATA_SIZE               8192
@@ -246,7 +246,7 @@ extern "C" {
  */
 #define S3_DEFAULT_REGION                  "us-east-1"
 
-// WINSCP
+// FORK_BUILD
 // according to https://docs.aws.amazon.com/IAM/latest/APIReference/API_AccessKey.html max length is nowadays 128
 #define S3_MAX_ACCESS_KEY_ID_LENGTH 128
 #define S3_MAX_REGION_LENGTH 32
@@ -317,7 +317,7 @@ typedef enum
     S3StatusConnectionFailed                                ,
     S3StatusAbortedByCallback                               ,
     S3StatusNotSupported                                    ,
-    S3StatusUploadIdTooLong                                 , // WINSCP
+    S3StatusUploadIdTooLong                                 , // FORK_BUILD
 
     /**
      * Errors from the S3 service
@@ -401,7 +401,7 @@ typedef enum
     S3StatusErrorUnresolvableGrantByEmailAddress            ,
     S3StatusErrorUserKeyMustBeSpecified                     ,
     S3StatusErrorQuotaExceeded                              ,
-    S3StatusErrorAuthorizationHeaderMalformed               , // WINSCP
+    S3StatusErrorAuthorizationHeaderMalformed               , // FORK_BUILD
     S3StatusErrorUnknown                                    ,
 
     /**
@@ -709,7 +709,7 @@ typedef struct S3BucketContext
      * The name of the host to connect to when making S3 requests.  If set to
      * NULL, the default S3 hostname passed in to S3_initialize will be used.
      **/
-    // WINSCP: Can contain port number
+    // FORK_BUILD: Can contain port number
     const char *hostName;
 
     /**
@@ -749,7 +749,7 @@ typedef struct S3BucketContext
      */
     const char *authRegion;
 
-    const char *service; // WINSCP
+    const char *service; // FORK_BUILD
 } S3BucketContext;
 
 
@@ -770,7 +770,7 @@ typedef struct S3ListBucketContent
      * date of the object identified by the key.
      **/
     int64_t lastModified;
-    const char *lastModifiedStr; // WINSCP 
+    const char *lastModifiedStr; // FORK_BUILD 
 
     /**
      * This gives a tag which gives a signature of the contents of the object,
@@ -1686,7 +1686,7 @@ S3Status S3_create_request_context_ex(S3RequestContext **requestContextReturn,
 void S3_destroy_request_context(S3RequestContext *requestContext);
 
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 struct ne_session_s;
 typedef void (S3SessionCallback)(ne_session_s *session, void *callbackData);
 void S3_set_request_context_session_callback(S3RequestContext *requestContext,
@@ -1842,7 +1842,7 @@ void S3_set_request_context_verify_peer(S3RequestContext *requestContext,
  * S3 Utility Functions
  ************************************************************************** **/
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /**
  * Generates an HTTP authenticated query string, which may then be used by
  * a browser (or other web client) to issue the request.  The request is
@@ -1906,7 +1906,7 @@ S3Status S3_generate_authenticated_query_string
 void S3_list_service(S3Protocol protocol, const char *accessKeyId,
                      const char *secretAccessKey, const char *securityToken,
                      const char *hostName, const char *authRegion,
-                     int maxkeys, // WINSCP
+                     int maxkeys, // FORK_BUILD
                      S3RequestContext *requestContext,
                      int timeoutMs,
                      const S3ListServiceHandler *handler, void *callbackData);
@@ -2615,8 +2615,8 @@ void S3_abort_multipart_upload(S3BucketContext *bucketContext, const char *key,
                                const char *uploadId,
                                int timeoutMs,
                                S3AbortMultipartUploadHandler *handler,
-                               S3RequestContext *requestContext, // WINSCP
-                               void *callbackData); // WINSCP
+                               S3RequestContext *requestContext, // FORK_BUILD
+                               void *callbackData); // FORK_BUILD
 
 
 /**

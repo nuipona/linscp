@@ -150,7 +150,7 @@ typedef void (*ne_lock_result)(void *userdata, const struct ne_lock *lock,
 int ne_lock_discover(ne_session *sess, const char *path,
 		     ne_lock_result result, void *userdata);
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 #include "ne_props.h"
 

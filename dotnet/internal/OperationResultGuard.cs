@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class OperationResultGuard : IDisposable
     {

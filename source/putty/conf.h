@@ -1292,7 +1292,7 @@ CONF_OPTION(winclass,
     SAVE_KEYWORD("WindowClass"),
 )
 
-/* WINSCP BEGIN */
+/* FORK_BUILD BEGIN */
 CONF_OPTION(connect_timeout,
     VALUE_TYPE(INT),
     NOT_SAVED,
@@ -1316,4 +1316,4 @@ CONF_OPTION(change_password,
     DEFAULT_BOOL(false),
     NOT_SAVED,
 )
-/* WINSCP END */
+/* FORK_BUILD END */

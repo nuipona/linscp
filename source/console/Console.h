@@ -2,11 +2,11 @@
 #ifndef ConsoleH
 #define ConsoleH
 //---------------------------------------------------------------------------
-#define CONSOLE_MAPPING L"WinSCPConsoleMapping"
-#define CONSOLE_EVENT_REQUEST L"WinSCPConsoleEventRequest"
-#define CONSOLE_EVENT_RESPONSE L"WinSCPConsoleEventResponse"
-#define CONSOLE_EVENT_CANCEL L"WinSCPConsoleEventCancel"
-#define CONSOLE_JOB L"WinSCPConsoleJob"
+#define CONSOLE_MAPPING L"LinuxSCPConsoleMapping"
+#define CONSOLE_EVENT_REQUEST L"LinuxSCPConsoleEventRequest"
+#define CONSOLE_EVENT_RESPONSE L"LinuxSCPConsoleEventResponse"
+#define CONSOLE_EVENT_CANCEL L"LinuxSCPConsoleEventCancel"
+#define CONSOLE_JOB L"LinuxSCPConsoleJob"
 //---------------------------------------------------------------------------
 struct TConsoleCommStruct
 {

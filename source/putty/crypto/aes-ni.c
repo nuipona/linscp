@@ -1,4 +1,4 @@
-#if defined(WINSCP_VS) || defined(_WIN64)
+#if defined(FORK_VS) || defined(_WIN64)
 
 #ifdef __clang__
 #pragma clang attribute push(__attribute__((target("sse2,aes,mmx,ssse3,sse4.1"))), apply_to=function)
@@ -120,7 +120,7 @@ static void aes_ni_key_expand(
     }
 }
 
-// WINSCP
+// FORK_BUILD
 // WORKAROUND
 // Cannot use _mm_setr_epi* - it results in the constant being stored in .rdata segment.
 // And consequently the code crashes.
@@ -141,7 +141,7 @@ static void aes_ni_key_expand(
  */
 static inline __m128i aes_ni_sdctr_increment(__m128i v)
 {
-    const __m128i ONE = MM_SETR_EPI8(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0); // WINSCP
+    const __m128i ONE = MM_SETR_EPI8(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0); // FORK_BUILD
     const __m128i ZERO = _mm_setzero_si128();
 
     /* Increment the low-order 64 bits of v */
@@ -164,7 +164,7 @@ static inline __m128i aes_ni_sdctr_increment(__m128i v)
  */
 static inline __m128i aes_ni_gcm_increment(__m128i v)
 {
-    const __m128i ONE  = MM_SETR_EPI8(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0); // WINSCP
+    const __m128i ONE  = MM_SETR_EPI8(1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0); // FORK_BUILD
     return _mm_add_epi32(v, ONE);
 }
 
@@ -174,9 +174,9 @@ static inline __m128i aes_ni_gcm_increment(__m128i v)
  */
 static inline __m128i aes_ni_sdctr_reverse(__m128i v)
 {
-    const __m128i R = MM_SETR_EPI8(15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0); // WINSCP
+    const __m128i R = MM_SETR_EPI8(15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0); // FORK_BUILD
     v = _mm_shuffle_epi8(
-        v, R); // WINSCP
+        v, R); // FORK_BUILD
     return v;
 }
 
@@ -262,7 +262,7 @@ static void aes_ni_next_message_gcm(ssh_cipher *ciph)
     msg_counter <<= 32;
     msg_counter |= (uint32_t)_mm_extract_epi32(ctx->iv, 1);
     msg_counter++;
-    ctx->iv = _mm_set_epi32(fixed, (int)(msg_counter >> 32), (int)msg_counter, 1); // WINSCP VS
+    ctx->iv = _mm_set_epi32(fixed, (int)(msg_counter >> 32), (int)msg_counter, 1); // FORK_BUILD VS
 }
 
 typedef __m128i (*aes_ni_fn)(__m128i v, const __m128i *keysched);
@@ -322,8 +322,8 @@ static inline void aes_encrypt_ecb_block_ni(
     _mm_storeu_si128(blk, ciphertext);
 }
 
-#ifdef WINSCP_VS
-// WINSCP (fixes linker alignment issues for the following function)
+#ifdef FORK_VS
+// FORK_BUILD (fixes linker alignment issues for the following function)
 const __m128i DUMMY;
 #endif
 
@@ -373,6 +373,6 @@ AES_ALL_VTABLES(_ni, "AES-NI accelerated");
 
 #else
 
-extern int aes_ni_dummy_winscp; // unit cannot be empty
+extern int aes_ni_dummy_linuxscp; // unit cannot be empty
 
-#endif // WINSCP_VS || _WIN64
+#endif // FORK_VS || _WIN64

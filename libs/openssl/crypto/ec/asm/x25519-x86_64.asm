@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 global x25519_fe51_mul
@@ -865,7 +865,7 @@ DB 115,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82
 DB 89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112
 DB 114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -1066,4 +1066,4 @@ DB 9,0,0,0
  DD short_handler wrt ..imagebase
  DD $L$fe64_to_body wrt ..imagebase,$L$fe64_to_epilogue wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Xml;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     [Flags]
     internal enum LogReadFlags

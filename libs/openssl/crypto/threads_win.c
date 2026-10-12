@@ -34,7 +34,7 @@
 #include "internal/rcu.h"
 #include "rcu_internal.h"
 
-// WINSCP
+// FORK_BUILD
 #if defined(_WIN64) && defined(__clang__)
 extern LONGLONG WINAPI InterlockedExchange64(volatile LONGLONG *Target, LONGLONG Value);
 extern LONGLONG WINAPI InterlockedExchangeAdd64(volatile LONGLONG *Addend, LONGLONG Value);
@@ -48,7 +48,7 @@ extern LONGLONG WINAPI InterlockedOr64(volatile LONGLONG *Destination, LONGLONG 
 extern LONGLONG WINAPI InterlockedXor64(volatile LONGLONG *Destination, LONGLONG Value);
 #endif
 
-// WINSCP
+// FORK_BUILD
 #if defined(__CODEGEARC__) && defined(__clang__)
 // MemoryBarrier is defined in winnt.h, but the definition is guarded by !__CODEGEARC__.
 // This clang-specific directive should work for both 32-bit and 64-bit.
@@ -224,13 +224,13 @@ static ossl_inline struct rcu_qp *get_hold_current_qp(CRYPTO_RCU_LOCK *lock)
     for (;;) {
         CRYPTO_atomic_load_int((int *)&lock->reader_idx, (int *)&qp_idx,
             lock->rw_lock);
-        CRYPTO_atomic_add64(/*WINSCP*/(uint64_t *)&lock->qp_group[qp_idx].users, (uint64_t)1, &tmp64,
+        CRYPTO_atomic_add64(/*FORK_BUILD*/(uint64_t *)&lock->qp_group[qp_idx].users, (uint64_t)1, &tmp64,
             lock->rw_lock);
         CRYPTO_atomic_load_int((int *)&lock->reader_idx, (int *)&tmp,
             lock->rw_lock);
         if (qp_idx == tmp)
             break;
-        CRYPTO_atomic_add64(/*WINSCP*/(uint64_t *)&lock->qp_group[qp_idx].users, (uint64_t)-1, &tmp64,
+        CRYPTO_atomic_add64(/*FORK_BUILD*/(uint64_t *)&lock->qp_group[qp_idx].users, (uint64_t)-1, &tmp64,
             lock->rw_lock);
     }
 
@@ -307,7 +307,7 @@ void ossl_rcu_read_unlock(CRYPTO_RCU_LOCK *lock)
         if (data->thread_qps[i].lock == lock) {
             data->thread_qps[i].depth--;
             if (data->thread_qps[i].depth == 0) {
-                CRYPTO_atomic_add64(/*WINSCP*/(uint64_t *)&data->thread_qps[i].qp->users,
+                CRYPTO_atomic_add64(/*FORK_BUILD*/(uint64_t *)&data->thread_qps[i].qp->users,
                     (uint64_t)-1, (uint64_t *)&ret,
                     lock->rw_lock);
                 OPENSSL_assert(ret >= 0);
@@ -397,7 +397,7 @@ void ossl_synchronize_rcu(CRYPTO_RCU_LOCK *lock)
 
     /* wait for the reader count to reach zero */
     do {
-        CRYPTO_atomic_load(/*WINSCP*/(uint64_t *)&qp->users, &count, lock->rw_lock);
+        CRYPTO_atomic_load(/*FORK_BUILD*/(uint64_t *)&qp->users, &count, lock->rw_lock);
     } while (count != (uint64_t)0);
 
     lock->next_to_retire++;
@@ -741,7 +741,7 @@ int CRYPTO_atomic_store(uint64_t *dst, uint64_t val, CRYPTO_RWLOCK *lock)
 
     return 1;
 #else
-    InterlockedExchange64(/*WINSCP*/(int64_t *)dst, val);
+    InterlockedExchange64(/*FORK_BUILD*/(int64_t *)dst, val);
     return 1;
 #endif
 }

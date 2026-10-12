@@ -41,7 +41,7 @@
 {$DEFINITIONINFO ON}  // Symbol definition information
 {$REFERENCEINFO ON}   // Symbol reference information
 
-{$IFDEF WINSCP}
+{$IFDEF FORK_BUILD}
 {$I jedi.inc} // Pull in the JCL/J-VCL shared directives
 {$ELSE}
 {$I jedi\jedi.inc} // Pull in the JCL/J-VCL shared directives

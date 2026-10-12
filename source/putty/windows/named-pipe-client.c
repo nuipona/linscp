@@ -13,7 +13,7 @@
 
 #include "security-api.h"
 
-HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system) // WINSCP
+HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system) // FORK_BUILD
 {
     HANDLE pipehandle;
     PSID usersid, pipeowner;
@@ -71,7 +71,7 @@ HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system
     }
 
     if (!EqualSid(pipeowner, usersid)) {
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         bool trusted_system = false;
         if (allow_system) {
             SID_IDENTIFIER_AUTHORITY nt_authority = { SECURITY_NT_AUTHORITY };
@@ -93,14 +93,14 @@ HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system
         }
         if (!trusted_system)
         {
-        #endif // WINSCP
+        #endif // FORK_BUILD
         CloseHandle(pipehandle);
         LocalFree(psd);
-        // The message is never shown anywhere anyway in WINSCP
+        // The message is never shown anywhere anyway in FORK_BUILD
         *err = dupprintf(
             allow_system ? "Owner of named pipe '%s' is neither us nor SYSTEM nor Administrator" : "Owner of named pipe '%s' is not us", pipename);
         return INVALID_HANDLE_VALUE;
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         }
         #endif
     }
@@ -110,10 +110,10 @@ HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system
     return pipehandle;
 }
 
-Socket *new_named_pipe_client(const char *pipename, Plug *plug, bool allow_system) // WINSCP
+Socket *new_named_pipe_client(const char *pipename, Plug *plug, bool allow_system) // FORK_BUILD
 {
     char *err = NULL;
-    HANDLE pipehandle = connect_to_named_pipe(pipename, &err, allow_system); // WINSCP
+    HANDLE pipehandle = connect_to_named_pipe(pipename, &err, allow_system); // FORK_BUILD
     if (pipehandle == INVALID_HANDLE_VALUE)
         return new_error_socket_consume_string(plug, err);
     else

@@ -1,7 +1,7 @@
 /*
  * aes.c - implementation of AES / Rijndael
  * 
- * WINSCP: Used solely for master password, until we update it to use the new PuTTY AES API
+ * FORK_BUILD: Used solely for master password, until we update it to use the new PuTTY AES API
  * 
  * AES is a flexible algorithm as regards endianness: it has no
  * inherent preference as to which way round you should form words
@@ -1026,7 +1026,7 @@ static void aes_encrypt(AESContext * ctx, word32 * block)
     ctx->encrypt(ctx, block);
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 #undef AESContext
 #include "puttyexp.h"

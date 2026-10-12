@@ -70,7 +70,7 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, wchar_t *, int)
     Application->MainFormOnTaskBar = true;
     Application->ModalPopupMode = pmAuto;
     DebugAssert(SameFont(Application->DefaultFont, std::unique_ptr<TFont>(new TFont()).get()));
-    SetEnvironmentVariable(L"WINSCP_PATH",
+    SetEnvironmentVariable(L"LINUXSCP_PATH",
       ExcludeTrailingBackslash(ExtractFilePath(Application->ExeName)).c_str());
     CoreInitialize();
     ApplicationLog->AddStartupInfo(); // Needs Configuration

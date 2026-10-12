@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Runtime.InteropServices;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     public enum ProgressOperation { Transfer }
 

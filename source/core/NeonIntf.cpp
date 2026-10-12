@@ -402,7 +402,7 @@ void ne_debug(void * Context, int Channel, const char * Format, ...)
     DoLog = (Configuration->ActualLogProtocol >= 0);
   }
   else if (FLAGSET(Channel, NE_DBG_XML) ||
-           FLAGSET(Channel, NE_DBG_WINSCP_HTTP_DETAIL))
+           FLAGSET(Channel, NE_DBG_FORK_HTTP_DETAIL))
   {
     DoLog = (Configuration->ActualLogProtocol >= 1);
   }

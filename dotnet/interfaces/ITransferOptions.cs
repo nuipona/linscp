@@ -1,4 +1,4 @@
-﻿namespace WinSCP
+﻿namespace LinuxSCP
 {
     public interface ITransferOptions
     {

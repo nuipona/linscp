@@ -16,7 +16,7 @@ static ChanopenResult chan_open_x11(
     struct ssh2_connection_state *s, SshChannel *sc,
     ptrlen peeraddr, int peerport)
 {
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     PacketProtocolLayer *ppl = &s->ppl; /* for ppl_logevent */
     char *peeraddr_str;
     Channel *ch;
@@ -112,7 +112,7 @@ static ChanopenResult chan_open_auth_agent(
         portfwd_raw_setup(ch, skt, sc);
         CHANOPEN_RETURN_SUCCESS(ch);
     } else {
-        struct callback_set *callback_set = get_callback_set(plug); // WINSCP
+        struct callback_set *callback_set = get_callback_set(plug); // FORK_BUILD
         portfwd_raw_free(ch);
         /*
          * Otherwise, fall back to the old-fashioned system of parsing the

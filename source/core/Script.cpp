@@ -2585,7 +2585,7 @@ void __fastcall TManagementScript::MaskPasswordInCommandLine(UnicodeString & Com
   {
     Options.Add(Param);
 
-    // "Param 1" is the "winscp.exe" or "open"
+    // "Param 1" is the "linuxscp.exe" or "open"
     if ((Options.ParamCount == 2) && Url.IsEmpty() && !SubCommands)
     {
       Url = Param;

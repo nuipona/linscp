@@ -73,12 +73,12 @@ static char *start_subprocess_handle_socket(
     CloseHandle(pi.hThread);
 
     if (waiter)
-        #ifndef WINSCP
+        #ifndef FORK_BUILD
         *waiter = subproc_waiter_from_hprocess(pi.hProcess);
         #else
         assert(false);
         #endif
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     else
     #endif
         CloseHandle(pi.hProcess);

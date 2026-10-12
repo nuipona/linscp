@@ -59,7 +59,7 @@
 
 int ne_debug_mask = 0;
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 void * ne_debug_context = NULL;
 
@@ -90,7 +90,7 @@ void ne_debug(int ch, const char *template, ...)
 	fflush(ne_debug_stream);
 }
 
-#endif /* WINSCP */
+#endif /* FORK_BUILD */
 
 #define NE_STRINGIFY(x) # x
 #define NE_EXPAT_VER(x,y,z) NE_STRINGIFY(x) "." NE_STRINGIFY(y) "." NE_STRINGIFY(z)

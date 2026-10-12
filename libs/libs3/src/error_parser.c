@@ -49,7 +49,7 @@ static S3Status errorXmlCallback(const char *elementPath, const char *data,
     if (!strcmp(elementPath, "Error")) {
         // Ignore, this is the Error element itself, we only care about subs
     }
-    // WINSCP: ErrorResponse is for STS
+    // FORK_BUILD: ErrorResponse is for STS
     else if (!strcmp(elementPath, "Error/Code") || !strcmp(elementPath, "ErrorResponse/Error/Code")) {
         string_buffer_append(errorParser->code, data, dataLen, fit);
     }
@@ -138,7 +138,7 @@ void error_parser_initialize(ErrorParser *errorParser)
 }
 
 
-S3Status error_parser_add(ErrorParser *errorParser, const /*WINSCP (const)*/ char *buffer,
+S3Status error_parser_add(ErrorParser *errorParser, const /*FORK_BUILD (const)*/ char *buffer,
                           int bufferSize)
 {
     if (!errorParser->errorXmlParserInitialized) {
@@ -245,7 +245,7 @@ void error_parser_convert_status(ErrorParser *errorParser, S3Status *status)
     HANDLE_CODE(UnresolvableGrantByEmailAddress);
     HANDLE_CODE(UserKeyMustBeSpecified);
     HANDLE_CODE(QuotaExceeded);
-    HANDLE_CODE(AuthorizationHeaderMalformed); // WINSCP
+    HANDLE_CODE(AuthorizationHeaderMalformed); // FORK_BUILD
     *status = S3StatusErrorUnknown;
 
  code_set:

@@ -117,7 +117,7 @@ static void initialise_ecurve(
     curve->e.G_order = mp_copy(G_order);
 }
 
-#define WINSCP_CURVE_CLEANUP(TYPE) \
+#define FORK_CURVE_CLEANUP(TYPE) \
     if (ec_curve_cleanup) \
     { \
         if (initialised) finalize_##TYPE##curve(&curve); \
@@ -130,7 +130,7 @@ static struct ec_curve *ec_p256(void)
     static struct ec_curve curve = { 0 };
     static bool initialised = false;
 
-    WINSCP_CURVE_CLEANUP(w);
+    FORK_CURVE_CLEANUP(w);
 
     if (!initialised) {
         mp_int *p = MP_LITERAL(0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff);
@@ -163,7 +163,7 @@ static struct ec_curve *ec_p384(void)
     static struct ec_curve curve = { 0 };
     static bool initialised = false;
 
-    WINSCP_CURVE_CLEANUP(w);
+    FORK_CURVE_CLEANUP(w);
 
     if (!initialised) {
         mp_int *p = MP_LITERAL(0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff);
@@ -196,7 +196,7 @@ static struct ec_curve *ec_p521(void)
     static struct ec_curve curve = { 0 };
     static bool initialised = false;
 
-    WINSCP_CURVE_CLEANUP(w);
+    FORK_CURVE_CLEANUP(w);
 
     if (!initialised) {
         mp_int *p = MP_LITERAL(0x01ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff);
@@ -229,7 +229,7 @@ static struct ec_curve *ec_curve25519(void)
     static struct ec_curve curve = { 0 };
     static bool initialised = false;
 
-    WINSCP_CURVE_CLEANUP(m);
+    FORK_CURVE_CLEANUP(m);
 
     if (!initialised) {
         mp_int *p = MP_LITERAL(0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed);
@@ -259,7 +259,7 @@ static struct ec_curve *ec_curve448(void)
     static struct ec_curve curve = { 0 };
     static bool initialised = false;
 
-    WINSCP_CURVE_CLEANUP(m);
+    FORK_CURVE_CLEANUP(m);
 
     if (!initialised) {
         mp_int *p = MP_LITERAL(0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffffffffffffffffffffffffffffffffffffffffffffffffffff);
@@ -289,7 +289,7 @@ static struct ec_curve *ec_ed25519(void)
     static struct ec_curve curve = { 0 };
     static bool initialised = false;
 
-    WINSCP_CURVE_CLEANUP(e);
+    FORK_CURVE_CLEANUP(e);
 
     if (!initialised) {
         mp_int *p = MP_LITERAL(0x7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed);

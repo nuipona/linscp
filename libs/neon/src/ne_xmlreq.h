@@ -24,7 +24,7 @@
 
 #include "ne_request.h"
 #include "ne_xml.h"
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #include "ne_basic.h"
 #endif
 
@@ -49,7 +49,7 @@ int ne_xml_parse_response(ne_request *req, ne_xml_parser *parser);
  * NE_ERROR is returned. */
 int ne_xml_dispatch_request(ne_request *req, ne_xml_parser *parser);
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 int media_type_is_xml(const ne_content_type *ctype);
 #endif
 

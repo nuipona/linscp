@@ -3049,7 +3049,7 @@ object Glyphs192Module: TGlyphs192Module
       end
       item
         Background = clWindow
-        Name = 'Open WinSCP webpage'
+        Name = 'Open LinuxSCP webpage'
         PngImage.Data = {
           89504E470D0A1A0A0000000D4948445200000020000000200806000000737A7A
           F4000000097048597300000EC400000EC401952B0E1B000005C969545874584D

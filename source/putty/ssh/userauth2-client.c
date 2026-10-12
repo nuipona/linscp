@@ -33,8 +33,8 @@ struct ssh2_userauth_state {
     int port;
     char *default_username;
     bool try_ki_auth, try_gssapi_auth, try_gssapi_kex_auth, gssapi_fwd;
-    char *loghost; // WINSCP
-    bool change_password; // WINSCP
+    char *loghost; // FORK_BUILD
+    bool change_password; // FORK_BUILD
 
     ptrlen session_id;
     enum {
@@ -106,7 +106,7 @@ struct ssh2_userauth_state {
     bool ki_scc_initialised;
     bool ki_printed_header;
 
-    Seat *seat; // WINSCP
+    Seat *seat; // FORK_BUILD
 
     PacketProtocolLayer ppl;
 };
@@ -162,7 +162,7 @@ PacketProtocolLayer *ssh2_userauth_new(
     bool try_ki_auth, bool try_gssapi_auth, bool try_gssapi_kex_auth,
     bool gssapi_fwd, struct ssh_connection_shared_gss_state *shgss,
     const char *authplugin_cmd,
-    const char * loghost, bool change_password, Seat *seat) // WINSCP
+    const char * loghost, bool change_password, Seat *seat) // FORK_BUILD
 {
     struct ssh2_userauth_state *s = snew(struct ssh2_userauth_state);
     memset(s, 0, sizeof(*s));
@@ -187,7 +187,7 @@ PacketProtocolLayer *ssh2_userauth_new(
     s->shgss = shgss;
     s->last_methods_string = strbuf_new();
     s->is_trivial_auth = true;
-    s->loghost = dupstr(loghost); // WINSCP
+    s->loghost = dupstr(loghost); // FORK_BUILD
     s->change_password = change_password;
     bufchain_init(&s->banner);
     bufchain_sink_init(&s->banner_bs, &s->banner);
@@ -482,7 +482,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
      */
     if (!filename_is_null(s->keyfile)) {
         int keytype;
-        ppl_logevent(WINSCP_BOM "Reading key file \"%s\"",
+        ppl_logevent(FORK_BOM "Reading key file \"%s\"",
                      filename_to_str(s->keyfile));
         keytype = key_type(s->keyfile);
         if (keytype == SSH_KEYTYPE_SSH2 ||
@@ -499,7 +499,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 s->privatekey_encrypted = ppk_encrypted_f(s->keyfile, NULL);
             } else {
                 ppl_logevent("Unable to load key (%s)", error);
-                ppl_printf(WINSCP_BOM "Unable to load key file \"%s\" (%s)\r\n",
+                ppl_printf(FORK_BOM "Unable to load key file \"%s\" (%s)\r\n",
                            filename_to_str(s->keyfile), error);
                 strbuf_free(s->publickey_blob);
                 s->publickey_blob = NULL;
@@ -507,7 +507,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
         } else {
             ppl_logevent("Unable to use this key file (%s)",
                          key_type_to_str(keytype));
-            ppl_printf(WINSCP_BOM "Unable to use key file \"%s\" (%s)\r\n",
+            ppl_printf(FORK_BOM "Unable to use key file \"%s\" (%s)\r\n",
                        filename_to_str(s->keyfile),
                        key_type_to_str(keytype));
             s->publickey_blob = NULL;
@@ -523,7 +523,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
         char *algname = NULL;
         char *comment = NULL;
 
-        ppl_logevent(WINSCP_BOM "Reading certificate file \"%s\"",
+        ppl_logevent(FORK_BOM "Reading certificate file \"%s\"",
                      filename_to_str(s->detached_cert_file));
         int keytype = key_type(s->detached_cert_file);
         if (!(keytype == SSH_KEYTYPE_SSH2_PUBLIC_RFC4716 ||
@@ -567,7 +567,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
             ppl_logevent("Unable to use this certificate file (%s)",
                          cert_error);
             ppl_printf(
-                WINSCP_BOM "Unable to use certificate file \"%s\" (%s)\r\n",
+                FORK_BOM "Unable to use certificate file \"%s\" (%s)\r\n",
                 filename_to_str(s->detached_cert_file), cert_error);
             sfree(cert_error);
         }
@@ -583,7 +583,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
      * key configured, filter out all others).
      */
     if (s->tryagent && agent_exists()) {
-        ppl_logevent("Agent is running. Requesting keys."); // WINSCP
+        ppl_logevent("Agent is running. Requesting keys."); // FORK_BUILD
 
         /* Request the keys held by the agent. */
         {
@@ -607,7 +607,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 get_string(s->asrc);   /* blob */
                 get_string(s->asrc);   /* comment */
                 if (get_err(s->asrc)) {
-                    ppl_logevent("Agent's response was truncated"); // WINSCP
+                    ppl_logevent("Agent's response was truncated"); // FORK_BUILD
                     goto done_agent_query;
                 }
             }
@@ -629,7 +629,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     ptrlen_from_strbuf(s->agent_keys[i].blob));
             }
 
-            ppl_logevent("Agent has %"SIZEu" SSH-2 keys", nkeys); // WINSCP
+            ppl_logevent("Agent has %"SIZEu" SSH-2 keys", nkeys); // FORK_BUILD
 
             if (s->publickey_blob) {
                 /*
@@ -647,12 +647,12 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 }
 
                 if (i < nkeys) {
-                    ppl_logevent("Agent key #%"SIZEu" matches " // WINSCP
+                    ppl_logevent("Agent key #%"SIZEu" matches " // FORK_BUILD
                                  "configured key file", i);
                     s->agent_key_index = i;
                     s->agent_key_limit = i+1;
                 } else {
-                    ppl_logevent("Configured key file not in Agent"); // WINSCP
+                    ppl_logevent("Configured key file not in Agent"); // FORK_BUILD
                     s->agent_key_index = 0;
                     s->agent_key_limit = 0;
                 }
@@ -664,7 +664,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 s->agent_key_limit = nkeys;
             }
         } else {
-            ppl_logevent("Failed to get reply from Agent"); // WINSCP
+            ppl_logevent("Failed to get reply from Agent"); // FORK_BUILD
         }
       done_agent_query:;
     }
@@ -802,7 +802,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
             s->cur_prompt = NULL;
         } else {
             if (seat_verbose(s->ppl.seat) || seat_interactive(s->ppl.seat))
-                ppl_printf(WINSCP_BOM "Using username \"%s\".\r\n", s->username);
+                ppl_printf(FORK_BOM "Using username \"%s\".\r\n", s->username);
         }
         s->got_username = true;
 
@@ -952,7 +952,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                  */
                 strbuf_clear(s->last_methods_string);
                 put_datapl(s->last_methods_string, methods);
-#ifdef WINSCP
+#ifdef FORK_BUILD
                 ppl_logevent("Server offered these authentication methods: %s", s->last_methods_string->s);
 #endif
 
@@ -1035,7 +1035,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
                 s->ppl.bpp->pls->actx = SSH2_PKTCTX_PUBLICKEY;
 
-                ppl_logevent("Trying Agent key #%"SIZEu, s->agent_key_index); // WINSCP
+                ppl_logevent("Trying Agent key #%"SIZEu, s->agent_key_index); // FORK_BUILD
 
                 /* See if server will accept it */
                 s->pktout = ssh_bpp_new_pktout(
@@ -1108,7 +1108,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         get_uint32(src); /* skip length field */
                         if (get_byte(src) == SSH2_AGENT_SIGN_RESPONSE &&
                             (sigblob = get_string(src), !get_err(src))) {
-                            ppl_logevent("Sending Agent's response"); // WINSCP
+                            ppl_logevent("Sending Agent's response"); // FORK_BUILD
                             ssh2_userauth_add_sigblob(
                                 s, s->pktout,
                                 ptrlen_from_strbuf(
@@ -1118,8 +1118,8 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                             s->type = AUTH_TYPE_PUBLICKEY;
                             s->is_trivial_auth = false;
                         } else {
-                            ppl_logevent("Agent refused signing request"); // WINSCP
-                            ppl_printf("Agent failed to " // WINSCP
+                            ppl_logevent("Agent refused signing request"); // FORK_BUILD
+                            ppl_printf("Agent failed to " // FORK_BUILD
                                        "provide a signature\r\n");
                             s->suppress_wait_for_response_packet = true;
                             ssh_free_pktout(s->pktout);
@@ -1389,15 +1389,15 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
                 /* Import server name if not cached from KEX */
                 if (s->shgss->srv_name == GSS_C_NO_NAME) {
-                    // WINSCP
+                    // FORK_BUILD
                     char * fullhostname = s->fullhostname;
                     if (s->loghost[0] != '\0')
                     {
                         fullhostname = s->loghost;
                     }
-                    // /WINSCP
+                    // /FORK_BUILD
                     s->gss_stat = s->shgss->lib->import_name(
-                        s->shgss->lib, fullhostname, &s->shgss->srv_name); // WINSCP
+                        s->shgss->lib, fullhostname, &s->shgss->srv_name); // FORK_BUILD
                     if (s->gss_stat != SSH_GSS_OK) {
                         if (s->gss_stat == SSH_GSS_BAD_HOST_NAME)
                             ppl_logevent("GSSAPI import name failed -"
@@ -1819,7 +1819,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
 
                 s->ppl.bpp->pls->actx = SSH2_PKTCTX_PASSWORD;
 
-                // WINSCP
+                // FORK_BUILD
                 if (s->change_password)
                 {
                     s->password = dupstr("");
@@ -1828,7 +1828,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                 else
                 {
                 // no indentation to ease merges
-                // /WINSCP
+                // /FORK_BUILD
                 s->cur_prompt = ssh_ppl_new_prompts(&s->ppl);
                 s->cur_prompt->utf8 = true;
                 s->cur_prompt->to_server = true;
@@ -1893,11 +1893,11 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                  * request.
                  */
                 crMaybeWaitUntilV((pktin = ssh2_userauth_pop(s)) != NULL);
-                } // WINSCP
+                } // FORK_BUILD
                 changereq_first_time = true;
 
                 while ((pktin->type == SSH2_MSG_USERAUTH_PASSWD_CHANGEREQ) ||
-                       s->change_password) { // WINSCP
+                       s->change_password) { // FORK_BUILD
 
                     /*
                      * We're being asked for a new password
@@ -1908,7 +1908,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                     bool got_new = false; /* not live over crReturn */
                     ptrlen prompt;  /* not live over crReturn */
 
-                    if (!s->change_password) // WINSCP
+                    if (!s->change_password) // FORK_BUILD
                     {
                         const char *msg;
                         if (changereq_first_time)
@@ -1919,7 +1919,7 @@ static void ssh2_userauth_process_queue(PacketProtocolLayer *ppl)
                         ppl_printf("%s\r\n", msg);
                     }
 
-                    s->change_password = false; // WINSCP
+                    s->change_password = false; // FORK_BUILD
 
                     prompt = get_string(pktin);
 
@@ -2115,7 +2115,7 @@ static void ssh2_userauth_print_banner(struct ssh2_userauth_state *s)
 
         bool mid_line = false;
         while (bufchain_size(&s->banner) > 0) {
-            // WINSCP: consume banner buffer before calling seat_banner_pl.
+            // FORK_BUILD: consume banner buffer before calling seat_banner_pl.
             // As we might get disconnected, while the banner is displaying,
             // and ssh_remote_error calls here via ssh2_userauth_final_output,
             // so we might get into loop
@@ -2219,7 +2219,7 @@ static bool ssh2_userauth_ki_setup_prompts(
 
     sb = strbuf_new();
     if (name.len) {
-        put_datapl(sb, PTRLEN_LITERAL("SSH server: ")); // WINSCP
+        put_datapl(sb, PTRLEN_LITERAL("SSH server: ")); // FORK_BUILD
         if (s->ki_scc) {
             stripctrl_retarget(s->ki_scc, BinarySink_UPCAST(sb));
             put_datapl(s->ki_scc, name);
@@ -2302,7 +2302,7 @@ static void ssh2_userauth_agent_query(
     s->agent_response_to_free = NULL;
 
     s->auth_agent_query = agent_query(req, &response, &response_len,
-                                      ssh2_userauth_agent_callback, s, get_seat_callback_set(s->seat)); // WINSCP
+                                      ssh2_userauth_agent_callback, s, get_seat_callback_set(s->seat)); // FORK_BUILD
     if (!s->auth_agent_query)
         ssh2_userauth_agent_callback(s, response, response_len);
 }
@@ -2419,7 +2419,7 @@ static void ssh2_userauth_add_alg_and_publickey(
          * SHA-512 name rsa-sha2-512-cert-v01@... .)
          */
         if (verbose) {
-            ppl_logevent(WINSCP_BOM "Sending public key with certificate from \"%s\"",
+            ppl_logevent(FORK_BOM "Sending public key with certificate from \"%s\"",
                          filename_to_str(s->detached_cert_file));
         }
         {
@@ -2454,7 +2454,7 @@ static void ssh2_userauth_add_alg_and_publickey(
          * avoid verbosely logging once for the offer and once for the
          * real auth attempt.) */
 	if (verbose) {
-            ppl_logevent(WINSCP_BOM "Not substituting certificate \"%s\" for public "
+            ppl_logevent(FORK_BOM "Not substituting certificate \"%s\" for public "
                          "key: %s", filename_to_str(s->detached_cert_file),
                          fail_reason->s);
             if (s->publickey_blob) {
@@ -2464,7 +2464,7 @@ static void ssh2_userauth_add_alg_and_publickey(
                  * send the certificate, so we should make a loud error
                  * message about it as well as just commenting in the
                  * Event Log. */
-                ppl_printf(WINSCP_BOM "Unable to use certificate \"%s\" with public "
+                ppl_printf(FORK_BOM "Unable to use certificate \"%s\" with public "
                            "key \"%s\": %s\r\n",
                            filename_to_str(s->detached_cert_file),
                            filename_to_str(s->keyfile),

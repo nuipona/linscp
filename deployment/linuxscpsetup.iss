@@ -1,12 +1,12 @@
-#define AppId "winscp3"
-#define AppMutex "WinSCP"
-#define ParentRegistryKey "Software\Martin Prikryl"
-#define RegistryKey ParentRegistryKey+"\WinSCP 2"
+#define AppId "linuxscp3"
+#define AppMutex "LinuxSCP"
+#define ParentRegistryKey "Software\nuipona"
+#define RegistryKey ParentRegistryKey+"\LinuxSCP 2"
 #define DefaultLang "en"
-#define WebRoot "https://winscp.net/"
-#define WebForum WebRoot+"forum/"
-#define WebDocumentation WebRoot+"eng/docs/"
-#define WebReport "https://winscp.net/install.php"
+#define WebRoot "https://github.com/nuipona/linuxscp/"
+#define WebForum WebRoot+"issues/"
+#define WebDocumentation WebRoot+"wiki/"
+#define WebReport ""
 #define Year 2026
 #define EnglishLang "English"
 #define SetupTypeData "SetupType"
@@ -54,16 +54,16 @@
 #define TranslationDir "translations"
 #define OutputDir "."
 
-#define TranslationFileMask "WinSCP.???"
-#define MainFileName "WinSCP.exe"
+#define TranslationFileMask "LinuxSCP.???"
+#define MainFileName "LinuxSCP.exe"
 #define MainFileSource BinariesDir+"\"+MainFileName
 #define ShellExtFileName "DragExt.dll"
 #define ShellExtFileSource BinariesDir+"\"+ShellExtFileName
 #define ShellExt64FileName "DragExt64.dll"
 #define ShellExt64FileSource BinariesDir64+"\"+ShellExt64FileName
-#define ConsoleFileSource BinariesDir+"\WinSCP.com"
-#define MapFileSource BinariesDir+"\WinSCP.map"
-#define AssemblyFileSource BinariesDirAssembly+"\WinSCPnet.dll"
+#define ConsoleFileSource BinariesDir+"\LinuxSCP.com"
+#define MapFileSource BinariesDir+"\LinuxSCP.map"
+#define AssemblyFileSource BinariesDirAssembly+"\LinuxSCPnet.dll"
 
 #ifdef Donations
 #define PayPalCardFileBase "PayPalCard"
@@ -79,37 +79,37 @@
 
 #ifndef BaseFilename
   #define FTag VersionOnly+(Status != "" ? "."+Status : "")
-  #define BaseFilename "WinSCP-" + FTag + "-Setup"
+  #define BaseFilename "LinuxSCP-" + FTag + "-Setup"
 #endif
 
-#define WebArguments "ver=" +VersionOnly + "&lang={language}&utm_source=winscp&utm_medium=setup&utm_campaign=" + VersionOnly
-#define WebGettingStarted WebRoot + "eng/installed.php?" + WebArguments + "&prevver="
+#define WebArguments "ver=" +VersionOnly + "&lang={language}&utm_source=linuxscp&utm_medium=setup&utm_campaign=" + VersionOnly
+#define WebGettingStarted WebRoot + "wiki/Getting-started?" + WebArguments + "&prevver="
 
-#define MessagesPath(L) TranslationDir + "\" + "WinSCP." + L + ".isl"
+#define MessagesPath(L) TranslationDir + "\" + "LinuxSCP." + L + ".isl"
 
 #define ExplorerFileBase "Explorer"
 #define CommanderFileBase "Commander"
 
 [Setup]
 AppId={#AppId}
-AppName=WinSCP
-AppPublisher=Martin Prikryl
+AppName=LinuxSCP
+AppPublisher=nuipona
 AppPublisherURL={#WebRoot}
 AppSupportURL={#WebForum}
 AppUpdatesURL={#WebRoot}eng/download.php
-VersionInfoCompany=Martin Prikryl
-VersionInfoDescription=Setup for WinSCP {#Version} (SFTP, FTP, WebDAV and SCP client)
+VersionInfoCompany=nuipona
+VersionInfoDescription=LinuxSCP {#Version} Setup (file transfer client)
 VersionInfoVersion={#Major}.{#Minor}.{#Rev}.{#Build}
 VersionInfoTextVersion={#Version}
 VersionInfoCopyright=(c) 2000-{#Year} Martin Prikryl
 VersionInfoOriginalFileName={#BaseFilename}.exe
-DefaultDirName={autopf}\WinSCP
+DefaultDirName={autopf}\LinuxSCP
 LicenseFile=license.setup.txt
-UninstallDisplayIcon={app}\WinSCP.exe
+UninstallDisplayIcon={app}\LinuxSCP.exe
 OutputDir={#OutputDir}
 DisableStartupPrompt=yes
 AppVersion={#Version}
-AppVerName=WinSCP {#Version}
+AppVerName=LinuxSCP {#Version}
 OutputBaseFilename={#BaseFilename}
 SolidCompression=yes
 #ifdef ImagesDir
@@ -124,13 +124,13 @@ PrivilegesRequiredOverridesAllowed=commandline dialog
 ShowLanguageDialog=auto
 UsePreviousLanguage=no
 DisableProgramGroupPage=yes
-SetupIconFile=winscpsetup.ico
+SetupIconFile=linuxscpsetup.ico
 DisableDirPage=no
 WizardStyle=modern dynamic
 CloseApplications=yes
 UsedUserAreasWarning=no
 #ifdef Sign
-SignTool=sign $f "WinSCP Installer" https://winscp.net/eng/docs/installation
+SignTool=sign $f "LinuxSCP Installer" https://github.com/nuipona/linuxscp/wiki/Installation
 #endif
 
 [Languages]
@@ -217,13 +217,13 @@ Name: searchpath; Description: {cm:AddSearchPath}; \
   Flags: unchecked; Check: IsAdminInstallMode
 
 [Icons]
-Name: "{autoprograms}\WinSCP"; Filename: "{app}\WinSCP.exe"; Components: main; \
+Name: "{autoprograms}\LinuxSCP"; Filename: "{app}\LinuxSCP.exe"; Components: main; \
   Comment: "{cm:ProgramComment2}"; Check: not CmdLineParamExists('/NoStartIcon');
 ; This is created when desktopicon task is selected
-Name: "{autodesktop}\WinSCP"; Filename: "{app}\WinSCP.exe"; \
+Name: "{autodesktop}\LinuxSCP"; Filename: "{app}\LinuxSCP.exe"; \
   Tasks: desktopicon; Comment: "{cm:ProgramComment2}"
 ; This is created when sendtohook task is selected
-Name: "{usersendto}\{cm:SendToHookNew}"; Filename: "{app}\WinSCP.exe"; \
+Name: "{usersendto}\{cm:SendToHookNew}"; Filename: "{app}\LinuxSCP.exe"; \
   Parameters: "/upload"; Tasks: sendtohook
 
 [InstallDelete]
@@ -232,21 +232,21 @@ Type: files; Name: "{app}\PuTTY\putty.hlp"
 ; Remove pre-524 licence file (without .txt extension)
 Type: files; Name: "{app}\license"
 ; Remove pre-520 start menu folders
-Type: filesandordirs; Name: "{commonprograms}\WinSCP"
-Type: filesandordirs; Name: "{userprograms}\WinSCP"; Check: HasUserPrograms
+Type: filesandordirs; Name: "{commonprograms}\LinuxSCP"
+Type: filesandordirs; Name: "{userprograms}\LinuxSCP"; Check: HasUserPrograms
 
 [Run]
-Filename: "{app}\WinSCP.exe"; Parameters: "{code:GetTaskCmdLine|RegisterForDefaultProtocols}"; \
+Filename: "{app}\LinuxSCP.exe"; Parameters: "{code:GetTaskCmdLine|RegisterForDefaultProtocols}"; \
   StatusMsg: {cm:RegisteringAsUrlHandlers}; Tasks: urlhandler
-Filename: "{app}\WinSCP.exe"; Parameters: "{code:GetTaskCmdLine|AddSearchPath}"; \
+Filename: "{app}\LinuxSCP.exe"; Parameters: "{code:GetTaskCmdLine|AddSearchPath}"; \
   StatusMsg: {cm:AddingSearchPath}; Tasks: searchpath
-Filename: "{app}\WinSCP.exe"; Parameters: "{code:GetTaskCmdLine|ImportSitesIfAny}"; \
+Filename: "{app}\LinuxSCP.exe"; Parameters: "{code:GetTaskCmdLine|ImportSitesIfAny}"; \
   StatusMsg: {cm:ImportSites}; Flags: skipifsilent
 
 [UninstallDelete]
 ; These additional files are created by application
-Type: files; Name: "{app}\WinSCP.ini"
-Type: files; Name: "{app}\WinSCP.cgl"
+Type: files; Name: "{app}\LinuxSCP.ini"
+Type: files; Name: "{app}\LinuxSCP.cgl"
 
 [Files]
 #ifdef ImagesDir
@@ -337,7 +337,7 @@ Root: HKLM; SubKey: "{#RegistryKey}"; \
   #if Languages[LangI*4+3] >= InclusionThreshold
 
 [Files]
-Source: "{#TranslationDir}\WinSCP.{#Languages[LangI*4]}"; DestDir: "{app}\Translations"; \
+Source: "{#TranslationDir}\LinuxSCP.{#Languages[LangI*4]}"; DestDir: "{app}\Translations"; \
   Components: transl; Flags: ignoreversion
 
   #endif
@@ -354,18 +354,18 @@ Source: "{#TranslationDir}\WinSCP.{#Languages[LangI*4]}"; DestDir: "{app}\Transl
   #define P Pos('-', AllTranslationsBuf)
   #define Lang Copy(AllTranslationsBuf, 1, P - 1)
   #expr AllTranslationsBuf = Copy(AllTranslationsBuf, P + 1)
-Type: files; Name: "{app}\WinSCP.{#Lang}"
+Type: files; Name: "{app}\LinuxSCP.{#Lang}"
 #endsub
 
 #for { 0; Len(AllTranslationsBuf) > 0; 0 } DeleteRootTranslation
 
 [UninstallRun]
 ; Make sure no later uninstall task recreate the configuration
-Filename: "{app}\WinSCP.exe"; Parameters: "{code:GetTaskCmdLine|UninstallCleanup}"; \
+Filename: "{app}\LinuxSCP.exe"; Parameters: "{code:GetTaskCmdLine|UninstallCleanup}"; \
   RunOnceId: "UninstallCleanup"
-Filename: "{app}\WinSCP.exe"; Parameters: "{code:GetTaskCmdLine|RemoveSearchPath}"; \
+Filename: "{app}\LinuxSCP.exe"; Parameters: "{code:GetTaskCmdLine|RemoveSearchPath}"; \
   RunOnceId: "RemoveSearchPath"
-Filename: "{app}\WinSCP.exe"; Parameters: "{code:GetTaskCmdLine|UnregisterForProtocols}"; \
+Filename: "{app}\LinuxSCP.exe"; Parameters: "{code:GetTaskCmdLine|UnregisterForProtocols}"; \
   RunOnceId: "UnregisterForProtocols"
 
 [Code]
@@ -857,7 +857,7 @@ begin
   while CheckForMutexes('{#AppMutex}') do
   begin
     if MsgBox(
-         FmtMessage(SetupMessage(msgSetupAppRunningError), ['WinSCP']),
+         FmtMessage(SetupMessage(msgSetupAppRunningError), ['LinuxSCP']),
          mbError, MB_OKCANCEL) <> IDOK then
     begin
       Abort;
@@ -1320,7 +1320,7 @@ begin
         WizardForm.NoRadio.Checked := True;
 
         S := SetupMessage(msgFinishedLabel);
-        StringChange(S, '[name]', 'WinSCP');
+        StringChange(S, '[name]', 'LinuxSCP');
         WizardForm.FinishedLabel.Caption :=
           S + NewLine + NewLine +
           // The additional new line is a padding for the "launch check box",
@@ -1455,6 +1455,14 @@ var
   ReportUrl: string;
   ReportData: string;
 begin
+  // This fork does not report installations anywhere. Set WebReport in the
+  // header of this script to your own endpoint to re-enable the block below.
+  if '{#WebReport}' = '' then
+  begin
+    Log('Installation reporting disabled (no report endpoint configured)');
+    Exit;
+  end;
+
   // cannot send report, unless user already accepted license
   // (with privacy policy)
   if LicenseAccepted then
@@ -1625,7 +1633,7 @@ begin
       if not IsAdminInstallMode then
         UsageData := UsageData + 'InstallationsNonElevated+,';
 
-      // have to do this before running WinSCP GUI instance below,
+      // have to do this before running LinuxSCP GUI instance below,
       // otherwise it loads the empty/previous counters and overwrites our changes,
       // when it's closed
       Log('Recording installer usage statistics: ' + UsageData);
@@ -1635,7 +1643,7 @@ begin
 
       if AutomaticUpdate then
       begin
-        Log('Launching WinSCP after automatic update');
+        Log('Launching LinuxSCP after automatic update');
         ExecApp('', SW_SHOWNORMAL, ewNoWait, 'AutomaticUpdateRun');
 
         if CmdLineParamExists('/OpenGettingStarted') then
@@ -1655,7 +1663,7 @@ begin
         begin
           if OpenGettingStarted then
           begin
-            Log('Will launch WinSCP minimized');
+            Log('Will launch LinuxSCP minimized');
             ShowCmd := SW_SHOWMINIMIZED
           end
             else
@@ -1663,7 +1671,7 @@ begin
             ShowCmd := SW_SHOWNORMAL;
           end;
 
-          Log('Launching WinSCP');
+          Log('Launching LinuxSCP');
           ExecApp('', ShowCmd, ewNoWait, 'Run');
         end;
       end;
@@ -2055,7 +2063,7 @@ begin
   // let application know that we are running silent uninstall,
   // this turns UninstallCleanup to noop
   if UninstallSilent then
-    CreateMutex('WinSCPSilentUninstall');
+    CreateMutex('LinuxSCPSilentUninstall');
   Result := True;
 end;
 

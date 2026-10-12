@@ -97,7 +97,7 @@ typedef struct {
  * parsed->path is guaranteed to be non-NULL. */
 int ne_uri_parse(const char *uri, ne_uri *parsed)
     ne_attribute((nonnull));
-int ne_uri_parse_ex(const char *uri, ne_uri *parsed, int liberal); // WINSCP
+int ne_uri_parse_ex(const char *uri, ne_uri *parsed, int liberal); // FORK_BUILD
 
 /* Turns a URI structure back into a string.  The returned string is
  * malloc-allocated, and must be freed by the caller. */

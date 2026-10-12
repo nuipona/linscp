@@ -683,7 +683,7 @@ static key_components *opensshcert_components(ssh_key *key)
 
 static SeatDialogText *opensshcert_cert_info(ssh_key *key)
 {
-#ifdef WINSCP
+#ifdef FORK_BUILD
     assert(false);
     return NULL;
 #else

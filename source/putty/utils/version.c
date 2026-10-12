@@ -13,7 +13,7 @@
 
 #include "version.h"
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 const char ver[] = TEXTVER;
 const char sshver[] = SSHVER;

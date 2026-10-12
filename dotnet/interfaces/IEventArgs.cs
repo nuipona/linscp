@@ -1,6 +1,6 @@
 ﻿using System;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     public interface ITransferEventArgs
     {

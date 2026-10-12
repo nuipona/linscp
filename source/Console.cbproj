@@ -49,7 +49,7 @@
         <ProjectType>CppConsoleApplication</ProjectType>
         <SanitizedProjectName>Console</SanitizedProjectName>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
-        <VerInfo_Keys>CompanyName=Martin Prikryl;FileDescription=Console interface for WinSCP$(DescPlaform);FileVersion=6.4.0.0;InternalName=console;LegalCopyright=(c) 2000-2026 Martin Prikryl;LegalTrademarks=;OriginalFilename=winscp.com;ProductName=WinSCP;ProductVersion=6.6.5.0;ReleaseType=stable;WWW=https://winscp.net/</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=nuipona;FileDescription=Console interface for LinuxSCP$(DescPlaform);FileVersion=6.4.0.0;InternalName=console;LegalCopyright=(c) 2000-2026 Martin Prikryl;LegalTrademarks=;OriginalFilename=linuxscp.com;ProductName=LinuxSCP;ProductVersion=6.6.5.0;ReleaseType=stable;WWW=https://github.com/nuipona/linuxscp/</VerInfo_Keys>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <VerInfo_MajorVer>6</VerInfo_MajorVer>
         <VerInfo_MinorVer>4</VerInfo_MinorVer>
@@ -93,7 +93,7 @@
     </ItemGroup>
     <PropertyGroup Condition="'$(FileToCompile)'==''">
         <PostBuildEvent>if exist "$(FinalOutputDir)\Console.com" (
-copy /y "$(FinalOutputDir)\Console.com" "$(FinalOutputDir)\WinSCP.com"
+copy /y "$(FinalOutputDir)\Console.com" "$(FinalOutputDir)\LinuxSCP.com"
 ) else (
 exit 0
 )</PostBuildEvent>

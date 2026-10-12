@@ -2,12 +2,12 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 EXTERN OPENSSL_ia32cap_P
 
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 64
 $L$zero:
  DD 0,0,0,0
@@ -3717,7 +3717,7 @@ $L$8xvl_epilogue:
 
 $L$SEH_end_ChaCha20_8xvl:
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -3943,4 +3943,4 @@ DB 9,0,0,0
  DD $L$8xvl_body wrt ..imagebase,$L$8xvl_epilogue wrt ..imagebase
  DD 0xa0,0
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

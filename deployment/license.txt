@@ -1,6 +1,6 @@
   A. GNU General Public License
-  B. License of WinSCP Icon Set
-  C. Privacy Policy
+  B. Attribution and Third-party Notices
+  C. Privacy
 
 
   A. GNU GENERAL PUBLIC LICENSE
@@ -679,43 +679,38 @@ Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
 
 
-  B. License of WinSCP Icon Set
 
-Note that all images distributed in or with WinSCP application are NOT
-published under the GNU General Public License. It means that it is not
-allowed to redistribute or reuse these images or parts of them or modifications
-of them without WinSCP separately or in or with another software.
+  B. Attribution and Third-party Notices
 
-You agree that all ownership and copyright of the licensed stock icons remain
-the property of York Technologies Limited. WinSCP was granted a license to
-display this graphical media royalty-free in WinSCP software applications,
-web design, presentations, and multimedia projects that WinSCP creates and/or
-distributes.
+This program carries the copyright notices of the authors whose work it is
+built from. The GNU General Public License requires those notices to be kept
+intact, so they remain in the source files, typically as:
+
+    Copyright (c) 2000-2026 Martin Prikryl
+
+Third-party components are covered by their own licences: the SSH client under
+source/putty (MIT-style), the FTP/WebDAV/S3 libraries under libs (MIT, expat,
+OpenSSL), the .NET assembly under dotnet (MPL-2.0) and the visual components
+under source/packages (their respective licences). See the files shipped with
+each component.
+
+The names, marks and logos of those projects are the property of their owners.
+Nothing in this licence grant allows you to use them to promote or endorse
+derivatives of this program. The application name, logo, icon set and
+descriptive text of this fork are its own: the artwork in /logo is original
+work created for this project and is not licensed under the GNU General Public
+License - you may not redistribute it with another program.
 
 
-  C. WinSCP Privacy Policy
+  C. Privacy
 
-Please take time to read WinSCP Privacy policy at
-https://winscp.net/eng/docs/privacy
+This program does not collect or transmit usage statistics, and it does not
+contact any vendor server for update checks or installation reports; those
+network calls were removed from this fork. Update notifications and the
+documented help links point at this project's public repository, which you are
+free to re-point at your own endpoints in source/resource/TextsWin1.rc
+(UPDATES_URL, DOCUMENTATION_URL2 and friends) and in deployment/
+linuxscpsetup.iss (WebRoot, WebReport).
 
-WinSCP includes functionality to collect and send non-personal WinSCP
-Usage statistics and to automatically check for application updates. The only
-potentially personal information sent to WinSCP is IP addresses. Users can
-opt-out from using this functionality in the installer or anytime later
-in WinSCP Preferences. WinSCP Usage statistics help improve future versions
-of WinSCP. Once sent, usage statistics are stored for analysis (except
-IP addresses) and made available to the core WinSCP team only.
-
-Before disabling WinSCP Usage statistics, be so kind and consider that it
-plays very important role in the WinSCP development. We work very hard
-to make WinSCP reliable and useful. We also love improving WinSCP with every
-release. And last but not least, we provide WinSCP application to you
-for free and we want this to stay so! However our resources and time are
-unfortunately very limited. We want to focus our effort on improving
-the right features for you. That is why we need to learn more about how you
-use WinSCP.
-
-If you still want to disable WinSCP Usage statistics already during
-installation, you may do so using Custom installation.
-
-Thank you!
+Beyond that, the only network traffic this program generates is the file
+transfer traffic you start yourself.

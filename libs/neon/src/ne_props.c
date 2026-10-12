@@ -380,7 +380,7 @@ static int startelm(void *userdata, int parent,
                     const char *nspace, const char *name, const char **atts)
 {
     ne_propfind_handler *hdl = userdata;
-    NE_DEBUG_WINSCP_CONTEXT(hdl->sess);
+    NE_DEBUG_FORK_CONTEXT(hdl->sess);
     struct propstat *pstat = ne_207_get_current_propstat(hdl->parser207);
     struct prop *prop;
     int n;
@@ -601,7 +601,7 @@ ne_propfind_create(ne_session *sess, const char *uri, int depth)
 
     if (ne_get_session_flag(sess, NE_SESSFLAG_SHAREPOINT))
         ne_207_set_flags(ret->parser207, NE_207_MSSP_ESCAPING);
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     if (ne_get_session_flag(sess, NE_SESSFLAG_LIBERAL_ESCAPING))
         ne_207_set_flags(ret->parser207, NE_207_LIBERAL_ESCAPING);
     #endif

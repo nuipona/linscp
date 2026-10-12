@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 EXTERN OPENSSL_ia32cap_P
@@ -1692,7 +1692,7 @@ $L$dec8x_epilogue:
 
 $L$SEH_end_aesni_multi_cbc_decrypt_avx:
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -1820,4 +1820,4 @@ DB 9,0,0,0
  DD se_handler wrt ..imagebase
  DD $L$dec8x_body wrt ..imagebase,$L$dec8x_epilogue wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

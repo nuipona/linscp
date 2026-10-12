@@ -34,7 +34,7 @@ static inline bool check_availability(const struct sha256_extra *extra)
  * Macro to define a SHA-256 vtable together with its 'extra'
  * structure.
  */
-// WINSCP Restore use of impl_display, once we have HW-accelerated variant
+// FORK_BUILD Restore use of impl_display, once we have HW-accelerated variant
 #define SHA256_VTABLE(impl_c, impl_display)                             \
     static struct sha256_extra_mutable sha256_ ## impl_c ## _extra_mut; \
     static const struct sha256_extra sha256_ ## impl_c ## _extra = {    \

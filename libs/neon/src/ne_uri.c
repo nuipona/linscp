@@ -162,7 +162,7 @@ unsigned int ne_uri_defaultport(const char *scheme)
 	return 0;
 }
 
-int ne_uri_parse_ex(const char *uri, ne_uri *parsed, int liberal) // WINSCP
+int ne_uri_parse_ex(const char *uri, ne_uri *parsed, int liberal) // FORK_BUILD
 {
     const char *p, *s;
 
@@ -265,7 +265,7 @@ int ne_uri_parse_ex(const char *uri, ne_uri *parsed, int liberal) // WINSCP
     p = s;
 
     while ((uri_lookup(*p) & URI_SEGCHAR) ||
-           (liberal && // WINSCP
+           (liberal && // FORK_BUILD
             ((uri_lookup(*p) & SD) ||
             ((uri_lookup(*p) & OT) && ((unsigned char)(*p) >= (unsigned char)' ')) || // OT without control characters
             ((*p) == '[') || ((*p) == ']')))) // GD without #
@@ -312,7 +312,7 @@ int ne_uri_parse_ex(const char *uri, ne_uri *parsed, int liberal) // WINSCP
     return 0;
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 int ne_uri_parse(const char *uri, ne_uri *parsed)
 {
     return ne_uri_parse_ex(uri, parsed, 0);

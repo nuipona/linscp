@@ -3,23 +3,23 @@
 #define CustomWinConfigurationH
 //---------------------------------------------------------------------------
 #include "GUIConfiguration.h"
-#define WM_WINSCP_USER   (WM_USER + 0x2000)
-// WM_USER_STOP = WM_WINSCP_USER + 2 (in forms/Synchronize.cpp)
-// WM_INTERUPT_IDLE = WM_WINSCP_USER + 3 (in windows/ConsoleRunner.cpp)
-// WM_COMPONENT_HIDE = WM_WINSCP_USER + 4 (forms/CustomScpExplorer.cpp)
-// WM_TRAY_ICON = WM_WINSCP_USER + 5 (forms/CustomScpExplorer.cpp)
-// WM_WINSCP_USER + 6 was WM_LOG_UPDATE
-#define WM_MANAGES_CAPTION (WM_WINSCP_USER + 7)
-#define WM_WANTS_MOUSEWHEEL (WM_WINSCP_USER + 8)
-#define WM_CAN_DISPLAY_UPDATES (WM_WINSCP_USER + 9)
+#define WM_FORK_USER   (WM_USER + 0x2000)
+// WM_USER_STOP = WM_FORK_USER + 2 (in forms/Synchronize.cpp)
+// WM_INTERUPT_IDLE = WM_FORK_USER + 3 (in windows/ConsoleRunner.cpp)
+// WM_COMPONENT_HIDE = WM_FORK_USER + 4 (forms/CustomScpExplorer.cpp)
+// WM_TRAY_ICON = WM_FORK_USER + 5 (forms/CustomScpExplorer.cpp)
+// WM_FORK_USER + 6 was WM_LOG_UPDATE
+#define WM_MANAGES_CAPTION (WM_FORK_USER + 7)
+#define WM_WANTS_MOUSEWHEEL (WM_FORK_USER + 8)
+#define WM_CAN_DISPLAY_UPDATES (WM_FORK_USER + 9)
 // CM_DPICHANGED + 10 (packages/my/PasTools.pas)
-#define WM_WANTS_MOUSEWHEEL_INACTIVE (WM_WINSCP_USER + 11)
-#define WM_WANTS_SCREEN_TIPS (WM_WINSCP_USER + 12)
+#define WM_WANTS_MOUSEWHEEL_INACTIVE (WM_FORK_USER + 11)
+#define WM_WANTS_SCREEN_TIPS (WM_FORK_USER + 12)
 // WM_USER_SHCHANGENOTIFY + 13 (packages/filemng/IEDriveInfo.pas)
 // WM_PASTE_FILES + 14 (forms/CustomScpExplorer.cpp)
-#define WM_IS_HIDDEN (WM_WINSCP_USER + 15)
+#define WM_IS_HIDDEN (WM_FORK_USER + 15)
 // WM_USER_INVALIDATEITEM + 16 (packages/filemng/DirView.pas)
-#define WM_QUEUE_CALLBACK (WM_WINSCP_USER + 17)
+#define WM_QUEUE_CALLBACK (WM_FORK_USER + 17)
 // WM_DRIVEINFO_PROCESS + 18 (packages/filemng/IEDriveInfo.pas)
 //---------------------------------------------------------------------------
 #define C(Property) (Property != rhc.Property) ||

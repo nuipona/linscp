@@ -320,7 +320,7 @@ char *buildinfo(const char *newline);
  * header wasn't foresighted enough to label abort() itself that way.
  */
 static inline NORETURN void unreachable_internal(void) { 
-  #ifndef WINSCP_VS
+  #ifndef FORK_VS
   // Not to try to link to VS abort
   abort();
   #endif
@@ -519,7 +519,7 @@ void stripctrl_retarget(StripCtrlChars *sccpub, BinarySink *new_bs_out);
 void stripctrl_reset(StripCtrlChars *sccpub);
 void stripctrl_free(StripCtrlChars *sanpub);
 void stripctrl_enable_line_limiting(StripCtrlChars *sccpub);
-#ifndef WINSCP
+#ifndef FORK_BUILD
 char *stripctrl_string_ptrlen(StripCtrlChars *sccpub, ptrlen str);
 static inline char *stripctrl_string(StripCtrlChars *sccpub, const char *str)
 {

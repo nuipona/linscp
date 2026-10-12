@@ -116,7 +116,7 @@ struct ne_session_s {
 
     char *user_agent; /* full User-Agent: header field */
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
     char *realhost;
 #endif
 

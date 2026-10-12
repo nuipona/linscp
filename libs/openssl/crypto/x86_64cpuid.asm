@@ -5,13 +5,13 @@ default rel
 
 EXTERN OPENSSL_cpuid_setup
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 section .CRT$XCU rdata align=8
   DQ OPENSSL_cpuid_setup
 %endif
 
 
-; WINSCP
+; FORK_BUILD
 global OPENSSL_ia32cap_P
 section .bss align=256
 OPENSSL_ia32cap_P:

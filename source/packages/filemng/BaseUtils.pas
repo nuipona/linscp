@@ -18,7 +18,7 @@ unit BaseUtils;
     65812 Bad Soden
     Germany
 
-    Modifications (for WinSCP):
+    Modifications (for LinuxSCP):
     ===========================
     (c) Martin Prikryl 2001, 2002
 

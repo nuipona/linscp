@@ -8,16 +8,16 @@
 int is_ssh(Plug * plug);
 int get_ssh_version(Backend * be);
 Seat * get_ssh_seat(Plug * plug);
-#ifdef WINSCP_SSH
+#ifdef FORK_SSH
 const ssh_cipher * get_cscipher(Backend * be);
 const ssh_cipher * get_sccipher(Backend * be);
 #endif
 const struct ssh_compressor * get_cscomp(Backend * be);
 const struct ssh_decompressor * get_sccomp(Backend * be);
-#define WINSCP_QUERY_REMMAXPKT 1
-#define WINSCP_QUERY_MAIN_CHANNEL 2
-#define WINSCP_QUERY_TIMER 3
-unsigned int winscp_query(Backend * be, int query);
+#define FORK_QUERY_REMMAXPKT 1
+#define FORK_QUERY_MAIN_CHANNEL 2
+#define FORK_QUERY_TIMER 3
+unsigned int linuxscp_query(Backend * be, int query);
 void md5checksum(const char * buffer, int len, unsigned char output[16]);
 typedef const struct ssh_keyalg * cp_ssh_keyalg;
 void get_hostkey_algs(int type, int * count, cp_ssh_keyalg ** sign_keys);

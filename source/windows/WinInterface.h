@@ -57,7 +57,7 @@ const int mpAllowContinueOnError = 0x02;
 #define IDENTITY_SWITCH L"Identity"
 #define WORKSPACE_SWITCH L"Workspace"
 
-#define DUMPCALLSTACK_EVENT L"WinSCPCallstack%d"
+#define DUMPCALLSTACK_EVENT L"LinuxSCPCallstack%d"
 
 struct TMessageParams
 {
@@ -249,7 +249,7 @@ bool __fastcall DoCreateDirectoryDialog(UnicodeString & Directory,
 bool __fastcall DoImportSessionsDialog(TList * Imported);
 
 // forms\License.cpp
-enum TLicense { lcNoLicense = -1, lcWinScp, lcExpat };
+enum TLicense { lcNoLicense = -1, lcLinuxSCP, lcExpat };
 void __fastcall DoLicenseDialog(TLicense License);
 
 bool DoLoginDialog(TList * DataList, TForm * LinkedForm, bool NeedTerminal);
@@ -562,7 +562,7 @@ void CheckConfigurationForceSave();
 void InterfaceStarted();
 void InterfaceStartDontMeasure();
 //---------------------------------------------------------------------------
-#define HIDDEN_WINDOW_NAME L"WinSCPHiddenWindow3"
+#define HIDDEN_WINDOW_NAME L"LinuxSCPHiddenWindow3"
 //---------------------------------------------------------------------------
 struct TCopyDataMessage
 {

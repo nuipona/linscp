@@ -40,7 +40,7 @@ struct ne_ssl_context_s {
     SSL_CTX *ctx;
     SSL_SESSION *sess;
     const char *hostname; /* for SNI */
-    const char *realhost; // WINSCP
+    const char *realhost; // FORK_BUILD
     ne_ssl_client_cert *client_cert;
     ne_ssl_ccprovide_fn provider;
     void *provider_ud;

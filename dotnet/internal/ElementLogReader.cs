@@ -2,7 +2,7 @@
 using System.Globalization;
 using System.Xml;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class ElementLogReader : CustomLogReader
     {

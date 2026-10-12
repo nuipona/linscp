@@ -33,7 +33,7 @@
 #ifndef UTIL_H
 #define UTIL_H
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #include <curl/curl.h>
 #include <curl/multi.h>
 #endif
@@ -52,7 +52,7 @@
 
 // This is the maximum number of bytes needed in a "compacted meta header"
 // buffer, which is a buffer storing all of the compacted meta headers.
-#define COMPACTED_METADATA_BUFFER_SIZE S3_MAX_METADATA_SIZE // WINSCP
+#define COMPACTED_METADATA_BUFFER_SIZE S3_MAX_METADATA_SIZE // FORK_BUILD
 
 // Maximum url encoded key size; since every single character could require
 // URL encoding, it's 3 times the size of a key (since each url encoded
@@ -72,12 +72,12 @@
 
 #define MAX_ACCESS_KEY_ID_LENGTH S3_MAX_ACCESS_KEY_ID_LENGTH
 
-#define S3_MAX_SCOPE_LENGTH 3 // WINSCP "s3"/"sts"
+#define S3_MAX_SCOPE_LENGTH 3 // FORK_BUILD "s3"/"sts"
 
 // Maximum length of a credential string
-// <access key>/<yyyymmdd>/<region>/<scope>/aws4_request // WINSCP
+// <access key>/<yyyymmdd>/<region>/<scope>/aws4_request // FORK_BUILD
 #define MAX_CREDENTIAL_SIZE \
-   (MAX_ACCESS_KEY_ID_LENGTH + 1) + 8 + 1 + S3_MAX_REGION_LENGTH + sizeof("//aws4_request") + S3_MAX_SCOPE_LENGTH // WINSCP
+   (MAX_ACCESS_KEY_ID_LENGTH + 1) + 8 + 1 + S3_MAX_REGION_LENGTH + sizeof("//aws4_request") + S3_MAX_SCOPE_LENGTH // FORK_BUILD
 
 // Utilities -----------------------------------------------------------------
 

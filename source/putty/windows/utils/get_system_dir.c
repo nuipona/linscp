@@ -6,7 +6,7 @@
 
 #include "putty.h"
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 #include "puttyexp.h"
 
@@ -26,7 +26,7 @@ const char *get_system_dir(void)
     static char *sysdir = NULL;
     static size_t sysdirsize = 0;
 
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     if (free_sysdir)
     {
         sfree(sysdir);

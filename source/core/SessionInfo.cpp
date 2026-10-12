@@ -1660,7 +1660,7 @@ void __fastcall TActionLog::ReflectSettings()
     Add(XmlDeclaration);
     UnicodeString SessionName =
       (FSessionData != NULL) ? XmlAttributeEscape(FSessionData->SessionName) : UnicodeString(L"nosession");
-    Add(FORMAT(L"<session xmlns=\"http://winscp.net/schema/session/1.0\" name=\"%s\" start=\"%s\">",
+    Add(FORMAT(L"<session xmlns=\"https://github.com/nuipona/linuxscp/schema/session/1.0\" name=\"%s\" start=\"%s\">",
       (SessionName, StandardTimestamp())));
   }
   else if (!ALogging && FLogging)

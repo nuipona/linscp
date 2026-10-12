@@ -5,7 +5,7 @@ using System.IO;
 using System.Security;
 #endif
 
-namespace WinSCP
+namespace LinuxSCP
 {
     public interface ISession : IDisposable
     {

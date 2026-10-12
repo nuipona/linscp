@@ -11,7 +11,7 @@ OBJFILES = \
     $(OBJD)\random_rand_s.$(O) \
     $(OBJD)\loadlibrary.$(O)
 # ---------------------------------------------------------------------------
-DEFINES = _WINDOWS;NDEBUG;_LIB;XML_STATIC;WINSCP;_NO_VCL;_ASSERTE;NO_STRICT;_RTLDLL
+DEFINES = _WINDOWS;NDEBUG;_LIB;XML_STATIC;FORK_BUILD;_NO_VCL;_ASSERTE;NO_STRICT;_RTLDLL
 INCLUDEPATH = ..;..\lib
 CFLAG1 = $(CFLAG_COMMON)
 # ---------------------------------------------------------------------------

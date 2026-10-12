@@ -2,7 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     // Originally, the interop classes were each implemented separately. Probably because at the time they were
     // originally implemented, it was not possible to implement them via generic parent class.

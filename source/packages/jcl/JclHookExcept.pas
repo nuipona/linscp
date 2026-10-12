@@ -77,7 +77,7 @@ function JclRemoveExceptNotifier(const NotifyMethod: TJclExceptNotifyMethod): Bo
 procedure JclReplaceExceptObj(NewExceptObj: Exception);
 
 // Exception hooking routines
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function JclHookExceptions: Boolean;
 function JclUnhookExceptions: Boolean;
 function JclExceptionsHooked: Boolean;
@@ -112,7 +112,7 @@ implementation
 
 uses
   JclBase,
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   JclPeImage,
   {$ENDIF}
   JclSysInfo, JclSysUtils;
@@ -151,7 +151,7 @@ type
   end;
 
 var
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   ExceptionsHooked: Boolean;
   {$ENDIF}
   Kernel32_RaiseException: procedure (dwExceptionCode, dwExceptionFlags,
@@ -612,7 +612,7 @@ begin
     hooked separately, so we're covered. }
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function HasCppRtl: Boolean;
 begin
   Result := GetCppRtlBase <> TJclPeMapImgHooks.SystemBase;
@@ -620,7 +620,7 @@ end;
 {$ENDIF}
 {$ENDIF BORLAND}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function JclHookExceptions: Boolean;
 var
   RaiseExceptionAddressCache: Pointer;

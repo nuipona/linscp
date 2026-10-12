@@ -53,14 +53,14 @@
 #define REQUEST_STACK_SIZE 32
 #define SIGNATURE_SCOPE_SIZE 64
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #define SIGNATURE_DEBUG
 #include <memory>
 #endif
 
 static char userAgentG[USER_AGENT_SIZE];
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static pthread_mutex_t requestStackMutexG;
 
 static Request *requestStackG[REQUEST_STACK_SIZE];
@@ -166,10 +166,10 @@ static void request_headers_done(Request *request)
 
     request->propertiesCallbackMade = 1;
 
-    request->httpResponseCode = ne_get_status(request->NeonRequest)->code; // WINSCP (neon)
+    request->httpResponseCode = ne_get_status(request->NeonRequest)->code; // FORK_BUILD (neon)
 
     response_headers_handler_done(&(request->responseHeadersHandler),
-                                  request->NeonRequest); // WINSCP (neon)
+                                  request->NeonRequest); // FORK_BUILD (neon)
 
     // Only make the callback if it was a successful request; otherwise we're
     // returning information about the error response itself
@@ -183,7 +183,7 @@ static void request_headers_done(Request *request)
 }
 
 
-// WINSCP (neon)
+// FORK_BUILD (neon)
 static int neon_header_func(void * userdata, ne_request * NeonRequest, const ne_status * status)
 {
     Request *request = (Request *) userdata;
@@ -202,7 +202,7 @@ static int neon_header_func(void * userdata, ne_request * NeonRequest, const ne_
 
 
 
-// WINSCP (neon)
+// FORK_BUILD (neon)
 static ssize_t neon_read_func(void * userdata, char * buf, size_t len)
 {
     Request *request = (Request *) userdata;
@@ -247,12 +247,12 @@ static ssize_t neon_read_func(void * userdata, char * buf, size_t len)
 }
 
 
-// WINSCP (neon)
+// FORK_BUILD (neon)
 static int neon_write_func(void * data, const char * buf, size_t len)
 {
     Request *request = (Request *) data;
 
-    // WinSCP (ignore empty responses)
+    // LinuxSCP (ignore empty responses)
     if (len == 0)
     {
         return 0;
@@ -347,7 +347,7 @@ static S3Status do_append_amz_header(RequestComputedValues *values,
 // to be the count of the total number of x-amz- headers thus created).
 static S3Status compose_amz_headers(const RequestParams *params,
                                     int forceUnsignedPayload,
-                                    int requesterPays, // WINSCP
+                                    int requesterPays, // FORK_BUILD
                                     RequestComputedValues *values)
 {
     const S3PutProperties *properties = params->putProperties;
@@ -403,7 +403,7 @@ static S3Status compose_amz_headers(const RequestParams *params,
         // Add the x-amz-copy-source header
         if (params->copySourceBucketName && params->copySourceBucketName[0]
             && params->copySourceKey && params->copySourceKey[0]) {
-            // WINSCP
+            // FORK_BUILD
             char bucketKey[1 + S3_MAX_BUCKET_NAME_SIZE + 1 + MAX_URLENCODED_KEY_SIZE + 1];
             snprintf(bucketKey, 1 + S3_MAX_BUCKET_NAME_SIZE + 1 + 1, "/%s/", params->copySourceBucketName);
             if (!urlEncode(bucketKey + strlen(bucketKey), params->copySourceKey, S3_MAX_KEY_SIZE, 0))
@@ -431,7 +431,7 @@ static S3Status compose_amz_headers(const RequestParams *params,
                           params->bucketContext.securityToken);
     }
 
-    // WINSCP
+    // FORK_BUILD
     if (requesterPays
         && (params->httpRequestType == HttpRequestTypeDELETE
             || params->httpRequestType == HttpRequestTypeGET
@@ -592,15 +592,15 @@ static S3Status compose_standard_headers(const RequestParams *params,
                   S3StatusContentEncodingTooLong);
 
     // Expires
-    // WINSCP (not implemented)
+    // FORK_BUILD (not implemented)
     values->expiresHeader[0] = 0;
 
     // If-Modified-Since
-    // WINSCP (not implemented)
+    // FORK_BUILD (not implemented)
     values->ifModifiedSinceHeader[0] = 0;
 
     // If-Unmodified-Since header
-    // WINSCP (not implemented)
+    // FORK_BUILD (not implemented)
     values->ifUnmodifiedSinceHeader[0] = 0;
 
     // If-Match header
@@ -1000,11 +1000,11 @@ static S3Status compose_auth_header(const RequestParams *params,
     if (params->bucketContext.authRegion) {
         awsRegion = params->bucketContext.authRegion;
     }
-    const char * service = (params->bucketContext.service != NULL) ? params->bucketContext.service : S3_SERVICE; // WINSCP
-    int scopeSize = 8 + strlen(awsRegion) + strlen(service) + sizeof("///aws4_request") + 1; // WINSCP
-    char scope[scopeSize]; // WINSCP
+    const char * service = (params->bucketContext.service != NULL) ? params->bucketContext.service : S3_SERVICE; // FORK_BUILD
+    int scopeSize = 8 + strlen(awsRegion) + strlen(service) + sizeof("///aws4_request") + 1; // FORK_BUILD
+    char scope[scopeSize]; // FORK_BUILD
     snprintf(scope, sizeof(scope), "%.8s/%s/%s/aws4_request",
-             values->requestDateISO8601, awsRegion, service); // WINSCP
+             values->requestDateISO8601, awsRegion, service); // FORK_BUILD
 
     char stringToSign[17 + 17 + sizeof(values->requestDateISO8601) +
                       sizeof(scope) + sizeof(canonicalRequestHashHex) + 1];
@@ -1027,7 +1027,7 @@ static S3Status compose_auth_header(const RequestParams *params,
     CCHmac(kCCHmacAlgSHA256, dateKey, S3_SHA256_DIGEST_LENGTH, awsRegion,
            strlen(awsRegion), dateRegionKey);
     unsigned char dateRegionServiceKey[S3_SHA256_DIGEST_LENGTH];
-    CCHmac(kCCHmacAlgSHA256, dateRegionKey, S3_SHA256_DIGEST_LENGTH, "s3", 2, // not updated to WINSCP
+    CCHmac(kCCHmacAlgSHA256, dateRegionKey, S3_SHA256_DIGEST_LENGTH, "s3", 2, // not updated to FORK_BUILD
            dateRegionServiceKey);
     unsigned char signingKey[S3_SHA256_DIGEST_LENGTH];
     CCHmac(kCCHmacAlgSHA256, dateRegionServiceKey, S3_SHA256_DIGEST_LENGTH,
@@ -1048,7 +1048,7 @@ static S3Status compose_auth_header(const RequestParams *params,
          NULL);
     unsigned char dateRegionServiceKey[S3_SHA256_DIGEST_LENGTH];
     HMAC(sha256evp, dateRegionKey, S3_SHA256_DIGEST_LENGTH,
-         (const unsigned char*) service, strlen(service), dateRegionServiceKey, NULL); // WINSCP
+         (const unsigned char*) service, strlen(service), dateRegionServiceKey, NULL); // FORK_BUILD
     unsigned char signingKey[S3_SHA256_DIGEST_LENGTH];
     HMAC(sha256evp, dateRegionServiceKey, S3_SHA256_DIGEST_LENGTH,
          (const unsigned char*) "aws4_request", strlen("aws4_request"),
@@ -1069,7 +1069,7 @@ static S3Status compose_auth_header(const RequestParams *params,
 
     snprintf(values->authCredential, sizeof(values->authCredential),
              "%s/%.8s/%s/%s/aws4_request", params->bucketContext.accessKeyId,
-             values->requestDateISO8601, awsRegion, service); // WINSCP
+             values->requestDateISO8601, awsRegion, service); // FORK_BUILD
 
     snprintf(values->authorizationHeader,
              sizeof(values->authorizationHeader),
@@ -1113,13 +1113,13 @@ static S3Status compose_uri(char *buffer, int bufferSize,
     if (bucketContext->bucketName &&
         bucketContext->bucketName[0]) {
         if (bucketContext->uriStyle == S3UriStyleVirtualHost) {
-#ifndef WINSCP
+#ifndef FORK_BUILD
             // We cannot change Host: header with neon.
             // Instead we tweak host name validation
             if (strchr(bucketContext->bucketName, '.') == NULL) {
 #endif
                 uri_append("%s.%s", bucketContext->bucketName, hostName);
-#ifndef WINSCP
+#ifndef FORK_BUILD
             }
             else {
                 // We'll use the hostName in the URL, and then explicitly set
@@ -1153,7 +1153,7 @@ static S3Status compose_uri(char *buffer, int bufferSize,
     return S3StatusOK;
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 int neon_ssl_callback(void * user_data, int failures, const ne_ssl_certificate * certificate)
 {
     Request *request = (Request *) user_data;
@@ -1168,7 +1168,7 @@ int neon_ssl_callback(void * user_data, int failures, const ne_ssl_certificate *
 #endif
 
 
-// WINSCP (neon)
+// FORK_BUILD (neon)
 // Sets up the neon handle given the completely computed RequestParams
 static S3Status setup_neon(Request *request,
                            const RequestParams *params,
@@ -1239,18 +1239,18 @@ static S3Status setup_neon(Request *request,
         ne_set_request_body_buffer(request->NeonRequest, "", 0);
     }
 
-    // WINSCP (Last-Modified parsed in response_headers_handler_done)
+    // FORK_BUILD (Last-Modified parsed in response_headers_handler_done)
 
     // xxx todo - support setting the proxy for Curl to use (can't use https
     // for proxies though)
 
     // xxx todo - support setting the network interface for Curl to use
 
-    // WINSCP (neon sets "nodelay" unconditionally)
+    // FORK_BUILD (neon sets "nodelay" unconditionally)
 
     if (params->bucketContext.protocol == S3ProtocolHTTPS)
     {
-      // WINSCP (we should verify peer always)
+      // FORK_BUILD (we should verify peer always)
       ne_ssl_set_verify(request->NeonSession, neon_ssl_callback, request);
       ne_ssl_trust_default_ca(request->NeonSession);
     }
@@ -1289,7 +1289,7 @@ static S3Status setup_neon(Request *request,
         do_add_header(values-> fieldName);                               \
     }
 
-    // WINSCP (hostHeader is added implicitly by neon based on uri, but for certificate check,
+    // FORK_BUILD (hostHeader is added implicitly by neon based on uri, but for certificate check,
     // we remove the dots, as they fail it)
     if ((params->bucketContext.bucketName != NULL) &&
         (strchr(params->bucketContext.bucketName, '.') != NULL) &&
@@ -1332,7 +1332,7 @@ static S3Status setup_neon(Request *request,
         do_add_header(values->amzHeaders[i]);
     }
 
-    ne_uri_free(&uri); // WINSCP (moved)
+    ne_uri_free(&uri); // FORK_BUILD (moved)
 
     return S3StatusOK;
 }
@@ -1349,12 +1349,12 @@ static void request_deinitialize(Request *request)
 
 static S3Status request_get(const RequestParams *params,
                             const RequestComputedValues *values,
-                            S3RequestContext *context, // WINSCP (non-const)
+                            S3RequestContext *context, // FORK_BUILD (non-const)
                             Request **reqReturn)
 {
     Request *request = 0;
 
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     // Try to get one from the request stack.  We hold the lock for the
     // shortest time possible here.
     pthread_mutex_lock(&requestStackMutexG);
@@ -1376,12 +1376,12 @@ static S3Status request_get(const RequestParams *params,
             return S3StatusOutOfMemory;
         }
         request->NeonSession = NULL;
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     }
     #endif
 
     // Initialize the request
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     request->prev = 0;
     request->next = 0;
     #else
@@ -1411,7 +1411,7 @@ static S3Status request_get(const RequestParams *params,
         return status;
     }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
     if (context && context->setupCurlCallback &&
         (status = context->setupCurlCallback(
                 context->curlm, request->curl,
@@ -1455,7 +1455,7 @@ static void request_destroy(Request *request)
 
 static void request_release(Request *request)
 {
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     pthread_mutex_lock(&requestStackMutexG);
 
     // If the request stack is full, destroy this one
@@ -1463,7 +1463,7 @@ static void request_release(Request *request)
         pthread_mutex_unlock(&requestStackMutexG);
     #endif
         request_destroy(request);
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     }
     // Else put this one at the front of the request stack; we do this because
     // we want the most-recently-used curl handle to be re-used on the next
@@ -1480,7 +1480,7 @@ static void request_release(Request *request)
 S3Status request_api_initialize(const char *userAgentInfo, int flags,
                                 const char *defaultHostName)
 {
-    // WINSCP (winsock must be initialized by caller)
+    // FORK_BUILD (winsock must be initialized by caller)
 
     if (!defaultHostName) {
         defaultHostName = S3_DEFAULT_HOSTNAME;
@@ -1491,7 +1491,7 @@ S3Status request_api_initialize(const char *userAgentInfo, int flags,
         return S3StatusUriTooLong;
     }
 
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     pthread_mutex_init(&requestStackMutexG, 0);
 
     requestStackCountG = 0;
@@ -1515,17 +1515,17 @@ S3Status request_api_initialize(const char *userAgentInfo, int flags,
              "Mozilla/4.0 (Compatible; %s; libs3 %s.%s; %s)",
              userAgentInfo, LIBS3_VER_MAJOR, LIBS3_VER_MINOR, platform);
 
-    // WINSCP (Expat does not need global initialization)
+    // FORK_BUILD (Expat does not need global initialization)
     return S3StatusOK;
 }
 
 
 void request_api_deinitialize()
 {
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     pthread_mutex_destroy(&requestStackMutexG);
 
-    // WINSCP (Expat does not need global initialization)
+    // FORK_BUILD (Expat does not need global initialization)
     while (requestStackCountG--) {
         request_destroy(requestStackG[requestStackCountG]);
     }
@@ -1535,7 +1535,7 @@ void request_api_deinitialize()
 static S3Status setup_request(const RequestParams *params,
                               RequestComputedValues *computed,
                               int forceUnsignedPayload,
-                              int requesterPays) // WINSCP
+                              int requesterPays) // FORK_BUILD
 {
     S3Status status;
 
@@ -1547,7 +1547,7 @@ static S3Status setup_request(const RequestParams *params,
         return status;
     }
 
-    // WINSCP (inspired by PuTTY ltime())
+    // FORK_BUILD (inspired by PuTTY ltime())
     // Original time()/gmtime() combination did not work correctly in winter time
     SYSTEMTIME st;
     GetSystemTime(&st);
@@ -1566,7 +1566,7 @@ static S3Status setup_request(const RequestParams *params,
              "%Y%m%dT%H%M%SZ", &gmt);
 
     // Compose the amz headers
-    if ((status = compose_amz_headers(params, forceUnsignedPayload, requesterPays, computed)) // WINSCP
+    if ((status = compose_amz_headers(params, forceUnsignedPayload, requesterPays, computed)) // FORK_BUILD
         != S3StatusOK) {
         return status;
     }
@@ -1618,10 +1618,10 @@ void request_perform(const RequestParams *params, S3RequestContext *context)
     return
 
     // These will hold the computed values
-    // WINSCP: too big for stack
+    // FORK_BUILD: too big for stack
     std::unique_ptr<RequestComputedValues> computed(new RequestComputedValues());
 
-    if ((status = setup_request(params, computed.get(), 0, context->requesterPays)) != S3StatusOK) { // WINSCP
+    if ((status = setup_request(params, computed.get(), 0, context->requesterPays)) != S3StatusOK) { // FORK_BUILD
         return_status(status);
     }
 
@@ -1629,9 +1629,9 @@ void request_perform(const RequestParams *params, S3RequestContext *context)
     if ((status = request_get(params, computed.get(), context, &request)) != S3StatusOK) {
         return_status(status);
     }
-    // WINSCP (we should always verify the peer)
+    // FORK_BUILD (we should always verify the peer)
 
-    #ifndef WINSCP
+    #ifndef FORK_BUILD
     // If a RequestContext was provided, add the request to the curl multi
     if (context) {
         CURLMcode code = curl_multi_add_handle(context->curlm, request->curl);
@@ -1676,13 +1676,13 @@ void request_finish(Request *request, NeonCode code)
 
     // If there was no error processing the request, then possibly there was
     // an S3 error parsed, which should be converted into the request status
-    // WINSCP: We get "OK", even if there's TCP or HTTP error
+    // FORK_BUILD: We get "OK", even if there's TCP or HTTP error
     if (request->status == S3StatusOK) {
         // First handle S3 errors
         // TemporaryRedirect S3 error has a precedence over HTTP 3xx error that carries it.
         error_parser_convert_status(&(request->errorParser),
                                     &(request->status));
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         // This handles TCP and HTTP errors
         if (request->status == S3StatusOK) {
             if (code != NE_OK) {
@@ -1699,7 +1699,7 @@ void request_finish(Request *request, NeonCode code)
         // If there still was no error recorded, then it is possible that
         // there was in fact an error but that there was no error XML
         // detailing the error
-        // WINSCP: We possibly never get here with neon
+        // FORK_BUILD: We possibly never get here with neon
         if ((request->status == S3StatusOK) &&
             ((request->httpResponseCode < 200) ||
              (request->httpResponseCode > 299))) {
@@ -1759,8 +1759,8 @@ void request_finish(Request *request, NeonCode code)
         }
     }
 
-    { // WINSCP
-    // WINSCP
+    { // FORK_BUILD
+    // FORK_BUILD
     S3ErrorDetails errorDetails = request->errorParser.s3ErrorDetails;
     if (errorDetails.furtherDetails == NULL)
     {
@@ -1768,11 +1768,11 @@ void request_finish(Request *request, NeonCode code)
     }
 
     (*(request->completeCallback))
-        (request->status, &errorDetails, // WINSCP
+        (request->status, &errorDetails, // FORK_BUILD
          request->callbackData);
 
     request_release(request);
-    } // WINSCP
+    } // FORK_BUILD
 }
 
 
@@ -1792,7 +1792,7 @@ S3Status request_neon_code_to_status(NeonCode code)
 }
 
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 S3Status S3_generate_authenticated_query_string
     (char *buffer, const S3BucketContext *bucketContext,
      const char *key, int expires, const char *resource,

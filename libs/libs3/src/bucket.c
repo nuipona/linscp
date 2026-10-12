@@ -493,7 +493,7 @@ static S3Status make_list_bucket_callback(ListBucketData *lbData)
         contentDest->key = contentSrc->key;
         contentDest->lastModified =
             parseIso8601Time(contentSrc->lastModified);
-        contentDest->lastModifiedStr = contentSrc->lastModified; // WINSCP
+        contentDest->lastModifiedStr = contentSrc->lastModified; // FORK_BUILD
         contentDest->eTag = contentSrc->eTag;
         contentDest->size = parseUnsignedInt(contentSrc->size);
         contentDest->ownerId =
@@ -649,7 +649,7 @@ static void listBucketCompleteCallback(S3Status requestStatus,
 {
     ListBucketData *lbData = (ListBucketData *) callbackData;
 
-    // WINSCP making callback unconditionally, as we need the isTruncated
+    // FORK_BUILD making callback unconditionally, as we need the isTruncated
     make_list_bucket_callback(lbData);
 
     (*(lbData->responseCompleteCallback))
@@ -707,7 +707,7 @@ void S3_list_bucket(const S3BucketContext *bucketContext, const char *prefix,
 
 
     int amp = 0;
-    if (prefix) { // WINSCP
+    if (prefix) { // FORK_BUILD
         safe_append("prefix", prefix);
     }
     if (marker && *marker) {

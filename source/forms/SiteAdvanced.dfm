@@ -2548,7 +2548,7 @@ object SiteAdvancedDialog: TSiteAdvancedDialog
             Top = 51
             Width = 224
             Height = 15
-            Caption = 'Chokes on WinSCP'#39's SSH '#39'&winadj'#39' requests'
+            Caption = 'Chokes on LinuxSCP'#39's SSH '#39'&winadj'#39' requests'
             FocusControl = BugWinAdjCombo
           end
           object BugHMAC2Combo: TComboBox

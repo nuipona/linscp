@@ -1,9 +1,9 @@
 #include "putty.h"
 
-// pre_connect_command not supported in WinSCP
+// pre_connect_command not supported in LinuxSCP
 // (needs subprocess_waiter.c - what needs callback injection)
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 typedef struct PreConnWrapper PreConnWrapper;
 struct PreConnWrapper {
@@ -313,7 +313,7 @@ Socket *new_main_connection(
     bool oobinline, bool nodelay, bool keepalive, Plug *plug, Conf *conf,
     Interactor *itr, LogContext *logctx)
 {
-#ifndef WINSCP
+#ifndef FORK_BUILD
     char *command = NULL;
 
     const char *template = conf_get_str(conf, CONF_pre_connect_command);
@@ -340,7 +340,7 @@ Socket *new_main_connection(
         /* No pre-connection command: just open the main socket immediately */
         return new_connection(addr, hostname, port, privport, oobinline,
                               nodelay, keepalive, plug, conf, itr);
-#ifndef WINSCP
+#ifndef FORK_BUILD
     }
 
     PreConnWrapper *wr = snew(PreConnWrapper);

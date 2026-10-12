@@ -5,7 +5,7 @@ using System.Xml;
 using System.Text;
 using System.Threading;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class SessionLogReader : CustomLogReader
     {
@@ -210,7 +210,7 @@ namespace WinSCP
             {
                 Session.Logger.WriteLine("Opening log without write sharing");
                 // First try to open file without write sharing.
-                // This fails, if WinSCP is still writing to the log file.
+                // This fails, if LinuxSCP is still writing to the log file.
                 // This is done only as a way to detect that log file is not complete yet.
                 _stream = new PatientFileStream(Session, Session.XmlLogPath, FileMode.Open, FileAccess.Read, FileShare.Read);
                 _closed = true;

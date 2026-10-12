@@ -67,7 +67,7 @@ BEGIN
     "  Changes remote working directory for active session.\n"
     "  If directory is not specified, changes to home directory.\n"
     "examples:\n"
-    "  cd /home/martin\n"
+    "  cd /home/user\n"
     "  cd\n"
   SCRIPT_LS_HELP2,
     "ls [ <directory> ]/[ <wildcard> ]\n"
@@ -82,7 +82,7 @@ BEGIN
     "examples:\n"
     "  ls\n"
     "  ls *.html\n"
-    "  ls /home/martin\n"
+    "  ls /home/user\n"
   SCRIPT_LPWD_HELP,
     "lpwd\n"
     "  Prints current local working directory (valid for all sessions).\n"
@@ -134,7 +134,7 @@ BEGIN
     "  mv index.html public_html/\n"
     "  mv index.html about.*\n"
     "  mv index.html public_html/about.*\n"
-    "  mv public_html/index.html public_html/about.html /home/martin/*.bak\n"
+    "  mv public_html/index.html public_html/about.html /home/user/*.bak\n"
     "  mv *.html /home/backup/*.bak\n"
   SCRIPT_CHMOD_HELP2,
     "chmod <mode> <file> [ <file2> ... ]\n"
@@ -145,7 +145,7 @@ BEGIN
     "  failonnomatch\n"
     "examples:\n"
     "  chmod 644 index.html about.html\n"
-    "  chmod 1700 /home/martin/public_html\n"
+    "  chmod 1700 /home/user/public_html\n"
     "  chmod 644 *.html\n"
   SCRIPT_LN_HELP,
     "ln <target> <symlink>\n"
@@ -153,7 +153,7 @@ BEGIN
     "alias:\n"
     "  symlink\n"
     "example:\n"
-    "  ln /home/martin/public_html www\n"
+    "  ln /home/user/public_html www\n"
   SCRIPT_MKDIR_HELP,
     "mkdir <directory>\n"
     "  Creates remote directory.\n"
@@ -226,9 +226,9 @@ BEGIN
     "examples:\n"
     "  put index.html\n"
     "  put -delete index.html about.html ./\n"
-    "  put -permissions=644 index.html about.html /home/martin/public_html/\n"
+    "  put -permissions=644 index.html about.html /home/user/public_html/\n"
     "  put d:\\www\\index.html about.*\n"
-    "  put *.html *.png /home/martin/backup/*.bak\n"
+    "  put *.html *.png /home/user/backup/*.bak\n"
   SCRIPT_OPTION_HELP7,
     "option [ <option> [ <value> ] ]\n"
     "  If no parameters are specified, lists all script options and their\n"
@@ -289,7 +289,7 @@ BEGIN
     "  reconnecttime\n"
     "examples:\n"
     "  synchronize remote -delete\n"
-    "  synchronize both d:\\www /home/martin/public_html\n"
+    "  synchronize both d:\\www /home/user/public_html\n"
   SCRIPT_KEEPUPTODATE_HELP5,
     "keepuptodate [ <local directory> [ <remote directory> ] ]\n"
     "  Watches for changes in local directory and reflects them on remote one.\n"
@@ -309,7 +309,7 @@ BEGIN
     "  reconnecttime\n"
     "examples:\n"
     "  keepuptodate -delete\n"
-    "  keepuptodate d:\\www /home/martin/public_html\n"
+    "  keepuptodate d:\\www /home/user/public_html\n"
   SCRIPT_CALL_HELP2,
     "call <command>\n"
     "  With SFTP and SCP protocols, executes arbitrary remote shell command.\n"
@@ -348,6 +348,6 @@ BEGIN
     "  cp index.html public_html/\n"
     "  cp index.html about.*\n"
     "  cp index.html public_html/about.*\n"
-    "  cp public_html/index.html public_html/about.html /home/martin/*.bak\n"
+    "  cp public_html/index.html public_html/about.html /home/user/*.bak\n"
     "  cp *.html /home/backup/*.bak\n"
 END

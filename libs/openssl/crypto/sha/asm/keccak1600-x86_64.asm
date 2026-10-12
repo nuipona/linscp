@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 
@@ -256,7 +256,7 @@ $L$oop:
  mov rbp,rdx
  mov rdx,r13
 
- ; WINSCP
+ ; FORK_BUILD
  lea r14,[rel iotas+192]
  cmp r15,r14
  jnz NEAR $L$oop
@@ -496,7 +496,7 @@ $L$done_squeeze:
  DB 0F3h,0C3h ;repret
 
 $L$SEH_end_SHA3_squeeze:
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 256
  DQ 0,0,0,0,0,0,0,0
 

@@ -4,7 +4,7 @@
  */
 
 #include <stddef.h>
-#include <assert.h> // WINSCP
+#include <assert.h> // FORK_BUILD
 
 #include "putty.h"
 
@@ -155,7 +155,7 @@ bool run_toplevel_callbacks(CALLBACK_SET_ONLY)
          */
         cbcurr->fn(cbcurr->ctx);
         sfree(cbcurr);
-        // WINSCP: this does not happen, when exception (disconnect) occurs while the callback is called.
+        // FORK_BUILD: this does not happen, when exception (disconnect) occurs while the callback is called.
         // See also the comment in TSecureShell::FreeBackend().
         cbcurr = NULL;
 
@@ -170,7 +170,7 @@ bool toplevel_callback_pending(CALLBACK_SET_ONLY)
     return cbcurr != NULL || cbhead != NULL;
 }
 
-// WINSCP
+// FORK_BUILD
 bool is_idempotent_callback_pending(CALLBACK_SET struct IdempotentCallback *ic)
 {
     return

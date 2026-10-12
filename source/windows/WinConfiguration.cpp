@@ -932,16 +932,16 @@ TStorage __fastcall TWinConfiguration::GetStorage()
 {
   if (FStorage == stDetect)
   {
-    if (FindResourceEx(NULL, RT_RCDATA, L"WINSCP_SESSION",
+    if (FindResourceEx(NULL, RT_RCDATA, L"LINUXSCP_SESSION",
       MAKELANGID(LANG_NEUTRAL, SUBLANG_NEUTRAL)))
     {
       FTemporarySessionFile =
-        IncludeTrailingBackslash(SystemTemporaryDirectory()) + L"winscps.tmp";
-      DumpResourceToFile(L"WINSCP_SESSION", FTemporarySessionFile);
+        IncludeTrailingBackslash(SystemTemporaryDirectory()) + L"linuxscps.tmp";
+      DumpResourceToFile(L"LINUXSCP_SESSION", FTemporarySessionFile);
       FEmbeddedSessions = true;
       FTemporaryKeyFile =
-        IncludeTrailingBackslash(SystemTemporaryDirectory()) + L"winscpk.tmp";
-      if (!DumpResourceToFile(L"WINSCP_KEY", FTemporaryKeyFile))
+        IncludeTrailingBackslash(SystemTemporaryDirectory()) + L"linuxscpk.tmp";
+      if (!DumpResourceToFile(L"LINUXSCP_KEY", FTemporaryKeyFile))
       {
         FTemporaryKeyFile = L"";
       }
@@ -1458,7 +1458,7 @@ UnicodeString __fastcall TWinConfiguration::GetProvisionaryExtensionId(const Uni
 //---------------------------------------------------------------------------
 UnicodeString __fastcall TWinConfiguration::GetUserExtensionsPath()
 {
-  return IncludeTrailingBackslash(GetShellFolderPath(CSIDL_APPDATA)) + L"WinSCP\\" + ExtensionsSubFolder;
+  return IncludeTrailingBackslash(GetShellFolderPath(CSIDL_APPDATA)) + L"LinuxSCP\\" + ExtensionsSubFolder;
 }
 //---------------------------------------------------------------------------
 TStrings * __fastcall TWinConfiguration::GetExtensionsPaths()
@@ -3170,15 +3170,15 @@ bool __fastcall TCustomCommandType::Equals(const TCustomCommandType * Other) con
 const UnicodeString ExtensionNameDirective(L"name");
 const UnicodeString ExtensionCommandDirective(L"command");
 const wchar_t ExtensionMark = L'@';
-const UnicodeString WinSCPExtensionExt(L".WinSCPextension");
+const UnicodeString LinuxSCPExtensionExt(L".LinuxSCPextension");
 //---------------------------------------------------------------------------
 UnicodeString __fastcall TCustomCommandType::GetExtensionId(const UnicodeString & Name)
 {
   UnicodeString Result;
-  int P = Pos(UpperCase(WinSCPExtensionExt), UpperCase(Name));
+  int P = Pos(UpperCase(LinuxSCPExtensionExt), UpperCase(Name));
   // Ends with Ext or there's another extension after it
   if ((P > 1) &&
-      ((Name.Length() == (P + WinSCPExtensionExt.Length() - 1)) || (Name[P + WinSCPExtensionExt.Length()] == L'.')))
+      ((Name.Length() == (P + LinuxSCPExtensionExt.Length() - 1)) || (Name[P + LinuxSCPExtensionExt.Length()] == L'.')))
   {
     Result = Name.SubString(1, P - 1);
   }
@@ -3275,7 +3275,7 @@ void __fastcall TCustomCommandType::LoadExtension(TStrings * Lines, const Unicod
           UnicodeString Dependency = CutToChar(Value, L' ', true).LowerCase();
           Value = Value.Trim();
           bool Failed;
-          if (Dependency == L"winscp")
+          if (Dependency == L"linuxscp")
           {
             int Version = StrToCompoundVersion(Value);
             Failed = (Version > WinConfiguration->CompoundVersion);

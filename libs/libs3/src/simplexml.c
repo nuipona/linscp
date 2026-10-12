@@ -30,11 +30,11 @@
  *
  ************************************************************************** **/
 
-#include <expat.h> // WINSCP (expat)
+#include <expat.h> // FORK_BUILD (expat)
 #include <string.h>
 #include "simplexml.h"
 
-typedef XML_Char xmlChar; // WINSCP (expat)
+typedef XML_Char xmlChar; // FORK_BUILD (expat)
 
 // Use libxml2 for parsing XML.  XML is severely overused in modern
 // computing.  It is useful for only a very small subset of tasks, but
@@ -53,7 +53,7 @@ typedef XML_Char xmlChar; // WINSCP (expat)
 // S3 appears to only use ASCII anyway.
 
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static xmlEntityPtr saxGetEntity(void *user_data, const xmlChar *name)
 {
     (void) user_data;
@@ -145,7 +145,7 @@ static void saxError(void *user_data, const char *msg, ...)
 }
 
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static struct _xmlSAXHandler saxHandlerG =
 {
     0, // internalSubsetSAXFunc
@@ -197,7 +197,7 @@ void simplexml_initialize(SimpleXml *simpleXml,
 void simplexml_deinitialize(SimpleXml *simpleXml)
 {
     if (simpleXml->xmlParser) {
-        XML_ParserFree((XML_Parser)simpleXml->xmlParser); // WINSCP (expat)
+        XML_ParserFree((XML_Parser)simpleXml->xmlParser); // FORK_BUILD (expat)
     }
 }
 
@@ -205,12 +205,12 @@ void simplexml_deinitialize(SimpleXml *simpleXml)
 S3Status simplexml_add(SimpleXml *simpleXml, const char *data, int dataLen)
 {
     if (!simpleXml->xmlParser &&
-        ((simpleXml->xmlParser = XML_ParserCreate(NULL)) == NULL)) { // WINSCP (expat)
+        ((simpleXml->xmlParser = XML_ParserCreate(NULL)) == NULL)) { // FORK_BUILD (expat)
         return S3StatusInternalError;
     }
 
-    XML_SetElementHandler((XML_Parser)simpleXml->xmlParser, saxStartElement, saxEndElement); // WINSCP (expat)
-    XML_SetCharacterDataHandler((XML_Parser)simpleXml->xmlParser, saxCharacters); // WINSCP (expat)
+    XML_SetElementHandler((XML_Parser)simpleXml->xmlParser, saxStartElement, saxEndElement); // FORK_BUILD (expat)
+    XML_SetCharacterDataHandler((XML_Parser)simpleXml->xmlParser, saxCharacters); // FORK_BUILD (expat)
     XML_SetUserData((XML_Parser)simpleXml->xmlParser, (void *) simpleXml);
 
     if (XML_Parse((XML_Parser)simpleXml->xmlParser,

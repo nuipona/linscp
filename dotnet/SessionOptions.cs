@@ -5,7 +5,7 @@ using System.Text.RegularExpressions;
 using System.Globalization;
 using System.Security;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     [Guid("F25C49A5-74A6-4E8F-AEB4-5B4E0DDF0EF9")]
     [ComVisible(true)]
@@ -186,7 +186,7 @@ namespace WinSCP
             }
 
             // Contrary to TSessionData::ParseUrl, not converting Webdav to S3 on S3 hostname.
-            // Not sure if it is desirable and WinSCP will do the conversion for us later anyway.
+            // Not sure if it is desirable and LinuxSCP will do the conversion for us later anyway.
 
             if (string.IsNullOrEmpty(HostName))
             {

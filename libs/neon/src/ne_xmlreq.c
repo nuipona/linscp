@@ -68,7 +68,7 @@ int ne_xml_parse_response(ne_request *req, ne_xml_parser *parser)
 
 /* Returns non-zero if given content-type is an XML media type,
  * following the RFC 7303 rules. */
-#ifdef WINSCP
+#ifdef FORK_BUILD
 int media_type_is_xml(const ne_content_type *ctype)
 #else
 static int media_type_is_xml(const ne_content_type *ctype)

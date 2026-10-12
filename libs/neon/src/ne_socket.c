@@ -69,7 +69,7 @@
 #ifdef HAVE_WSPIAPI_H
 #include <wspiapi.h>
 #endif
-#if (defined WINSCP) && (HAVE_IF_INDEXTONAME)
+#if (defined FORK_BUILD) && (HAVE_IF_INDEXTONAME)
 #include <iphlpapi.h>
 #endif
 #endif
@@ -137,7 +137,7 @@ typedef struct in_addr ne_inet_addr;
 #endif
 
 /* "Be Conservative In What You Build". */
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #define USE_NONBLOCKING_CONNECT
 #else
 #if defined(HAVE_FCNTL) && defined(O_NONBLOCK) && defined(F_SETFL) \
@@ -345,7 +345,7 @@ int ne_sock_init(void)
     if (err != 0) {
 	return init_state = -1;
     }
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #ifdef HAVE_SSPI
     if (ne_sspi_init() < 0) {
         return init_state = -1;
@@ -1374,7 +1374,7 @@ static int timed_connect(ne_socket *sock, int fd,
     if (sock->cotimeout) {
         int errnum, flags;
 
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         flags = 1;
         ioctlsocket(fd, FIONBIO, &flags);
         #else
@@ -1428,7 +1428,7 @@ static int timed_connect(ne_socket *sock, int fd,
         }
         
         /* Reset to old flags; fail on error if no previous error. */
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         flags = 0;
         ioctlsocket(fd, FIONBIO, &flags);
         #else
@@ -1998,7 +1998,7 @@ int ne_sock_connect_ssl(ne_socket *sock, ne_ssl_context *ctx, void *userdata)
 }
 
 int ne_sock_handshake(ne_socket *sock, ne_ssl_context *ctx,
-                      const char *hostname, unsigned int flags, void *userdata) // WINSCP
+                      const char *hostname, unsigned int flags, void *userdata) // FORK_BUILD
 {
     int ret;
 
@@ -2041,7 +2041,7 @@ int ne_sock_handshake(ne_socket *sock, ne_ssl_context *ctx,
         NE_DEBUG(NE_DBG_SSL, "sslsess: Using cached session: set_session = %d.\n", ret);
     }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
     ne_init_ssl_session(ssl, userdata);
 #endif
 
@@ -2356,7 +2356,7 @@ int ne_sock_close(ne_socket *sock)
     return ret;
 }
 
-// WINSCP
+// FORK_BUILD
 void do_ne_sock_sndbuf(ne_socket *sock, int opt, unsigned int buf)
 {
     unsigned int value = 0;
