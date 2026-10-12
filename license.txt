@@ -688,11 +688,10 @@ intact, so they remain in the source files, typically as:
 
     Copyright (c) 2000-2026 Martin Prikryl
 
-Third-party components are covered by their own licences: the SSH client under
-source/putty (MIT-style), the FTP/WebDAV/S3 libraries under libs (MIT, expat,
-OpenSSL), the .NET assembly under dotnet (MPL-2.0) and the visual components
-under source/packages (their respective licences). See the files shipped with
-each component.
+Third-party components are covered by their own licences: the SSH and SFTP
+core under source/putty and the POSIX platform layer under libs/putty are
+derived from PuTTY and are distributed under its MIT-style licence (see
+libs/putty/LICENCE). See the files shipped with each component.
 
 The names, marks and logos of those projects are the property of their owners.
 Nothing in this licence grant allows you to use them to promote or endorse
@@ -705,12 +704,7 @@ License - you may not redistribute it with another program.
   C. Privacy
 
 This program does not collect or transmit usage statistics, and it does not
-contact any vendor server for update checks or installation reports; those
-network calls were removed from this fork. Update notifications and the
-documented help links point at this project's public repository, which you are
-free to re-point at your own endpoints in source/resource/TextsWin1.rc
-(UPDATES_URL, DOCUMENTATION_URL2 and friends) and in deployment/
-linuxscpsetup.iss (WebRoot, WebReport).
+contact any vendor server for update checks or installation reports.
 
 Beyond that, the only network traffic this program generates is the file
 transfer traffic you start yourself.

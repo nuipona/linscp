@@ -19,9 +19,8 @@ is the console file transfer client of LinuxSCP. It connects to an SFTP
 server over SSH, and transfers files to and from the local file system,
 either from a script, from a command line, or interactively.
 .PP
-It is the native POSIX port of the LinuxSCP application: the SSH and SFTP
-protocol code is the PuTTY core that the Windows build uses, driven by a
-POSIX front end.
+The SSH and SFTP protocol code is the PuTTY core, driven by a POSIX front
+end.
 .SH OPTIONS
 .TP
 .BI \-script= file
@@ -215,7 +214,7 @@ linuxscp \-batch \-script=sync.txt
 .SH LIMITATIONS
 The POSIX client speaks SFTP only. The SCP protocol, FTP, FTPS, WebDAV and
 Amazon S3 sessions, local-to-local transfers, resuming interrupted
-transfers and the graphical interface of the Windows client are not ported.
+transfers and any graphical interface are not implemented.
 .SH SEE ALSO
 .BR sftp (1),
 .BR ssh (1),

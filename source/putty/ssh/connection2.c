@@ -1253,8 +1253,12 @@ static void ssh2_check_termination_callback(void *vctx)
     ssh2_check_termination(s);
 }
 
+#ifdef __clang__
 #pragma clang diagnostic push
+#endif
+#ifdef __clang__
 #pragma clang diagnostic ignored "-Wdisabled-macro-expansion"
+#endif
 
 static void ssh2_channel_destroy(struct ssh2_channel *c)
 {
@@ -1544,7 +1548,9 @@ static void ssh2_sharing_no_more_downstreams(ConnectionLayer *cl)
     queue_toplevel_callback(ssh2_check_termination_callback, s);
 }
 
+#ifdef __clang__
 #pragma clang diagnostic pop
+#endif
 
 static struct X11FakeAuth *ssh2_add_x11_display(
     ConnectionLayer *cl, int authtype, struct X11Display *disp)

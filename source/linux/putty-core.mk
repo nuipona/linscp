@@ -1,6 +1,7 @@
-# Generated from source/*.cbproj by tools/gen-putty-sources.py -- do not edit.
-# PuTTY core sources shared with the Windows build (all platform layers
-# except putty/windows/**, which the POSIX build replaces with libs/putty/unix).
+# PuTTY core sources built into libputty.a for the Debian client.
+# Every source/putty/**/*.c file is listed here except the Windows platform
+# layer (putty/windows/**, replaced by libs/putty/unix). Edit this list by hand
+# when adding or removing core files.
 PUTTY_CORE_SRCS := \
 	../../source/putty/be_list.c \
 	../../source/putty/callback.c \

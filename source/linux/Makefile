@@ -2,8 +2,7 @@
 #
 # This builds the console client `linuxscp` for Linux out of:
 #
-#   * the platform-neutral PuTTY core that the Windows build also uses
-#     (source/putty, see putty-core.mk),
+#   * the platform-neutral PuTTY core (source/putty, listed in putty-core.mk),
 #   * a POSIX platform layer vendored from upstream PuTTY 0.85
 #     (libs/putty/unix, libs/putty/charset),
 #   * the upstream PuTTY SFTP client library (libs/putty/ssh/sftp.c),
@@ -32,13 +31,14 @@ OPT ?= -O2
 WARN ?= -Wall
 
 # -DFORK_BUILD               : build the PuTTY core in "embedded library" mode,
-#                              as the Windows build does.
+#                              as the upstream core expects.
 # -DPLATFORM_HAS_SMEMCLR     : the core provides smemclr().
 # -DNO_GSSAPI                : no GSSAPI/Kerberos support in this build.
 # -DHAVE_...                 : C library features available on Linux.
 # -DHAVE_AES_NI=0 etc.       : use the portable crypto implementations; the
 #                              x86 intrinsics versions in source/putty/crypto
-#                              are tuned for the MSVC/BCC Windows toolchains.
+#                              are tuned for the MSVC/BCC toolchains and are
+#                              not built here.
 PUTTY_DEFS := \
 	-DFORK_BUILD \
 	-DMPEXT \
@@ -106,9 +106,10 @@ CXXFLAGS_APP := -std=gnu++17 $(OPT) -g $(WARN) -pthread $(DEPFLAGS) \
 
 include putty-core.mk
 
-# Core sources that the POSIX platform layer replaces. The Windows build links
-# these; on POSIX the real implementation comes from libs/putty/unix and
-# keeping both would give duplicate symbols at link time:
+# Core sources that the POSIX platform layer replaces. The core's own copy
+# would clash with the one in libs/putty/unix, so it is left out. The real
+# implementation comes from libs/putty/unix. Keeping both would give
+# duplicate symbols at link time:
 #
 #   ssh/nosharing.c       -> libs/putty/unix/sharing.c
 #                            (platform_ssh_share[_cleanup])
