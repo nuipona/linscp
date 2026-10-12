@@ -39,6 +39,7 @@ bool ExpandLocalWildcard(const std::string & path, std::vector<std::string> & na
     std::string & error);
 
 bool CreateLocalDirectory(const std::string & path, std::string & error);
+bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error);
 bool RemoveLocalFile(const std::string & path, std::string & error);
 
 std::string GetLocalDirectory(std::string & error);

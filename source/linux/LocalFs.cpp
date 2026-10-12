@@ -128,6 +128,44 @@ bool CreateLocalDirectory(const std::string & path, std::string & error)
     return false;
 }
 
+bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error)
+{
+    error.clear();
+    if (path.empty())
+    {
+        return false;
+    }
+    std::string expanded = ExpandTilde(path);
+    LocalFileInfo info = StatLocal(expanded);
+    if (info.exists)
+    {
+        if (info.isDir)
+        {
+            return true;
+        }
+        error = "Path '" + expanded + "' exists and is not a directory.";
+        return false;
+    }
+    std::string parent = LocalDirName(expanded);
+    if (!parent.empty() && parent != expanded && parent != "." && parent != "/")
+    {
+        LocalFileInfo parentInfo = StatLocal(parent);
+        if (!parentInfo.exists)
+        {
+            if (!CreateLocalDirectoryRecursive(parent, error))
+            {
+                return false;
+            }
+        }
+        else if (!parentInfo.isDir)
+        {
+            error = "Parent path '" + parent + "' exists and is not a directory.";
+            return false;
+        }
+    }
+    return CreateLocalDirectory(expanded, error);
+}
+
 bool RemoveLocalFile(const std::string & path, std::string & error)
 {
     error.clear();

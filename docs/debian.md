@@ -102,18 +102,32 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 ### Commands
 
 `open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lcd`, `lpwd`, `get`,
-`put`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`, `option`, `help`, `exit`.
+`put`, `synchronize`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`,
+`option`, `help`, `exit`.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
 transfers every match. The exit status is non-zero if any command failed. When a
 transfer selects multiple source files, the destination is treated as a
-directory and created if it does not exist. Directories themselves are not
-transferred recursively.
+directory and created if it does not exist.
+
+Directory transfers are recursive by default or with the `-r` switch. Both `get`
+and `put` support WinSCP switches:
+* `-r`: transfer directories recursively.
+* `-delete`: remove source files after a successful transfer.
+* `-neweronly`: only transfer files that are newer than target files.
+* `-preservetime`: preserve source file modification timestamps.
+When the destination is omitted, `get` defaults to the local working directory
+and `put` defaults to the remote working directory.
+
+`synchronize [local|remote|both] [localdir [remotedir]]` compares directory
+trees and synchronizes newer and missing files in the specified direction.
 
 Overwrite and delete confirmations are enabled by default. Interactive runs
 ask before replacing or removing data. In `-batch` or other non-interactive
 runs, an operation that needs confirmation fails without reading from stdin;
 put `option confirm off` in a trusted script to disable those checks.
+`option batch on|off|abort` configures script batch mode, and `echo` prints
+messages for script output logging.
 
 `call` and `show` are rejected on purpose: the connection runs the SFTP
 subsystem only, so there is no remote shell to execute a command in.
@@ -232,7 +246,9 @@ layer's events to standard output as they happen.
 
 ## Not ported yet
 
-The Debian client is an SFTP-only command-line subset. Still to come:
-recursive directory transfers, SCP, FTP/FTPS, WebDAV and Amazon S3 sessions,
-transferring between two local directories, resuming interrupted transfers,
-and a graphical interface. See the scope notes in the top-level readme.
+The Debian client is currently an SFTP command-line client. While recursive
+directory transfers, directory synchronization, and script compatibility options
+are implemented, the following upstream WinSCP subsystems remain to be ported:
+additional protocols (SCP, FTP/FTPS, WebDAV, Amazon S3), resuming interrupted
+transfers, and a graphical desktop interface (e.g. Qt/GTK). See the scope notes
+in the top-level readme.

@@ -136,15 +136,43 @@ Change the local directory.
 .B lpwd
 Print the local directory.
 .TP
-.BI get " remote local"
-Download a file, or every file matching a mask. The final argument is a local
-file path for one source file and a directory for multiple sources. An absent
-destination directory is created when multiple sources are selected.
+.BI get " [" options "] remote [" local ]
+Download a file, a directory recursively, or every file matching a mask.
+Optional switches include
+.BR \-r " (recursive directory download),"
+.BR \-delete " (remove remote source after transfer),"
+.BR \-neweronly " (skip files that are not newer than the target),"
+and
+.BR \-preservetime " (preserve timestamps)."
+When omitted,
+.I local
+defaults to the current local directory.
 .TP
-.BI put " local remote"
-Upload a file, or every file matching a mask. The final argument is a remote
-file path for one source file and a directory for multiple sources. An absent
-remote destination directory is created when multiple sources are selected.
+.BI put " [" options "] local [" remote ]
+Upload a file, a directory recursively, or every file matching a mask.
+Optional switches include
+.BR \-r " (recursive directory upload),"
+.BR \-delete " (remove local source after transfer),"
+.BR \-neweronly " (skip files that are not newer than the target),"
+and
+.BR \-preservetime " (preserve timestamps)."
+When omitted,
+.I remote
+defaults to the current remote directory.
+.TP
+.BI synchronize " [local|remote|both] [" localdir " [" remotedir ]]"
+Synchronize directories in the specified direction.
+.B remote
+pushes newer local files to the remote server,
+.B local
+pulls newer remote files to the local machine, and
+.B both
+synchronizes both directions. Supports the
+.B \-delete
+flag.
+.TP
+.BI echo " [" message ]
+Print a message to the console output.
 .TP
 .BI rm " file"
 Remove remote files.
@@ -165,15 +193,15 @@ Change the permissions of a remote file, given in octal.
 Print the attributes of a remote file.
 .TP
 .BI option " name value"
-Control confirmations with
-.BR option\ confirm\ on
-or
-.BR option\ confirm\ off .
-The default is
-.BR on ,
-which asks before overwriting local or remote files and before deleting remote
-files. In a non-interactive run, a required confirmation fails without
-consuming script input.
+Configure session options:
+.BR option\ confirm\ on|off
+controls overwrite and delete confirmations.
+.BR option\ batch\ on|off|abort
+controls non-interactive batch mode.
+.BR option\ reconnect\ <secs>
+and
+.BR option\ transfer\ binary|ascii
+are also recognized for WinSCP script compatibility.
 .TP
 .B help
 List the commands.
@@ -230,10 +258,11 @@ linuxscp \-batch \-script=sync.txt
 .fi
 .RE
 .SH LIMITATIONS
-The Debian client is an SFTP command-line client. It does not yet implement
-recursive directory transfers, the SCP protocol, FTP, FTPS, WebDAV, Amazon S3,
-local-to-local transfers, resuming interrupted transfers or a graphical
-interface.
+The Debian client is an SFTP command-line client. While recursive directory
+transfers, directory synchronization, and script compatibility options are
+supported, it does not yet implement the SCP protocol, FTP, FTPS, WebDAV,
+Amazon S3, local-to-local transfers, resuming interrupted transfers or a
+graphical interface.
 .SH SEE ALSO
 .BR sftp (1),
 .BR ssh (1),

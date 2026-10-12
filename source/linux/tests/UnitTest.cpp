@@ -19,6 +19,7 @@
 #include "PathUtil.h"
 #include "LocalFs.h"
 #include "Session.h"
+#include "Script.h"
 
 namespace {
 
@@ -412,7 +413,35 @@ void TestLocalFs()
     CHECK_TRUE(RemoveLocalFile(dir + "/two.log", error));
     CHECK_EQ(error, "");
     CHECK_TRUE(rmdir((dir + "/sub").c_str()) == 0);
+
+    /* Recursive directory creation handles multiple missing parent directories. */
+    CHECK_TRUE(CreateLocalDirectoryRecursive(dir + "/deep/nested/path", error));
+    CHECK_TRUE(error.empty());
+    LocalFileInfo deepInfo = StatLocal(dir + "/deep/nested/path");
+    CHECK_TRUE(deepInfo.exists);
+    CHECK_TRUE(deepInfo.isDir);
+    CHECK_TRUE(rmdir((dir + "/deep/nested/path").c_str()) == 0);
+    CHECK_TRUE(rmdir((dir + "/deep/nested").c_str()) == 0);
+    CHECK_TRUE(rmdir((dir + "/deep").c_str()) == 0);
+
     CHECK_TRUE(rmdir(dir.c_str()) == 0);
+}
+
+void TestScriptCommands()
+{
+    Script script;
+    CHECK_TRUE(script.ExecuteLine("echo test message"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option confirm off"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option batch abort"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option reconnect 10"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option transfer binary"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_FALSE(script.ExecuteLine("exit"));
+    CHECK_TRUE(script.ExitRequested());
 }
 
 void TestSessionRegistry()
@@ -443,6 +472,7 @@ int main()
     TestParseSiteUrl();
     TestLocalFs();
     TestSessionRegistry();
+    TestScriptCommands();
 
     if (gFailures != 0)
     {

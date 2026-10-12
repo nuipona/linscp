@@ -15,6 +15,17 @@
 
 namespace linuxscp {
 
+struct TransferFlags
+{
+    bool deleteSource;
+    bool newerOnly;
+    bool preserveTime;
+    bool recursive;
+
+    TransferFlags() : deleteSource(false), newerOnly(false),
+        preserveTime(false), recursive(true) {}
+};
+
 class Script
 {
 public:
@@ -48,6 +59,7 @@ private:
     void PrintLocalDirectory();
     bool GetFiles(const std::vector<std::string> & args);
     bool PutFiles(const std::vector<std::string> & args);
+    bool SynchronizeDirectories(const std::vector<std::string> & args);
     bool RemoveRemote(const std::vector<std::string> & args);
     bool RemoveRemoteDirectory(const std::vector<std::string> & args);
     bool MakeRemoteDirectory(const std::vector<std::string> & args);
@@ -57,6 +69,15 @@ private:
     bool SetOption(const std::vector<std::string> & args);
     void PrintHelp();
     void PrintStatus();
+
+    bool DownloadDirectoryRecursive(const std::string & remoteDir,
+        const std::string & localDir, const TransferFlags & flags,
+        unsigned long long & bytesTransferred);
+    bool UploadDirectoryRecursive(const std::string & localDir,
+        const std::string & remoteDir, const TransferFlags & flags,
+        unsigned long long & bytesTransferred);
+    bool CreateRemoteDirectoryRecursive(const std::string & path,
+        std::string & error);
 
     bool RequireConnection();
     /* Expands a remote argument (possibly a mask) into full paths. */
