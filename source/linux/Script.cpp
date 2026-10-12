@@ -1,4 +1,5 @@
 #include "Script.h"
+#include "ProtocolClient.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -95,6 +96,7 @@ bool ParseOctalPermissions(const std::string & text, unsigned long & permissions
 
 Script::Script() :
     mConfirm(true),
+    mResume(false),
     mExit(false),
     mErrors(0)
 {
@@ -114,6 +116,161 @@ bool Script::RequireConnection()
         return false;
     }
     return true;
+}
+
+bool Script::RemoteListDir(const std::string & path, LscpNames *& names, std::string & error)
+{
+    error.clear();
+    names = NULL;
+    if (mSession.Options().protocol == "sftp")
+    {
+        names = lscp_sftp_list_dir(path.c_str());
+        if (names == NULL)
+        {
+            error = lscp_sftp_error();
+            return false;
+        }
+        return true;
+    }
+    names = new LscpNames();
+    bool ok = ProtocolClient::List(mSession.Options(), path, names, error);
+    if (!ok)
+    {
+        delete names;
+        names = NULL;
+        return false;
+    }
+    return true;
+}
+
+void Script::RemoteFreeNames(LscpNames * names)
+{
+    if (names == NULL)
+    {
+        return;
+    }
+    if (mSession.Options().protocol == "sftp")
+    {
+        lscp_sftp_free_names(names);
+    }
+    else
+    {
+        ProtocolClient::FreeNames(names);
+        delete names;
+    }
+}
+
+int Script::RemoteStat(const std::string & path, LscpAttrs * attrs, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int st = lscp_sftp_stat(path.c_str(), attrs);
+        if (st != LSCP_SFTP_STAT_EXISTS)
+        {
+            error = lscp_sftp_error();
+        }
+        return st;
+    }
+    return ProtocolClient::Stat(mSession.Options(), path, attrs, error);
+}
+
+int Script::RemoteGet(const std::string & remote, const std::string & local,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * ctx, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int res = lscp_sftp_get_resume(remote.c_str(), local.c_str(), resumeOffset, size,
+            progress, ctx);
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::Get(mSession.Options(), remote, local, resumeOffset, size,
+        progress, ctx, error);
+}
+
+int Script::RemotePut(const std::string & local, const std::string & remote,
+    int permissions, unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * ctx, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int res = lscp_sftp_put_resume(local.c_str(), remote.c_str(), permissions,
+            resumeOffset, size, progress, ctx);
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::Put(mSession.Options(), local, remote, permissions,
+        resumeOffset, size, progress, ctx, error);
+}
+
+int Script::RemoteRemove(const std::string & path, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int res = lscp_sftp_remove(path.c_str());
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::Remove(mSession.Options(), path, error);
+}
+
+int Script::RemoteRemoveDir(const std::string & path, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int res = lscp_sftp_rmdir(path.c_str());
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::RemoveDir(mSession.Options(), path, error);
+}
+
+int Script::RemoteMakeDir(const std::string & path, int permissions, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int res = lscp_sftp_mkdir(path.c_str(), permissions);
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::MakeDir(mSession.Options(), path, error);
+}
+
+int Script::RemoteRename(const std::string & from, const std::string & to, std::string & error)
+{
+    error.clear();
+    if (mSession.Options().protocol == "sftp")
+    {
+        int res = lscp_sftp_rename(from.c_str(), to.c_str());
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::Move(mSession.Options(), from, to, error);
 }
 
 bool Script::OpenSite(const std::vector<std::string> & args)
@@ -197,26 +354,34 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         return false;
     }
 
-    if (lscp_sftp_init() != 0)
+    if (mSession.Options().protocol == "sftp")
     {
-        Console::Instance().Error(lscp_sftp_error());
-        mSession.Close();
-        mErrors++;
-        return false;
-    }
+        if (lscp_sftp_init() != 0)
+        {
+            Console::Instance().Error(lscp_sftp_error());
+            mSession.Close();
+            mErrors++;
+            return false;
+        }
 
-    std::string initial = options.initialDirectory.empty() ?
-        std::string(".") : options.initialDirectory;
-    char * canonical = lscp_sftp_realpath(initial.c_str());
-    if (canonical == NULL)
-    {
-        Console::Instance().Error(lscp_sftp_error());
-        mSession.Close();
-        mErrors++;
-        return false;
+        std::string initial = options.initialDirectory.empty() ?
+            std::string(".") : options.initialDirectory;
+        char * canonical = lscp_sftp_realpath(initial.c_str());
+        if (canonical == NULL)
+        {
+            Console::Instance().Error(lscp_sftp_error());
+            mSession.Close();
+            mErrors++;
+            return false;
+        }
+        mRemoteDirectory = canonical;
+        free(canonical);
     }
-    mRemoteDirectory = canonical;
-    free(canonical);
+    else
+    {
+        mRemoteDirectory = options.initialDirectory.empty() ?
+            std::string("/") : options.initialDirectory;
+    }
 
     Console::Instance().Status("Connected, the remote directory is " + mRemoteDirectory);
     return true;
@@ -247,16 +412,23 @@ bool Script::ChangeRemoteDirectory(const std::vector<std::string> & args)
         return false;
     }
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
-    char * canonical = lscp_sftp_realpath(path.c_str());
-    if (canonical == NULL)
+    if (mSession.Options().protocol == "sftp")
     {
-        Console::Instance().Error(Texts::RemoteError("change directory to", path,
-            lscp_sftp_error()));
-        mErrors++;
-        return false;
+        char * canonical = lscp_sftp_realpath(path.c_str());
+        if (canonical == NULL)
+        {
+            Console::Instance().Error(Texts::RemoteError("change directory to", path,
+                lscp_sftp_error()));
+            mErrors++;
+            return false;
+        }
+        mRemoteDirectory = canonical;
+        free(canonical);
     }
-    mRemoteDirectory = canonical;
-    free(canonical);
+    else
+    {
+        mRemoteDirectory = path;
+    }
     return true;
 }
 
@@ -340,10 +512,11 @@ bool Script::ListRemote(const std::vector<std::string> & args)
     std::string path = target.empty() ? mRemoteDirectory :
         ResolveRemotePath(mRemoteDirectory, target);
     Console::Instance().Status(Texts::ReadingDirectory(path));
-    LscpNames * names = lscp_sftp_list_dir(path.c_str());
-    if (names == NULL)
+    LscpNames * names = NULL;
+    std::string readError;
+    if (!RemoteListDir(path, names, readError))
     {
-        Console::Instance().Error(Texts::CannotReadDirectory(path, lscp_sftp_error()));
+        Console::Instance().Error(Texts::CannotReadDirectory(path, readError));
         mErrors++;
         return false;
     }
@@ -359,7 +532,7 @@ bool Script::ListRemote(const std::vector<std::string> & args)
         PrintRemoteEntry(name, names->names[i], longFormat);
         count++;
     }
-    lscp_sftp_free_names(names);
+    RemoteFreeNames(names);
     Console::Instance().Status(Texts::DirectoryRead(count));
     return true;
 }
@@ -420,10 +593,9 @@ bool Script::ExpandRemote(const std::string & pattern, std::vector<std::string> 
     {
         dir = "/";
     }
-    LscpNames * names = lscp_sftp_list_dir(dir.c_str());
-    if (names == NULL)
+    LscpNames * names = NULL;
+    if (!RemoteListDir(dir, names, error))
     {
-        error = lscp_sftp_error();
         return false;
     }
     for (int i = 0; i < names->count; i++)
@@ -439,7 +611,7 @@ bool Script::ExpandRemote(const std::string & pattern, std::vector<std::string> 
         }
         paths.push_back(JoinRemotePath(dir, name));
     }
-    lscp_sftp_free_names(names);
+    RemoteFreeNames(names);
     return true;
 }
 
@@ -451,7 +623,7 @@ bool Script::CreateRemoteDirectoryRecursive(const std::string & path, std::strin
         return true;
     }
     LscpAttrs attrs = {};
-    int st = lscp_sftp_stat(path.c_str(), &attrs);
+    int st = RemoteStat(path, &attrs, error);
     if (st == LSCP_SFTP_STAT_EXISTS)
     {
         if ((attrs.flags & LSCP_ATTR_PERMISSIONS) != 0 && (attrs.permissions & 0040000) != 0)
@@ -469,9 +641,8 @@ bool Script::CreateRemoteDirectoryRecursive(const std::string & path, std::strin
             return false;
         }
     }
-    if (lscp_sftp_mkdir(path.c_str(), -1) != 0)
+    if (RemoteMakeDir(path, -1, error) != 0)
     {
-        error = lscp_sftp_error();
         return false;
     }
     return true;
@@ -489,10 +660,11 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
         return false;
     }
 
-    LscpNames * names = lscp_sftp_list_dir(remoteDir.c_str());
-    if (names == NULL)
+    LscpNames * names = NULL;
+    std::string dirErr;
+    if (!RemoteListDir(remoteDir, names, dirErr))
     {
-        Console::Instance().Error(Texts::RemoteError("read directory", remoteDir, lscp_sftp_error()));
+        Console::Instance().Error(Texts::RemoteError("read directory", remoteDir, dirErr));
         mErrors++;
         return false;
     }
@@ -520,7 +692,7 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
         if (!childIsDir && (names->names[i].attrs.flags & LSCP_ATTR_PERMISSIONS) == 0)
         {
             LscpAttrs a = {};
-            if (lscp_sftp_stat(childRemote.c_str(), &a) == LSCP_SFTP_STAT_EXISTS)
+            if (RemoteStat(childRemote, &a, dirErr) == LSCP_SFTP_STAT_EXISTS)
             {
                 childIsDir = (a.flags & LSCP_ATTR_PERMISSIONS) != 0 && (a.permissions & 0040000) != 0;
             }
@@ -534,7 +706,7 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             }
             if (flags.deleteSource)
             {
-                lscp_sftp_rmdir(childRemote.c_str());
+                RemoteRemoveDir(childRemote, dirErr);
             }
         }
         else
@@ -564,12 +736,12 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             unsigned long long totalSize = (names->names[i].attrs.flags & LSCP_ATTR_SIZE) != 0 ?
                 names->names[i].attrs.size : 0;
             Console::Instance().TransferStart(name, totalSize);
-            int result = lscp_sftp_get(childRemote.c_str(), childLocal.c_str(), &size,
-                ProgressCallback, NULL);
+            int result = RemoteGet(childRemote, childLocal, 0, &size,
+                ProgressCallback, NULL, dirErr);
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
-                Console::Instance().Error(Texts::TransferFailed(childRemote, lscp_sftp_error()));
+                Console::Instance().Error(Texts::TransferFailed(childRemote, dirErr));
                 mErrors++;
                 success = false;
                 continue;
@@ -586,11 +758,11 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             }
             if (flags.deleteSource)
             {
-                lscp_sftp_remove(childRemote.c_str());
+                RemoteRemove(childRemote, dirErr);
             }
         }
     }
-    lscp_sftp_free_names(names);
+    RemoteFreeNames(names);
     return success;
 }
 
@@ -636,7 +808,7 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
         else if (info.isRegular)
         {
             LscpAttrs remoteInfo = {};
-            const int remoteStat = lscp_sftp_stat(childRemote.c_str(), &remoteInfo);
+            const int remoteStat = RemoteStat(childRemote, &remoteInfo, error);
             const bool remoteExists = remoteStat == LSCP_SFTP_STAT_EXISTS;
 
             if (flags.newerOnly && remoteExists &&
@@ -661,12 +833,12 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
 
             unsigned long long size = 0;
             Console::Instance().TransferStart(name, info.size);
-            int result = lscp_sftp_put(childLocal.c_str(), childRemote.c_str(), -1,
-                &size, ProgressCallback, NULL);
+            int result = RemotePut(childLocal, childRemote, -1, 0,
+                &size, ProgressCallback, NULL, error);
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
-                Console::Instance().Error(Texts::TransferFailed(childLocal, lscp_sftp_error()));
+                Console::Instance().Error(Texts::TransferFailed(childLocal, error));
                 mErrors++;
                 success = false;
                 continue;
@@ -714,8 +886,11 @@ bool Script::GetFiles(const std::vector<std::string> & args)
         {
             flags.recursive = true;
         }
-        else if (StartsWith(a, "-filemask=") || StartsWith(a, "-transfer=") ||
-                 StartsWith(a, "-resume") || a == "-resume")
+        else if (StartsWith(a, "-resume") || a == "-resume")
+        {
+            flags.resume = true;
+        }
+        else if (StartsWith(a, "-filemask=") || StartsWith(a, "-transfer="))
         {
             /* Accepted WinSCP switch compatibility */
         }
@@ -784,7 +959,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
         for (size_t n = 0; n < sources.size(); n++)
         {
             LscpAttrs sourceAttrs = {};
-            int statRes = lscp_sftp_stat(sources[n].c_str(), &sourceAttrs);
+            int statRes = RemoteStat(sources[n], &sourceAttrs, error);
             bool isDir = (statRes == LSCP_SFTP_STAT_EXISTS) &&
                 (sourceAttrs.flags & LSCP_ATTR_PERMISSIONS) != 0 &&
                 (sourceAttrs.permissions & 0040000) != 0;
@@ -808,7 +983,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
                     any = true;
                     if (flags.deleteSource)
                     {
-                        lscp_sftp_rmdir(sources[n].c_str());
+                        RemoteRemoveDir(sources[n], error);
                     }
                 }
                 continue;
@@ -855,7 +1030,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             {
                 continue;
             }
-            if (mConfirm && localInfo.exists)
+            if (mConfirm && localInfo.exists && !(flags.resume || mResume))
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite local file '" + localPath + "'?");
@@ -874,15 +1049,21 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             {
                 totalSize = sourceAttrs.size;
             }
+            unsigned long long resumeOffset = 0;
+            if ((flags.resume || mResume) && localInfo.exists && localInfo.isRegular && localInfo.size < totalSize)
+            {
+                resumeOffset = localInfo.size;
+                Console::Instance().Status("Resuming download of '" + RemoteFileName(sources[n]) +
+                    "' from byte " + std::to_string(resumeOffset));
+            }
             unsigned long long size = 0;
             Console::Instance().TransferStart(RemoteFileName(sources[n]), totalSize);
-            int result = lscp_sftp_get(sources[n].c_str(), localPath.c_str(), &size,
-                ProgressCallback, NULL);
+            int result = RemoteGet(sources[n], localPath, resumeOffset, &size,
+                ProgressCallback, NULL, error);
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
-                Console::Instance().Error(Texts::TransferFailed(sources[n],
-                    lscp_sftp_error()));
+                Console::Instance().Error(Texts::TransferFailed(sources[n], error));
                 mErrors++;
                 continue;
             }
@@ -898,7 +1079,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             }
             if (flags.deleteSource)
             {
-                lscp_sftp_remove(sources[n].c_str());
+                RemoteRemove(sources[n], error);
             }
         }
     }
@@ -937,8 +1118,11 @@ bool Script::PutFiles(const std::vector<std::string> & args)
         {
             flags.recursive = true;
         }
-        else if (StartsWith(a, "-filemask=") || StartsWith(a, "-transfer=") ||
-                 StartsWith(a, "-resume") || a == "-resume")
+        else if (StartsWith(a, "-resume") || a == "-resume")
+        {
+            flags.resume = true;
+        }
+        else if (StartsWith(a, "-filemask=") || StartsWith(a, "-transfer="))
         {
             /* Accepted WinSCP switch compatibility */
         }
@@ -963,11 +1147,12 @@ bool Script::PutFiles(const std::vector<std::string> & args)
 
     std::string destination = ResolveRemotePath(mRemoteDirectory, destinationArg);
     LscpAttrs destinationAttrs = {};
-    const int destinationStat = lscp_sftp_stat(destination.c_str(), &destinationAttrs);
+    std::string destErr;
+    const int destinationStat = RemoteStat(destination, &destinationAttrs, destErr);
     if (destinationStat == LSCP_SFTP_STAT_ERROR)
     {
         Console::Instance().Error(Texts::RemoteError("inspect destination", destination,
-            lscp_sftp_error()));
+            destErr));
         mErrors++;
         return false;
     }
@@ -1061,11 +1246,11 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                 sourcePatterns.size() > 1) ?
                 JoinRemotePath(destination, LocalFileName(sources[n])) : destination;
             LscpAttrs remoteInfo = {};
-            const int remoteStat = lscp_sftp_stat(remotePath.c_str(), &remoteInfo);
+            const int remoteStat = RemoteStat(remotePath, &remoteInfo, error);
             if (remoteStat == LSCP_SFTP_STAT_ERROR)
             {
                 Console::Instance().Error(Texts::RemoteError("inspect destination",
-                    remotePath, lscp_sftp_error()));
+                    remotePath, error));
                 mErrors++;
                 continue;
             }
@@ -1084,7 +1269,7 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             {
                 continue;
             }
-            if (mConfirm && remoteExists)
+            if (mConfirm && remoteExists && !(flags.resume || mResume))
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite remote file '" + remotePath + "'?");
@@ -1097,15 +1282,21 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                     continue;
                 }
             }
+            unsigned long long resumeOffset = 0;
+            if ((flags.resume || mResume) && remoteExists && remoteInfo.size < info.size)
+            {
+                resumeOffset = remoteInfo.size;
+                Console::Instance().Status("Resuming upload of '" + LocalFileName(sources[n]) +
+                    "' from byte " + std::to_string(resumeOffset));
+            }
             unsigned long long size = 0;
             Console::Instance().TransferStart(LocalFileName(sources[n]), info.size);
-            int result = lscp_sftp_put(sources[n].c_str(), remotePath.c_str(), -1,
-                &size, ProgressCallback, NULL);
+            int result = RemotePut(sources[n], remotePath, -1,
+                resumeOffset, &size, ProgressCallback, NULL, error);
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
-                Console::Instance().Error(Texts::TransferFailed(sources[n],
-                    lscp_sftp_error()));
+                Console::Instance().Error(Texts::TransferFailed(sources[n], error));
                 mErrors++;
                 continue;
             }
@@ -1230,10 +1421,10 @@ bool Script::RemoveRemote(const std::vector<std::string> & args)
                     continue;
                 }
             }
-            if (lscp_sftp_remove(paths[n].c_str()) != 0)
+            if (RemoteRemove(paths[n], error) != 0)
             {
                 Console::Instance().Error(Texts::RemoteError("remove", paths[n],
-                    lscp_sftp_error()));
+                    error));
                 mErrors++;
                 ok = false;
             }
@@ -1270,10 +1461,11 @@ bool Script::RemoveRemoteDirectory(const std::vector<std::string> & args)
             return true;
         }
     }
-    if (lscp_sftp_rmdir(path.c_str()) != 0)
+    std::string error;
+    if (RemoteRemoveDir(path, error) != 0)
     {
         Console::Instance().Error(Texts::RemoteError("remove the directory", path,
-            lscp_sftp_error()));
+            error));
         mErrors++;
         return false;
     }
@@ -1294,10 +1486,11 @@ bool Script::MakeRemoteDirectory(const std::vector<std::string> & args)
         return false;
     }
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
-    if (lscp_sftp_mkdir(path.c_str(), -1) != 0)
+    std::string error;
+    if (RemoteMakeDir(path, -1, error) != 0)
     {
         Console::Instance().Error(Texts::RemoteError("create the directory", path,
-            lscp_sftp_error()));
+            error));
         mErrors++;
         return false;
     }
@@ -1319,14 +1512,15 @@ bool Script::MoveRemote(const std::vector<std::string> & args)
     }
     std::string from = ResolveRemotePath(mRemoteDirectory, args[0]);
     std::string to = ResolveRemotePath(mRemoteDirectory, args[1]);
+    std::string error;
     if (mConfirm)
     {
         LscpAttrs existing = {};
-        const int targetStat = lscp_sftp_stat(to.c_str(), &existing);
+        const int targetStat = RemoteStat(to, &existing, error);
         if (targetStat == LSCP_SFTP_STAT_ERROR)
         {
             Console::Instance().Error(Texts::RemoteError("inspect target", to,
-                lscp_sftp_error()));
+                error));
             mErrors++;
             return false;
         }
@@ -1345,9 +1539,9 @@ bool Script::MoveRemote(const std::vector<std::string> & args)
             }
         }
     }
-    if (lscp_sftp_rename(from.c_str(), to.c_str()) != 0)
+    if (RemoteRename(from, to, error) != 0)
     {
-        Console::Instance().Error(Texts::RemoteError("move", from, lscp_sftp_error()));
+        Console::Instance().Error(Texts::RemoteError("move", from, error));
         mErrors++;
         return false;
     }
@@ -1423,10 +1617,11 @@ bool Script::StatRemote(const std::vector<std::string> & args)
     }
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
     LscpAttrs attrs;
-    if (lscp_sftp_stat(path.c_str(), &attrs) != 0)
+    std::string error;
+    if (RemoteStat(path, &attrs, error) != LSCP_SFTP_STAT_EXISTS)
     {
         Console::Instance().Error(Texts::RemoteError("read the attributes of", path,
-            lscp_sftp_error()));
+            error));
         mErrors++;
         return false;
     }
@@ -1445,7 +1640,7 @@ bool Script::SetOption(const std::vector<std::string> & args)
     if (args.empty())
     {
         Console::Instance().Error(Texts::WrongArguments("option",
-            "Syntax: option <name> <value> (supported: confirm, batch, reconnect, transfer)"));
+            "Syntax: option <name> <value> (supported: confirm, batch, resume, reconnect, transfer)"));
         mErrors++;
         return false;
     }
@@ -1462,11 +1657,16 @@ bool Script::SetOption(const std::vector<std::string> & args)
             Console::Instance().Status(std::string("batch = ") + (Console::Instance().IsBatchMode() ? "on" : "off"));
             return true;
         }
+        if (name == "resume")
+        {
+            Console::Instance().Status(std::string("resume = ") + (mResume ? "on" : "off"));
+            return true;
+        }
     }
     if (args.size() != 2)
     {
         Console::Instance().Error(Texts::WrongArguments("option",
-            "Syntax: option <name> <value> (supported: confirm, batch, reconnect, transfer)"));
+            "Syntax: option <name> <value> (supported: confirm, batch, resume, reconnect, transfer)"));
         mErrors++;
         return false;
     }
@@ -1485,6 +1685,25 @@ bool Script::SetOption(const std::vector<std::string> & args)
         {
             Console::Instance().Error(Texts::WrongArguments("option",
                 "The value of 'confirm' must be 'on' or 'off'."));
+            mErrors++;
+            return false;
+        }
+        return true;
+    }
+    if (name == "resume")
+    {
+        if (value == "on")
+        {
+            mResume = true;
+        }
+        else if (value == "off")
+        {
+            mResume = false;
+        }
+        else
+        {
+            Console::Instance().Error(Texts::WrongArguments("option",
+                "The value of 'resume' must be 'on' or 'off'."));
             mErrors++;
             return false;
         }

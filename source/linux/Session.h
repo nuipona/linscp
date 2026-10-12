@@ -17,6 +17,7 @@ namespace linuxscp {
 
 struct SessionOptions
 {
+    std::string protocol;
     std::string hostName;
     int portNumber;
     std::string userName;

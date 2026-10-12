@@ -47,6 +47,7 @@ std::string Usage()
 "  -timeout=SECS     connection timeout in seconds (default 15)\n"
 "  -log=FILE         log the session to FILE\n"
 "  -batch            never ask, abort instead\n"
+"  -gui              launch the graphical Commander desktop interface\n"
 "  -verbose          print SSH event log messages\n"
 "  -version          print the version and exit\n"
 "  -help             print this help and exit\n"
@@ -59,8 +60,8 @@ std::string Usage()
 "  ls [-al1] [DIR]   list remote files\n"
 "  lcd DIR           change the local directory\n"
 "  lpwd              print the local directory\n"
-"  get [opts] REMOTE [LOCAL]  download file(s) or directories (-r, -delete, -neweronly)\n"
-"  put [opts] LOCAL [REMOTE]  upload file(s) or directories (-r, -delete, -neweronly)\n"
+"  get [opts] REMOTE [LOCAL]  download file(s) or directories (-r, -delete, -neweronly, -resume)\n"
+"  put [opts] LOCAL [REMOTE]  upload file(s) or directories (-r, -delete, -neweronly, -resume)\n"
 "  synchronize [local|remote|both] [LOCAL [REMOTE]]  synchronize directories\n"
 "  rm FILE           remove remote file(s)\n"
 "  rmdir DIR         remove a remote directory\n"
@@ -69,7 +70,7 @@ std::string Usage()
 "  chmod PERMS FILE  change remote permissions\n"
 "  stat FILE         print remote file attributes\n"
 "  echo [MESSAGE]    display text message\n"
-"  option confirm|batch|reconnect|transfer VALUE  configure session options\n"
+"  option confirm|batch|resume|reconnect|transfer VALUE  configure session options\n"
 "  help              list the commands\n"
 "  exit              end the session\n";
 }

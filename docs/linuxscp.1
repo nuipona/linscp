@@ -76,6 +76,9 @@ run
 .B option confirm off
 before those operations.
 .TP
+.B \-gui
+Launch the graphical Commander desktop interface.
+.TP
 .B \-verbose
 Print what the SSH connection layer does as it happens.
 .TP
@@ -93,9 +96,14 @@ A site is a URL of the form
 .PP
 The schemes
 .BR sftp:// ,
-.B ssh://
+.BR ssh:// ,
+.BR scp:// ,
+.BR ftp:// ,
+.BR ftps:// ,
+.BR dav:// ,
+.B webdav://
 and
-.B scp://
+.B s3://
 are all accepted, as is a bare
 .IR host [ :port ].
 The path is the directory the client changes to after connecting. The
@@ -140,6 +148,7 @@ Print the local directory.
 Download a file, a directory recursively, or every file matching a mask.
 Optional switches include
 .BR \-r " (recursive directory download),"
+.BR \-resume " (resume interrupted transfers at target offset),"
 .BR \-delete " (remove remote source after transfer),"
 .BR \-neweronly " (skip files that are not newer than the target),"
 and
@@ -152,6 +161,7 @@ defaults to the current local directory.
 Upload a file, a directory recursively, or every file matching a mask.
 Optional switches include
 .BR \-r " (recursive directory upload),"
+.BR \-resume " (resume interrupted transfers at target offset),"
 .BR \-delete " (remove local source after transfer),"
 .BR \-neweronly " (skip files that are not newer than the target),"
 and
@@ -198,6 +208,8 @@ Configure session options:
 controls overwrite and delete confirmations.
 .BR option\ batch\ on|off|abort
 controls non-interactive batch mode.
+.BR option\ resume\ on|off
+controls automatic transfer resumption.
 .BR option\ reconnect\ <secs>
 and
 .BR option\ transfer\ binary|ascii

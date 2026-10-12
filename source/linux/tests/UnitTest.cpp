@@ -293,9 +293,30 @@ void TestParseSiteUrl()
     CHECK_TRUE(options.portNumber == 2222);
     CHECK_EQ(options.initialDirectory, "/tmp");
 
+    /* Multi-protocol URLs. */
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("ftp://example.com", options, error));
+    CHECK_EQ(options.protocol, "ftp");
+    CHECK_EQ(options.hostName, "example.com");
+    CHECK_TRUE(options.portNumber == 21);
+
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("ftps://example.com", options, error));
+    CHECK_EQ(options.protocol, "ftps");
+    CHECK_TRUE(options.portNumber == 990);
+
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("webdav://example.com/dav", options, error));
+    CHECK_EQ(options.protocol, "webdav");
+    CHECK_EQ(options.initialDirectory, "/dav");
+
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("s3://bucket.example.com", options, error));
+    CHECK_EQ(options.protocol, "s3");
+
     /* Rejected URLs. */
     options = SessionOptions();
-    CHECK_FALSE(ParseSiteUrl("ftp://example.com", options, error));
+    CHECK_FALSE(ParseSiteUrl("gopher://example.com", options, error));
     CHECK_TRUE(error.find("Unsupported protocol") != std::string::npos);
     options = SessionOptions();
     CHECK_FALSE(ParseSiteUrl("sftp://", options, error));
@@ -433,6 +454,10 @@ void TestScriptCommands()
     CHECK_TRUE(script.ExecuteLine("echo test message"));
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option confirm off"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option resume on"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option resume off"));
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option batch abort"));
     CHECK_TRUE(script.ErrorCount() == 0);

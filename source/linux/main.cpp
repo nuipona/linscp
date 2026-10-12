@@ -6,7 +6,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <climits>
+#include <cerrno>
 #include <string>
+#include <unistd.h>
 
 #include "Console.h"
 #include "PathUtil.h"
@@ -72,6 +74,7 @@ int main(int argc, char ** argv)
     std::string url;
     std::string logFile;
     bool batch = false;
+    bool launchGui = false;
     bool help = false;
     bool version = false;
     bool scriptSpecified = false;
@@ -129,9 +132,17 @@ int main(int argc, char ** argv)
         {
             logFile = linuxscp::ExpandTilde(value);
         }
-        else if (strcmp(arg, "-batch") == 0)
+        else if (strcmp(arg, "-batch") == 0 || strcmp(arg, "-batch=on") == 0)
         {
             batch = true;
+        }
+        else if (strcmp(arg, "-batch=off") == 0)
+        {
+            batch = false;
+        }
+        else if (strcmp(arg, "-gui") == 0 || strcmp(arg, "--gui") == 0)
+        {
+            launchGui = true;
         }
         else if (strcmp(arg, "-verbose") == 0)
         {
@@ -161,6 +172,18 @@ int main(int argc, char ** argv)
             console.Error(std::string("Unexpected argument '") + arg + "'.");
             return 1;
         }
+    }
+
+    if (launchGui)
+    {
+        const char * guiBin = "/usr/bin/linuxscp-gui";
+        if (access(guiBin, X_OK) != 0)
+        {
+            guiBin = "linuxscp-gui";
+        }
+        execlp(guiBin, guiBin, NULL);
+        console.Error("Failed to launch LinuxSCP GUI: " + std::string(strerror(errno)));
+        return 1;
     }
 
     if (version)

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="screenGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e5799"/>
+      <stop offset="100%" stop-color="#207cca"/>
+    </linearGradient>
+    <linearGradient id="cloudGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d6e4f0"/>
+    </linearGradient>
+  </defs>
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#f4f6f9" stroke="#0055ea" stroke-width="4"/>
+  
+  <!-- Left Computer (Local) -->
+  <rect x="20" y="44" width="36" height="26" rx="2" fill="#2d3748" stroke="#1a202c" stroke-width="2"/>
+  <rect x="23" y="47" width="30" height="20" rx="1" fill="url(#screenGrad)"/>
+  <!-- Computer stand -->
+  <path d="M34 70 L34 76 L42 76 L42 70 Z" fill="#4a5568"/>
+  <rect x="28" y="76" width="20" height="3" rx="1" fill="#718096"/>
+
+  <!-- Right Computer (Remote) -->
+  <rect x="72" y="44" width="36" height="26" rx="2" fill="#2d3748" stroke="#1a202c" stroke-width="2"/>
+  <rect x="75" y="47" width="30" height="20" rx="1" fill="url(#screenGrad)"/>
+  <!-- Computer stand -->
+  <path d="M86 70 L86 76 L94 76 L94 70 Z" fill="#4a5568"/>
+  <rect x="80" y="76" width="20" height="3" rx="1" fill="#718096"/>
+
+  <!-- Transfer Arrows between computers -->
+  <!-- Top Arrow: Right pointing -->
+  <path d="M54 48 L68 48 L68 44 L76 51 L68 58 L68 54 L54 54 Z" fill="#38a169"/>
+  <!-- Bottom Arrow: Left pointing -->
+  <path d="M74 62 L60 62 L60 58 L52 65 L60 72 L60 68 L74 68 Z" fill="#e53e3e"/>
+
+  <!-- Secure Lock Icon at Top Center -->
+  <rect x="58" y="22" width="12" height="10" rx="2" fill="#d69e2e"/>
+  <path d="M60 22 L60 17 A4 4 0 0 1 68 17 L68 22" fill="none" stroke="#d69e2e" stroke-width="2.5"/>
+  <circle cx="64" cy="27" r="1.5" fill="#744210"/>
+</svg>

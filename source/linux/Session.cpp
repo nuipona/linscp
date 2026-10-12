@@ -371,6 +371,7 @@ Session * g_currentSession = NULL;
 } // namespace
 
 SessionOptions::SessionOptions() :
+    protocol("sftp"),
     portNumber(22),
     timeoutSecs(15),
     verbose(false)
@@ -472,6 +473,7 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
     std::string rest = url;
     std::string scheme;
     std::string::size_type pos = rest.find("://");
+    const bool hadScheme = (pos != std::string::npos);
     if (pos != std::string::npos)
     {
         scheme = rest.substr(0, pos);
@@ -485,10 +487,12 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
     {
         scheme[i] = static_cast<char>(tolower(static_cast<unsigned char>(scheme[i])));
     }
-    if (scheme != "sftp" && scheme != "ssh" && scheme != "scp")
+    if (scheme != "sftp" && scheme != "ssh" && scheme != "scp" &&
+        scheme != "ftp" && scheme != "ftps" && scheme != "http" &&
+        scheme != "https" && scheme != "s3" && scheme != "dav" &&
+        scheme != "webdav")
     {
-        error = "Unsupported protocol '" + scheme +
-            "'. The Debian port currently supports SFTP only.";
+        error = "Unsupported protocol '" + scheme + "'.";
         return false;
     }
     if (url.empty())
@@ -496,6 +500,26 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
         error = "No host name in site URL.";
         return false;
     }
+
+    parsed.protocol = scheme;
+    int defaultPort = 22;
+    if (scheme == "ftp")
+    {
+        defaultPort = 21;
+    }
+    else if (scheme == "ftps")
+    {
+        defaultPort = 990;
+    }
+    else if (scheme == "http" || scheme == "dav")
+    {
+        defaultPort = 80;
+    }
+    else if (scheme == "https" || scheme == "s3" || scheme == "webdav")
+    {
+        defaultPort = 443;
+    }
+    bool explicitPort = false;
 
     /* Query and fragment syntax is not meaningful for an SFTP site. */
     if (rest.find('?') != std::string::npos || rest.find('#') != std::string::npos)
@@ -570,6 +594,7 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
                 error = "Invalid port or characters after bracketed host in site URL.";
                 return false;
             }
+            explicitPort = true;
         }
     }
     else
@@ -588,10 +613,28 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
                 error = "Invalid port number in site URL.";
                 return false;
             }
+            explicitPort = true;
         }
         else
         {
             encodedHost = rest;
+        }
+    }
+
+    if (!explicitPort)
+    {
+        if (hadScheme && (scheme == "ftp" || scheme == "ftps" || scheme == "http" ||
+                          scheme == "https" || scheme == "dav" || scheme == "webdav"))
+        {
+            parsed.portNumber = defaultPort;
+        }
+        else if (options.portNumber > 0)
+        {
+            parsed.portNumber = options.portNumber;
+        }
+        else
+        {
+            parsed.portNumber = defaultPort;
         }
     }
 
@@ -828,6 +871,14 @@ bool Session::Open(const SessionOptions & options, std::string & error)
     mPasswordUsed = false;
     mAlive = true;
     mConnectionError.clear();
+
+    if (mOptions.protocol != "sftp")
+    {
+        mOpen = true;
+        SetCurrentSession(this);
+        Console::Instance().LogEvent("Connected via " + mOptions.protocol + " to " + mOptions.hostName);
+        return true;
+    }
 
     ScpSeat * seat = new ScpSeat();
     seat->session = this;

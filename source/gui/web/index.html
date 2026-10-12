@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LinuxSCP Commander - Dual Pane File Transfer</title>
+  <style>
+    :root {
+      --win-bg: #ece9d8;
+      --win-panel: #f5f5f5;
+      --win-header: #0055ea;
+      --win-header-grad: linear-gradient(180deg, #0a246a 0%, #a6caf0 100%);
+      --win-border: #999999;
+      --win-border-light: #ffffff;
+      --win-border-dark: #808080;
+      --win-blue: #0b61a4;
+      --text-main: #111111;
+      --table-header: #e0dfe3;
+      --sel-bg: #316ac5;
+      --sel-color: #ffffff;
+      --font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font-family);
+      font-size: 12px;
+      color: var(--text-main);
+      background-color: var(--win-bg);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+    /* Menu Bar */
+    .menu-bar {
+      background: #f0f0f0;
+      border-bottom: 1px solid #d0d0d0;
+      display: flex;
+      padding: 2px 4px;
+      font-size: 11px;
+    }
+    .menu-item {
+      padding: 2px 8px;
+      cursor: pointer;
+      border-radius: 2px;
+    }
+    .menu-item:hover {
+      background: #3399ff;
+      color: white;
+    }
+    /* Toolbar / Quick Connect */
+    .toolbar {
+      background: linear-gradient(to bottom, #fdfdfd, #e6e6e6);
+      border-bottom: 1px solid #b0b0b0;
+      padding: 6px 8px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .tool-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .tool-label {
+      font-weight: 600;
+      font-size: 11px;
+      color: #333;
+    }
+    .input-field, .select-field {
+      padding: 3px 6px;
+      font-size: 11px;
+      border: 1px solid #7f9db9;
+      border-radius: 2px;
+      background: white;
+    }
+    .btn {
+      padding: 3px 10px;
+      font-size: 11px;
+      font-weight: 500;
+      border: 1px solid #707070;
+      border-radius: 3px;
+      background: linear-gradient(to bottom, #f2f2f2, #ebebeb);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn:hover {
+      background: linear-gradient(to bottom, #eaf2fb, #dbebfc);
+      border-color: #3c7fb1;
+    }
+    .btn:active {
+      background: #cce4f7;
+    }
+    .btn-primary {
+      background: linear-gradient(to bottom, #0078d7, #0063b1);
+      color: white;
+      border-color: #004e8c;
+      font-weight: 600;
+    }
+    .btn-primary:hover {
+      background: linear-gradient(to bottom, #1a88df, #0070c9);
+    }
+    .badge-connected {
+      background: #107c41;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: bold;
+    }
+    .badge-disconnected {
+      background: #d83b01;
+      color: white;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: bold;
+    }
+
+    /* Main Commander Area */
+    .commander-main {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+      overflow: hidden;
+      padding: 4px;
+      gap: 4px;
+      min-height: 0;
+    }
+    .pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid var(--win-border-dark);
+      background: white;
+      overflow: hidden;
+      border-radius: 2px;
+      min-width: 0;
+    }
+    .pane-header {
+      background: #e8e8e8;
+      border-bottom: 1px solid #c0c0c0;
+      padding: 4px 6px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .pane-title {
+      font-weight: bold;
+      font-size: 11px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      color: #003399;
+    }
+    .path-input-group {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+    .path-input {
+      flex: 1;
+      padding: 2px 4px;
+      font-size: 11px;
+      border: 1px solid #7f9db9;
+      background: white;
+    }
+    .btn-icon {
+      padding: 2px 6px;
+      font-size: 11px;
+      cursor: pointer;
+      background: #eee;
+      border: 1px solid #aaa;
+      border-radius: 2px;
+    }
+    .btn-icon:hover { background: #ddd; }
+
+    /* File Table */
+    .file-table-container {
+      flex: 1;
+      overflow: auto;
+      background: white;
+    }
+    table.file-table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+    table.file-table th {
+      position: sticky;
+      top: 0;
+      background: var(--table-header);
+      border-bottom: 1px solid #999;
+      border-right: 1px solid #d0d0d0;
+      padding: 3px 6px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 11px;
+      cursor: pointer;
+    }
+    table.file-table td {
+      padding: 2px 6px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-bottom: 1px solid #f0f0f0;
+      font-size: 11px;
+    }
+    table.file-table tr.selected {
+      background-color: var(--sel-bg) !important;
+      color: var(--sel-color) !important;
+    }
+    table.file-table tr:hover:not(.selected) {
+      background-color: #f2f7fd;
+    }
+    .file-icon {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    /* Central Splitter Action Column */
+    .commander-actions {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      padding: 2px;
+    }
+    .action-btn {
+      padding: 8px 6px;
+      font-size: 12px;
+      font-weight: bold;
+      cursor: pointer;
+      border: 1px solid #888;
+      border-radius: 3px;
+      background: linear-gradient(to bottom, #fff, #e0e0e0);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+    }
+    .action-btn:hover {
+      background: #d0e4f7;
+      border-color: #3399ff;
+    }
+
+    /* Lower Panel / Tabs */
+    .lower-panel {
+      height: 160px;
+      display: flex;
+      flex-direction: column;
+      background: #f0f0f0;
+      border-top: 1px solid #aaa;
+    }
+    .tabs {
+      display: flex;
+      background: #e0e0e0;
+      border-bottom: 1px solid #bbb;
+      padding-left: 6px;
+    }
+    .tab {
+      padding: 4px 12px;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 500;
+      border-top-left-radius: 3px;
+      border-top-right-radius: 3px;
+      margin-top: 2px;
+      margin-right: 2px;
+      background: #d8d8d8;
+      border: 1px solid #bbb;
+      border-bottom: none;
+    }
+    .tab.active {
+      background: white;
+      font-weight: bold;
+      border-bottom: 1px solid white;
+      margin-bottom: -1px;
+    }
+    .tab-content {
+      flex: 1;
+      overflow: auto;
+      background: white;
+      padding: 4px;
+      display: none;
+      font-family: Consolas, monospace;
+      font-size: 11px;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    .log-line {
+      line-height: 1.4;
+      white-space: pre-wrap;
+    }
+    .log-time { color: #666; margin-right: 6px; }
+    .log-cmd { color: #0000aa; font-weight: bold; }
+    .log-error { color: #cc0000; font-weight: bold; }
+    .log-success { color: #008800; font-weight: bold; }
+
+    /* Commander Bottom Function Keys Bar */
+    .function-keys {
+      display: flex;
+      background: #2b3a42;
+      color: white;
+      padding: 2px;
+      gap: 2px;
+      border-top: 1px solid #1a242a;
+    }
+    .fn-key {
+      flex: 1;
+      background: linear-gradient(to bottom, #445661, #2b3a42);
+      border: 1px solid #5a6e7c;
+      border-radius: 2px;
+      padding: 4px 2px;
+      text-align: center;
+      cursor: pointer;
+      font-size: 10px;
+    }
+    .fn-key:hover {
+      background: linear-gradient(to bottom, #5a6e7c, #3d4f5b);
+      border-color: #8da4b6;
+    }
+    .fn-key strong {
+      color: #ffd700;
+      margin-right: 2px;
+    }
+
+    /* Modal Dialog */
+    .modal-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.4);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-overlay.open {
+      display: flex;
+    }
+    .modal-box {
+      width: 440px;
+      background: #f0f0f0;
+      border: 2px solid #0055ea;
+      border-radius: 4px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      background: var(--win-header-grad);
+      color: white;
+      font-weight: bold;
+      padding: 6px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-body {
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #f7f7f7;
+    }
+    .modal-footer {
+      padding: 8px 12px;
+      background: #ece9d8;
+      border-top: 1px solid #ccc;
+      display: flex;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .form-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-row label {
+      width: 90px;
+      font-weight: 500;
+    }
+    .form-row input, .form-row select {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Menu Bar -->
+  <div class="menu-bar">
+    <div class="menu-item" onclick="openLoginModal()">Session</div>
+    <div class="menu-item" onclick="triggerSynchronize()">Commands</div>
+    <div class="menu-item" onclick="refreshBoth()">View</div>
+    <div class="menu-item" onclick="openOptionsModal()">Options</div>
+    <div class="menu-item" onclick="showHelp()">Help</div>
+  </div>
+
+  <!-- Quick Connect Toolbar -->
+  <div class="toolbar">
+    <div class="tool-group">
+      <span class="tool-label">Protocol:</span>
+      <select id="quickProtocol" class="select-field" style="width: 100px;">
+        <option value="sftp">SFTP (SSH)</option>
+        <option value="ftp">FTP</option>
+        <option value="ftps">FTPS</option>
+        <option value="dav">WebDAV</option>
+        <option value="s3">Amazon S3</option>
+        <option value="scp">SCP</option>
+      </select>
+    </div>
+    <div class="tool-group">
+      <span class="tool-label">Host:</span>
+      <input type="text" id="quickHost" class="input-field" value="localhost" style="width: 130px;">
+    </div>
+    <div class="tool-group">
+      <span class="tool-label">Port:</span>
+      <input type="number" id="quickPort" class="input-field" value="22" style="width: 50px;">
+    </div>
+    <div class="tool-group">
+      <span class="tool-label">User:</span>
+      <input type="text" id="quickUser" class="input-field" value="user" style="width: 80px;">
+    </div>
+    <div class="tool-group">
+      <span class="tool-label">Password:</span>
+      <input type="password" id="quickPass" class="input-field" placeholder="(optional)" style="width: 80px;">
+    </div>
+    <button class="btn btn-primary" onclick="quickConnect()">Connect</button>
+    <button class="btn" onclick="disconnectSession()">Disconnect</button>
+    <div id="statusBadge" class="badge-disconnected">Disconnected</div>
+  </div>
+
+  <!-- Commander Dual Pane Area -->
+  <div class="commander-main">
+    
+    <!-- LEFT PANE: LOCAL -->
+    <div class="pane" id="localPane">
+      <div class="pane-header">
+        <div class="pane-title">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="#0066cc"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H2z"/></svg>
+          Local
+        </div>
+        <div class="path-input-group">
+          <input type="text" id="localPathInput" class="path-input">
+          <button class="btn-icon" title="Go" onclick="loadLocalDir(document.getElementById('localPathInput').value)">Go</button>
+          <button class="btn-icon" title="Parent Directory" onclick="localGoUp()">..</button>
+          <button class="btn-icon" title="Refresh" onclick="loadLocalDir(currentLocalPath)">↻</button>
+        </div>
+      </div>
+      <div class="file-table-container">
+        <table class="file-table">
+          <thead>
+            <tr>
+              <th style="width: 45%;">Name</th>
+              <th style="width: 18%;">Size</th>
+              <th style="width: 22%;">Changed</th>
+              <th style="width: 15%;">Rights</th>
+            </tr>
+          </thead>
+          <tbody id="localFileList">
+            <!-- Dynamic local items -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- CENTER ACTION BUTTONS -->
+    <div class="commander-actions">
+      <button class="action-btn" title="Upload to Remote (F5)" onclick="uploadSelected()">
+        <span>Upload</span>
+        <span style="font-size: 16px;">➡</span>
+      </button>
+      <button class="action-btn" title="Download to Local (F5)" onclick="downloadSelected()">
+        <span style="font-size: 16px;">⬅</span>
+        <span>Download</span>
+      </button>
+      <button class="action-btn" title="Synchronize Directories" onclick="triggerSynchronize()">
+        <span>Sync</span>
+        <span style="font-size: 14px;">⇄</span>
+      </button>
+    </div>
+
+    <!-- RIGHT PANE: REMOTE -->
+    <div class="pane" id="remotePane">
+      <div class="pane-header">
+        <div class="pane-title">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="#107c41"><path d="M4.5 11a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm0 2a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm0-4a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm1-5.5V5h5V3.5a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5z"/><path d="M14 0H2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zM2 1a1 1 0 0 0-1 1v1h14V2a1 1 0 0 0-1-1H2z"/></svg>
+          Remote
+        </div>
+        <div class="path-input-group">
+          <input type="text" id="remotePathInput" class="path-input">
+          <button class="btn-icon" title="Go" onclick="loadRemoteDir(document.getElementById('remotePathInput').value)">Go</button>
+          <button class="btn-icon" title="Parent Directory" onclick="remoteGoUp()">..</button>
+          <button class="btn-icon" title="Refresh" onclick="loadRemoteDir(currentRemotePath)">↻</button>
+        </div>
+      </div>
+      <div class="file-table-container">
+        <table class="file-table">
+          <thead>
+            <tr>
+              <th style="width: 45%;">Name</th>
+              <th style="width: 18%;">Size</th>
+              <th style="width: 22%;">Changed</th>
+              <th style="width: 15%;">Rights</th>
+            </tr>
+          </thead>
+          <tbody id="remoteFileList">
+            <!-- Dynamic remote items -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Bottom Panel Tabs (Queue, Log, CLI) -->
+  <div class="lower-panel">
+    <div class="tabs">
+      <div class="tab active" id="tabQueueBtn" onclick="switchTab('queue')">Transfer Queue (0)</div>
+      <div class="tab" id="tabLogBtn" onclick="switchTab('log')">Command Log</div>
+      <div class="tab" id="tabCliBtn" onclick="switchTab('cli')">LinuxSCP CLI Terminal</div>
+    </div>
+    
+    <!-- Tab 1: Queue -->
+    <div class="tab-content active" id="tabQueue">
+      <table style="width:100%; border-collapse:collapse;">
+        <thead>
+          <tr style="background:#eee; text-align:left;">
+            <th style="padding:4px;">Type</th>
+            <th style="padding:4px;">Source</th>
+            <th style="padding:4px;">Destination</th>
+            <th style="padding:4px;">Status</th>
+            <th style="padding:4px;">Started</th>
+          </tr>
+        </thead>
+        <tbody id="queueList">
+          <tr><td colspan="5" style="padding:8px; color:#888;">No active transfers in queue.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Tab 2: Log -->
+    <div class="tab-content" id="tabLog" style="background:#fcfcfc;">
+      <div id="logOutput"></div>
+    </div>
+
+    <!-- Tab 3: CLI Terminal -->
+    <div class="tab-content" id="tabCli" style="display:flex; flex-direction:column; padding:6px; background:#1e1e1e; color:#eee;">
+      <div id="cliOutput" style="flex:1; overflow:auto; margin-bottom:6px; white-space:pre-wrap; font-family:monospace;">LinuxSCP Interactive Console. Type any command (e.g. 'pwd', 'ls', 'stat', 'echo').</div>
+      <div style="display:flex; gap:6px;">
+        <span style="color:#00ff00; font-weight:bold;">lscp&gt;</span>
+        <input type="text" id="cliInput" style="flex:1; background:#2d2d2d; color:#fff; border:1px solid #444; padding:3px 6px; font-family:monospace;" onkeydown="if(event.key==='Enter') execCliCommand()">
+        <button class="btn" style="background:#333; color:#fff; border-color:#555;" onclick="execCliCommand()">Run</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Classic Commander Function Keys Bar -->
+  <div class="function-keys">
+    <div class="fn-key" onclick="downloadSelected()"><strong>F5</strong> Copy</div>
+    <div class="fn-key" onclick="renamePrompt()"><strong>F6</strong> Move</div>
+    <div class="fn-key" onclick="newFolderPrompt()"><strong>F7</strong> New Folder</div>
+    <div class="fn-key" onclick="deletePrompt()"><strong>F8</strong> Delete</div>
+    <div class="fn-key" onclick="triggerSynchronize()"><strong>F9</strong> Synchronize</div>
+    <div class="fn-key" onclick="refreshBoth()"><strong>F10</strong> Refresh</div>
+  </div>
+
+  <!-- Login Modal -->
+  <div class="modal-overlay" id="loginModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>Login / New Connection</span>
+        <span style="cursor:pointer;" onclick="closeModal('loginModal')">✕</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <label>Protocol:</label>
+          <select id="modalProtocol" class="select-field">
+            <option value="sftp">SFTP (SSH)</option>
+            <option value="ftp">FTP</option>
+            <option value="ftps">FTPS</option>
+            <option value="dav">WebDAV</option>
+            <option value="s3">Amazon S3</option>
+            <option value="scp">SCP</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Host name:</label>
+          <input type="text" id="modalHost" class="input-field" value="localhost">
+        </div>
+        <div class="form-row">
+          <label>Port number:</label>
+          <input type="number" id="modalPort" class="input-field" value="22">
+        </div>
+        <div class="form-row">
+          <label>User name:</label>
+          <input type="text" id="modalUser" class="input-field" value="user">
+        </div>
+        <div class="form-row">
+          <label>Password:</label>
+          <input type="password" id="modalPass" class="input-field">
+        </div>
+        <div class="form-row">
+          <label>Private key:</label>
+          <input type="text" id="modalKey" class="input-field" placeholder="path/to/key.ppk">
+        </div>
+        <div class="form-row">
+          <label>Host key:</label>
+          <input type="text" id="modalHostKey" class="input-field" value="*">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="modalConnect()">Login</button>
+        <button class="btn" onclick="closeModal('loginModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let currentLocalPath = "";
+    let currentRemotePath = "/";
+    let selectedLocal = null;
+    let selectedRemote = null;
+    let isConnected = false;
+
+    function formatBytes(bytes) {
+      if (bytes === 0) return "0 B";
+      const k = 1024;
+      const sizes = ["B", "KB", "MB", "GB", "TB"];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+    }
+
+    async function checkStatus() {
+      try {
+        const res = await fetch("/api/status");
+        const data = await res.json();
+        isConnected = data.connected;
+        currentLocalPath = data.local_dir;
+        currentRemotePath = data.remote_dir;
+
+        const badge = document.getElementById("statusBadge");
+        if (isConnected) {
+          badge.className = "badge-connected";
+          badge.textContent = `Connected (${data.session.protocol}://${data.session.host})`;
+        } else {
+          badge.className = "badge-disconnected";
+          badge.textContent = "Disconnected";
+        }
+
+        document.getElementById("localPathInput").value = currentLocalPath;
+        document.getElementById("remotePathInput").value = currentRemotePath;
+      } catch (err) {
+        console.error(err);
+      }
+    }
+
+    async function loadLocalDir(path) {
+      try {
+        const url = "/api/local/list" + (path ? `?path=${encodeURIComponent(path)}` : "");
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.success) {
+          alert("Failed to load local directory: " + data.error);
+          return;
+        }
+        currentLocalPath = data.path;
+        document.getElementById("localPathInput").value = currentLocalPath;
+        renderFileList("localFileList", data.entries, "local");
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    async function loadRemoteDir(path) {
+      if (!isConnected) {
+        document.getElementById("remoteFileList").innerHTML =
+          `<tr><td colspan="4" style="text-align:center; padding:16px; color:#888;">Not connected. Click 'Connect' above.</td></tr>`;
+        return;
+      }
+      try {
+        const url = "/api/remote/list" + (path ? `?path=${encodeURIComponent(path)}` : "");
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.success) {
+          alert("Failed to load remote directory: " + data.error);
+          return;
+        }
+        currentRemotePath = data.path;
+        document.getElementById("remotePathInput").value = currentRemotePath;
+        renderFileList("remoteFileList", data.entries, "remote");
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderFileList(containerId, entries, paneType) {
+      const tbody = document.getElementById(containerId);
+      tbody.innerHTML = "";
+
+      // Add '..' parent row
+      const trUp = document.createElement("tr");
+      trUp.innerHTML = `
+        <td style="font-weight:bold;"><span class="file-icon">📁</span>..</td>
+        <td>&lt;DIR&gt;</td>
+        <td>--</td>
+        <td>--</td>
+      `;
+      trUp.ondblclick = () => paneType === "local" ? localGoUp() : remoteGoUp();
+      tbody.appendChild(trUp);
+
+      entries.forEach(entry => {
+        const tr = document.createElement("tr");
+        const icon = entry.is_dir ? "📁" : "📄";
+        const sizeStr = entry.is_dir ? "&lt;DIR&gt;" : formatBytes(entry.size);
+
+        tr.innerHTML = `
+          <td><span class="file-icon">${icon}</span>${entry.name}</td>
+          <td>${sizeStr}</td>
+          <td>${entry.date || ""}</td>
+          <td>${entry.permissions || ""}</td>
+        `;
+
+        tr.onclick = () => {
+          Array.from(tbody.querySelectorAll("tr")).forEach(r => r.classList.remove("selected"));
+          tr.classList.add("selected");
+          if (paneType === "local") selectedLocal = entry;
+          else selectedRemote = entry;
+        };
+
+        tr.ondblclick = () => {
+          if (entry.is_dir) {
+            const next = paneType === "local" ?
+              (currentLocalPath.endsWith("/") ? currentLocalPath + entry.name : currentLocalPath + "/" + entry.name) :
+              (currentRemotePath.endsWith("/") ? currentRemotePath + entry.name : currentRemotePath + "/" + entry.name);
+            if (paneType === "local") loadLocalDir(next);
+            else loadRemoteDir(next);
+          } else {
+            if (paneType === "local") uploadSelected();
+            else downloadSelected();
+          }
+        };
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function localGoUp() {
+      const parts = currentLocalPath.split("/").filter(Boolean);
+      parts.pop();
+      const parent = "/" + parts.join("/");
+      loadLocalDir(parent || "/");
+    }
+
+    function remoteGoUp() {
+      const parts = currentRemotePath.split("/").filter(Boolean);
+      parts.pop();
+      const parent = "/" + parts.join("/");
+      loadRemoteDir(parent || "/");
+    }
+
+    async function quickConnect() {
+      const proto = document.getElementById("quickProtocol").value;
+      const host = document.getElementById("quickHost").value;
+      const port = parseInt(document.getElementById("quickPort").value) || 22;
+      const username = document.getElementById("quickUser").value;
+      const password = document.getElementById("quickPass").value;
+
+      await doConnect({ protocol: proto, host, port, username, password, hostkey: "*" });
+    }
+
+    async function doConnect(session) {
+      try {
+        const res = await fetch("/api/session/connect", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session })
+        });
+        const data = await res.json();
+        if (data.success) {
+          isConnected = true;
+          await checkStatus();
+          await loadRemoteDir(data.remote_dir || "/");
+          await pollTransfers();
+          await pollLogs();
+        } else {
+          alert("Connection failed: " + data.error);
+        }
+      } catch (e) {
+        alert("Connection request error: " + e);
+      }
+    }
+
+    async function disconnectSession() {
+      await fetch("/api/session/disconnect", { method: "POST" });
+      isConnected = false;
+      await checkStatus();
+      loadRemoteDir("/");
+    }
+
+    async function uploadSelected() {
+      if (!selectedLocal) {
+        alert("Please select a local file or folder to upload.");
+        return;
+      }
+      try {
+        const res = await fetch("/api/transfer/upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            local_item: selectedLocal.name,
+            remote_dir: currentRemotePath,
+            resume: true,
+            recursive: true
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          switchTab("queue");
+          pollTransfers();
+          setTimeout(() => loadRemoteDir(currentRemotePath), 1500);
+        } else {
+          alert("Upload failed: " + data.error);
+        }
+      } catch (e) {
+        alert("Upload error: " + e);
+      }
+    }
+
+    async function downloadSelected() {
+      if (!selectedRemote) {
+        alert("Please select a remote file or folder to download.");
+        return;
+      }
+      try {
+        const res = await fetch("/api/transfer/download", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            remote_item: selectedRemote.name,
+            local_dir: currentLocalPath,
+            resume: true,
+            recursive: true
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          switchTab("queue");
+          pollTransfers();
+          setTimeout(() => loadLocalDir(currentLocalPath), 1500);
+        } else {
+          alert("Download failed: " + data.error);
+        }
+      } catch (e) {
+        alert("Download error: " + e);
+      }
+    }
+
+    async function triggerSynchronize() {
+      if (!isConnected) {
+        alert("Please connect to a remote site first.");
+        return;
+      }
+      const mode = prompt("Choose synchronization direction: 'local' (remote->local), 'remote' (local->remote), or 'both':", "local");
+      if (!mode) return;
+      const deleteObs = confirm("Delete obsolete destination files during synchronization?");
+
+      try {
+        const res = await fetch("/api/transfer/synchronize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: mode.toLowerCase(), delete: deleteObs })
+        });
+        const data = await res.json();
+        if (data.success) {
+          switchTab("queue");
+          pollTransfers();
+          setTimeout(() => {
+            loadLocalDir(currentLocalPath);
+            loadRemoteDir(currentRemotePath);
+          }, 2000);
+        }
+      } catch (e) {
+        alert("Sync error: " + e);
+      }
+    }
+
+    async function newFolderPrompt() {
+      const name = prompt("Enter new folder name:");
+      if (!name) return;
+      // create on remote if selected, otherwise local
+      if (document.querySelector("#remotePane .selected")) {
+        await fetch("/api/remote/mkdir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        loadRemoteDir(currentRemotePath);
+      } else {
+        await fetch("/api/local/mkdir", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name })
+        });
+        loadLocalDir(currentLocalPath);
+      }
+    }
+
+    async function deletePrompt() {
+      if (document.querySelector("#remotePane .selected") && selectedRemote) {
+        if (confirm(`Delete remote item '${selectedRemote.name}'?`)) {
+          await fetch("/api/remote/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: selectedRemote.name, is_dir: selectedRemote.is_dir })
+          });
+          loadRemoteDir(currentRemotePath);
+        }
+      } else if (selectedLocal) {
+        if (confirm(`Delete local item '${selectedLocal.name}'?`)) {
+          await fetch("/api/local/delete", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: selectedLocal.name })
+          });
+          loadLocalDir(currentLocalPath);
+        }
+      } else {
+        alert("Select an item to delete.");
+      }
+    }
+
+    async function renamePrompt() {
+      if (selectedRemote) {
+        const newName = prompt(`Rename '${selectedRemote.name}' to:`, selectedRemote.name);
+        if (newName && newName !== selectedRemote.name) {
+          await fetch("/api/remote/rename", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ old_name: selectedRemote.name, new_name: newName })
+          });
+          loadRemoteDir(currentRemotePath);
+        }
+      }
+    }
+
+    function refreshBoth() {
+      loadLocalDir(currentLocalPath);
+      if (isConnected) loadRemoteDir(currentRemotePath);
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+
+      if (tabName === "queue") {
+        document.getElementById("tabQueueBtn").classList.add("active");
+        document.getElementById("tabQueue").classList.add("active");
+        pollTransfers();
+      } else if (tabName === "log") {
+        document.getElementById("tabLogBtn").classList.add("active");
+        document.getElementById("tabLog").classList.add("active");
+        pollLogs();
+      } else if (tabName === "cli") {
+        document.getElementById("tabCliBtn").classList.add("active");
+        document.getElementById("tabCli").classList.add("active");
+        document.getElementById("cliInput").focus();
+      }
+    }
+
+    async function pollTransfers() {
+      try {
+        const res = await fetch("/api/transfers");
+        const data = await res.json();
+        const tbody = document.getElementById("queueList");
+        document.getElementById("tabQueueBtn").textContent = `Transfer Queue (${data.transfers.length})`;
+        if (!data.transfers || data.transfers.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="5" style="padding:8px; color:#888;">No active transfers in queue.</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = data.transfers.map(t => `
+          <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:4px; font-weight:bold;">${t.type}</td>
+            <td style="padding:4px;">${t.source}</td>
+            <td style="padding:4px;">${t.destination}</td>
+            <td style="padding:4px; color:${t.status === 'Completed' ? '#008800' : (t.status === 'Failed' ? '#cc0000' : '#0066cc')}; font-weight:bold;">${t.status}</td>
+            <td style="padding:4px;">${t.start_time}</td>
+          </tr>
+        `).join("");
+      } catch (e) {}
+    }
+
+    async function pollLogs() {
+      try {
+        const res = await fetch("/api/logs");
+        const data = await res.json();
+        const container = document.getElementById("logOutput");
+        container.innerHTML = data.logs.map(l => `
+          <div class="log-line">
+            <span class="log-time">[${l.time}]</span>
+            <span class="log-${l.level}">${l.text}</span>
+          </div>
+        `).join("");
+        container.scrollTop = container.scrollHeight;
+      } catch (e) {}
+    }
+
+    async function execCliCommand() {
+      const input = document.getElementById("cliInput");
+      const cmd = input.value.trim();
+      if (!cmd) return;
+      input.value = "";
+
+      const out = document.getElementById("cliOutput");
+      out.textContent += `\n> ${cmd}\n`;
+      try {
+        const res = await fetch("/api/command/exec", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ command: cmd })
+        });
+        const data = await res.json();
+        out.textContent += data.stdout || "";
+        if (data.stderr) out.textContent += `\nError: ${data.stderr}`;
+        out.scrollTop = out.scrollHeight;
+      } catch (e) {
+        out.textContent += `\nExecution error: ${e}`;
+      }
+    }
+
+    function openLoginModal() {
+      document.getElementById("loginModal").classList.add("open");
+    }
+    function closeModal(id) {
+      document.getElementById(id).classList.remove("open");
+    }
+    async function modalConnect() {
+      const session = {
+        protocol: document.getElementById("modalProtocol").value,
+        host: document.getElementById("modalHost").value,
+        port: parseInt(document.getElementById("modalPort").value) || 22,
+        username: document.getElementById("modalUser").value,
+        password: document.getElementById("modalPass").value,
+        keyfile: document.getElementById("modalKey").value,
+        hostkey: document.getElementById("modalHostKey").value
+      };
+      closeModal("loginModal");
+      await doConnect(session);
+    }
+
+    function showHelp() {
+      alert("LinuxSCP Dual-Pane Commander GUI\n\n- Left Pane: Local Filesystem\n- Right Pane: Remote Server Filesystem\n- Drag or use F5 to copy/transfer files with automatic resume support\n- Multi-protocol support: SFTP, FTP, FTPS, WebDAV, Amazon S3, SCP\n- Press F9 to synchronize folders");
+    }
+
+    // Auto-init on page load
+    window.addEventListener("DOMContentLoaded", async () => {
+      await checkStatus();
+      await loadLocalDir();
+      setInterval(pollTransfers, 2000);
+      setInterval(pollLogs, 3000);
+    });
+  </script>
+</body>
+</html>

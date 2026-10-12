@@ -21,9 +21,10 @@ struct TransferFlags
     bool newerOnly;
     bool preserveTime;
     bool recursive;
+    bool resume;
 
     TransferFlags() : deleteSource(false), newerOnly(false),
-        preserveTime(false), recursive(true) {}
+        preserveTime(false), recursive(true), resume(false) {}
 };
 
 class Script
@@ -86,10 +87,25 @@ private:
     void PrintRemoteEntry(const std::string & name, const LscpName & entry,
         bool longFormat = true);
 
+    bool RemoteListDir(const std::string & path, LscpNames *& names, std::string & error);
+    void RemoteFreeNames(LscpNames * names);
+    int RemoteStat(const std::string & path, LscpAttrs * attrs, std::string & error);
+    int RemoteGet(const std::string & remote, const std::string & local,
+        unsigned long long resumeOffset, unsigned long long * size,
+        LscpProgressFn progress, void * ctx, std::string & error);
+    int RemotePut(const std::string & local, const std::string & remote,
+        int permissions, unsigned long long resumeOffset, unsigned long long * size,
+        LscpProgressFn progress, void * ctx, std::string & error);
+    int RemoteRemove(const std::string & path, std::string & error);
+    int RemoteRemoveDir(const std::string & path, std::string & error);
+    int RemoteMakeDir(const std::string & path, int permissions, std::string & error);
+    int RemoteRename(const std::string & from, const std::string & to, std::string & error);
+
     SessionOptions mDefaults;
     Session mSession;
     std::string mRemoteDirectory;
     bool mConfirm;
+    bool mResume;
     bool mExit;
     int mErrors;
 };
