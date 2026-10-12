@@ -33,6 +33,6 @@ The NuGet package includes the assembly itself and a required LinuxSCP executabl
     <file src="LinuxSCP.targets" target="build"/>
     <file src="LinuxSCP.targets" target="buildTransitive"/>
     <file src="linuxscp64.png" target=""/>
-    <file src="README.md" target="docs"/>
+    <file src="readme_nuget.md" target="docs\README.md"/>
   </files>
 </package>

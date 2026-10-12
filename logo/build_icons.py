@@ -335,7 +335,12 @@ def main():
     # horizontal lock-up: badge + wordmark
     H = 320
     b = wrap(full, H, .86)
-    font_path = next((p for p in ('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    # Bold sans-serif for the wordmark. Windows ships Arial/Segoe UI in the
+    # system font folder; DejaVu is the fallback on other hosts.
+    windir = os.environ.get('WINDIR', r'C:\Windows')
+    font_path = next((p for p in (os.path.join(windir, 'Fonts', 'arialbd.ttf'),
+                                  os.path.join(windir, 'Fonts', 'segoeuib.ttf'),
+                                  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
                                   '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf')
                       if os.path.exists(p)), None)
     if font_path:
