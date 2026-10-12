@@ -352,8 +352,9 @@ static unsigned long long local_file_size(FILE * file)
     return (unsigned long long)st.st_size;
 }
 
-int lscp_sftp_get(const char * remotePath, const char * localPath,
-    unsigned long long * size, LscpProgressFn progress, void * progressCtx)
+int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * progressCtx)
 {
     clear_error();
     struct sftp_request * request;
@@ -363,7 +364,7 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
     struct fxp_xfer * xfer;
     FILE * file;
     unsigned long long total = 0;
-    unsigned long long transferred = 0;
+    unsigned long long transferred = resumeOffset;
     int result = 0;
     bool canCloseHandle = true;
     LscpAttrs attrs;
@@ -398,7 +399,22 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
         return -1;
     }
 
-    file = fopen(localPath, "wb");
+    if (resumeOffset > 0)
+    {
+        file = fopen(localPath, "r+b");
+        if (file == NULL)
+        {
+            file = fopen(localPath, "ab");
+        }
+        if (file != NULL)
+        {
+            fseeko(file, (off_t)resumeOffset, SEEK_SET);
+        }
+    }
+    else
+    {
+        file = fopen(localPath, "wb");
+    }
     if (file == NULL)
     {
         set_system_error("Creating the local file", localPath);
@@ -406,7 +422,7 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
         return -1;
     }
 
-    xfer = xfer_download_init(handle, 0);
+    xfer = xfer_download_init(handle, resumeOffset);
     while (!xfer_done(xfer))
     {
         int got;
@@ -489,8 +505,15 @@ int lscp_sftp_get(const char * remotePath, const char * localPath,
     return 0;
 }
 
-int lscp_sftp_put(const char * localPath, const char * remotePath, int permissions,
+int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx)
+{
+    return lscp_sftp_get_resume(remotePath, localPath, 0, size, progress, progressCtx);
+}
+
+int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int permissions,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * progressCtx)
 {
     clear_error();
     struct sftp_request * request;
@@ -502,7 +525,7 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
     FILE * file;
     char * buffer;
     unsigned long long total;
-    unsigned long long transferred = 0;
+    unsigned long long transferred = resumeOffset;
     size_t pendingWrites = 0;
     bool eof = false;
     bool canCloseHandle = true;
@@ -520,6 +543,10 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
         return -1;
     }
     total = local_file_size(file);
+    if (resumeOffset > 0)
+    {
+        fseeko(file, (off_t)resumeOffset, SEEK_SET);
+    }
 
     if (permissions >= 0)
     {
@@ -527,8 +554,13 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
         attrs.permissions = (unsigned long)permissions;
     }
 
-    sftp_register(request = fxp_open_send(remotePath,
-        SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_TRUNC, &attrs));
+    int openFlags = SSH_FXF_WRITE | SSH_FXF_CREAT;
+    if (resumeOffset == 0)
+    {
+        openFlags |= SSH_FXF_TRUNC;
+    }
+
+    sftp_register(request = fxp_open_send(remotePath, openFlags, &attrs));
     pktin = receive_response(request, &found);
     if (pktin == NULL)
     {
@@ -550,7 +582,7 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
      * queued. Keep going until both are done.
      */
     buffer = snewn(TRANSFER_CHUNK, char);
-    xfer = xfer_upload_init(handle, 0);
+    xfer = xfer_upload_init(handle, resumeOffset);
     while (!eof || pendingWrites != 0)
     {
         size_t read;
@@ -661,6 +693,12 @@ int lscp_sftp_put(const char * localPath, const char * remotePath, int permissio
         *size = transferred;
     }
     return 0;
+}
+
+int lscp_sftp_put(const char * localPath, const char * remotePath, int permissions,
+    unsigned long long * size, LscpProgressFn progress, void * progressCtx)
+{
+    return lscp_sftp_put_resume(localPath, remotePath, permissions, 0, size, progress, progressCtx);
 }
 
 /*

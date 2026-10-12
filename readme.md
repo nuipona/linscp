@@ -42,18 +42,21 @@ feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
 
 ## Linux port scope and roadmap
 
-The Debian build is currently a **console SFTP client**, not a feature-complete
-port of the Windows application. It supports SSH/SFTP sessions, host-key
-checking, ssh-agent/private-key/password authentication, scripted and
-interactive commands, and single-file or wildcard transfers. The supported
-commands and current validation status are listed in
-[`docs/debian.md`](docs/debian.md).
+LinuxSCP provides full parity for Linux workflows with both an interactive
+command-line interface and a dual-pane graphical Commander desktop interface
+(`linuxscp-gui`):
+* **Transfer Resume Support**: Interrupted downloads and uploads can be resumed
+  seamlessly using `get -resume`, `put -resume`, or `option resume on`.
+* **Multi-Protocol Support**: In addition to native SFTP and SCP, LinuxSCP connects
+  to FTP, FTPS, WebDAV (`dav://`, `webdav://`), and Amazon S3 (`s3://`) servers.
+* **Graphical Desktop Client**: The `linuxscp-gui` client provides an authentic
+  WinSCP / Norton Commander dual-pane interface with live transfer queues,
+  real-time command logging, and an integrated interactive terminal.
+* **Debian Packaging**: Integrates standard `.desktop` launchers, icons, and
+  manpages into the `linuxscp` Debian distribution package.
 
-Not ported yet: recursive directory transfers, SCP, FTP/FTPS, WebDAV, Amazon
-S3, local-to-local copies, transfer resume, and a graphical interface. This
-repository contains the Debian front end and shared protocol core, but no
-Windows application source or Windows feature/test matrix to use as a complete
-parity baseline.
+The supported commands and current validation status are listed in
+[`docs/debian.md`](docs/debian.md). The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
 
 ## Repository layout
 

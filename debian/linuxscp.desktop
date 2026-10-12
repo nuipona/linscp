@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LinuxSCP
+GenericName=File Transfer Client
+Comment=Dual-Pane SFTP, FTP, WebDAV and S3 File Transfer Client
+Exec=linuxscp-gui %u
+Icon=linuxscp
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=sftp;ftp;ftps;webdav;s3;scp;winscp;commander;
+MimeType=x-scheme-handler/sftp;x-scheme-handler/ftp;x-scheme-handler/ftps;
+StartupNotify=true

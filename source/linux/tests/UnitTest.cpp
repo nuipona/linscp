@@ -19,6 +19,7 @@
 #include "PathUtil.h"
 #include "LocalFs.h"
 #include "Session.h"
+#include "Script.h"
 
 namespace {
 
@@ -292,9 +293,30 @@ void TestParseSiteUrl()
     CHECK_TRUE(options.portNumber == 2222);
     CHECK_EQ(options.initialDirectory, "/tmp");
 
+    /* Multi-protocol URLs. */
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("ftp://example.com", options, error));
+    CHECK_EQ(options.protocol, "ftp");
+    CHECK_EQ(options.hostName, "example.com");
+    CHECK_TRUE(options.portNumber == 21);
+
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("ftps://example.com", options, error));
+    CHECK_EQ(options.protocol, "ftps");
+    CHECK_TRUE(options.portNumber == 990);
+
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("webdav://example.com/dav", options, error));
+    CHECK_EQ(options.protocol, "webdav");
+    CHECK_EQ(options.initialDirectory, "/dav");
+
+    options = SessionOptions();
+    CHECK_TRUE(ParseSiteUrl("s3://bucket.example.com", options, error));
+    CHECK_EQ(options.protocol, "s3");
+
     /* Rejected URLs. */
     options = SessionOptions();
-    CHECK_FALSE(ParseSiteUrl("ftp://example.com", options, error));
+    CHECK_FALSE(ParseSiteUrl("gopher://example.com", options, error));
     CHECK_TRUE(error.find("Unsupported protocol") != std::string::npos);
     options = SessionOptions();
     CHECK_FALSE(ParseSiteUrl("sftp://", options, error));
@@ -412,7 +434,39 @@ void TestLocalFs()
     CHECK_TRUE(RemoveLocalFile(dir + "/two.log", error));
     CHECK_EQ(error, "");
     CHECK_TRUE(rmdir((dir + "/sub").c_str()) == 0);
+
+    /* Recursive directory creation handles multiple missing parent directories. */
+    CHECK_TRUE(CreateLocalDirectoryRecursive(dir + "/deep/nested/path", error));
+    CHECK_TRUE(error.empty());
+    LocalFileInfo deepInfo = StatLocal(dir + "/deep/nested/path");
+    CHECK_TRUE(deepInfo.exists);
+    CHECK_TRUE(deepInfo.isDir);
+    CHECK_TRUE(rmdir((dir + "/deep/nested/path").c_str()) == 0);
+    CHECK_TRUE(rmdir((dir + "/deep/nested").c_str()) == 0);
+    CHECK_TRUE(rmdir((dir + "/deep").c_str()) == 0);
+
     CHECK_TRUE(rmdir(dir.c_str()) == 0);
+}
+
+void TestScriptCommands()
+{
+    Script script;
+    CHECK_TRUE(script.ExecuteLine("echo test message"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option confirm off"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option resume on"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option resume off"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option batch abort"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option reconnect 10"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option transfer binary"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_FALSE(script.ExecuteLine("exit"));
+    CHECK_TRUE(script.ExitRequested());
 }
 
 void TestSessionRegistry()
@@ -443,6 +497,7 @@ int main()
     TestParseSiteUrl();
     TestLocalFs();
     TestSessionRegistry();
+    TestScriptCommands();
 
     if (gFailures != 0)
     {

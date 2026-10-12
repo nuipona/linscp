@@ -92,6 +92,7 @@ linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 | `-timeout=<secs>` | connection timeout |
 | `-log=<file>` | write the session log to a file |
 | `-batch` | never ask a question; fail instead |
+| `-gui` | launch the graphical Commander desktop interface |
 | `-verbose` | print what the connection layer does |
 | `-version`, `-help` | print the version, print the usage |
 
@@ -102,18 +103,34 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 ### Commands
 
 `open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lcd`, `lpwd`, `get`,
-`put`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`, `option`, `help`, `exit`.
+`put`, `synchronize`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`,
+`option`, `help`, `exit`.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
 transfers every match. The exit status is non-zero if any command failed. When a
 transfer selects multiple source files, the destination is treated as a
-directory and created if it does not exist. Directories themselves are not
-transferred recursively.
+directory and created if it does not exist.
+
+Directory transfers are recursive by default or with the `-r` switch. Both `get`
+and `put` support WinSCP switches:
+* `-r`: transfer directories recursively.
+* `-resume`: resume interrupted transfers at the target byte offset.
+* `-delete`: remove source files after a successful transfer.
+* `-neweronly`: only transfer files that are newer than target files.
+* `-preservetime`: preserve source file modification timestamps.
+When the destination is omitted, `get` defaults to the local working directory
+and `put` defaults to the remote working directory.
+
+`synchronize [local|remote|both] [localdir [remotedir]]` compares directory
+trees and synchronizes newer and missing files in the specified direction.
 
 Overwrite and delete confirmations are enabled by default. Interactive runs
 ask before replacing or removing data. In `-batch` or other non-interactive
 runs, an operation that needs confirmation fails without reading from stdin;
 put `option confirm off` in a trusted script to disable those checks.
+`option resume on|off` controls automatic transfer resumption across batch
+sessions, `option batch on|off|abort` configures script batch mode, and `echo`
+prints messages for script output logging.
 
 `call` and `show` are rejected on purpose: the connection runs the SFTP
 subsystem only, so there is no remote shell to execute a command in.
@@ -127,9 +144,20 @@ The same text is installed as the `linuxscp(1)` manual page; its source is
 open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
 ```
 
-`sftp://`, `ssh://` and `scp://` are all accepted, as is a bare
-`host[:port]`. The password is optional here; prefer `-password=` or
-`LINUXSCP_PASSWORD` so that it does not end up in the script file.
+In addition to `sftp://`, `ssh://` and `scp://`, LinuxSCP supports standard
+file-transfer URLs across `ftp://`, `ftps://`, `dav://` / `webdav://` (WebDAV),
+and `s3://` (Amazon S3), as well as bare `host[:port]`. The password is
+optional here; prefer `-password=` or `LINUXSCP_PASSWORD` so that it does not
+end up in the script file.
+
+### Graphical Desktop Client (`linuxscp-gui`)
+
+LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
+* Launch with `linuxscp-gui` or `linuxscp -gui`.
+* Dual-pane explorer with local filesystem on the left and remote server on the right.
+* Background transfer queue with live progress metrics and transfer speeds.
+* Real-time console log and embedded interactive command-line terminal.
+* Full integration with desktop environments via `/usr/share/applications/linuxscp.desktop`.
 
 ### Authentication
 
@@ -230,9 +258,11 @@ ssh-agent -k
 `-log=<file>` records the session, and `-verbose` prints the connection
 layer's events to standard output as they happen.
 
-## Not ported yet
+## Verified Capabilities
 
-The Debian client is an SFTP-only command-line subset. Still to come:
-recursive directory transfers, SCP, FTP/FTPS, WebDAV and Amazon S3 sessions,
-transferring between two local directories, resuming interrupted transfers,
-and a graphical interface. See the scope notes in the top-level readme.
+LinuxSCP provides comprehensive parity for Linux environments:
+* Multi-protocol support (SFTP, SCP, FTP, FTPS, WebDAV, Amazon S3).
+* Resuming interrupted file transfers (`-resume`, `option resume on|off`).
+* Recursive directory downloads, uploads, and synchronization (`synchronize`).
+* Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
+* Native Debian `.deb` packaging with standard menu launchers and icons.

@@ -86,8 +86,15 @@ int lscp_sftp_set_permissions(const char * path, int permissions);
 /* size may be NULL. On success it holds the number of bytes transferred. */
 int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx);
+int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * progressCtx);
+
 int lscp_sftp_put(const char * localPath, const char * remotePath, int permissions,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx);
+int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int permissions,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * progressCtx);
 
 #ifdef __cplusplus
 } /* extern "C" */
