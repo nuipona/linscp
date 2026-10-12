@@ -387,7 +387,7 @@ static TRegistry * __fastcall CreateRegistry(HKEY RootKey)
 
   // Most locations we write to (Software\Classes, Software\RegisteredApplications),
   // are shared between 32-bit and 64-bit, so the WOW flag has no effect.
-  // For WinSCPCapabilities we want the 32-bit key for backward compatibility.
+  // For LinuxSCPCapabilities we want the 32-bit key for backward compatibility.
   Registry->Access = KEY_WRITE | KEY_READ | KEY_WOW64_32KEY;
   Registry->RootKey = RootKey;
 
@@ -508,7 +508,7 @@ static void __fastcall UnregisterAsUrlHandlers(const UnicodeString & Prefix, boo
   UnregisterAsUrlHandler(Prefix + S3Protocol, UnregisterProtocol);
 }
 //---------------------------------------------------------------------------
-static const UnicodeString GenericUrlHandler(L"WinSCP.Url");
+static const UnicodeString GenericUrlHandler(L"LinuxSCP.Url");
 //---------------------------------------------------------------------------
 static void __fastcall RegisterProtocolForDefaultPrograms(HKEY RootKey, const UnicodeString & Protocol)
 {
@@ -524,10 +524,10 @@ static void __fastcall RegisterProtocolForDefaultPrograms(HKEY RootKey, const Un
 
   // create capabilities record
 
-  // this has to be a separate branch from WinSCP one, as by its presence we
+  // this has to be a separate branch from LinuxSCP one, as by its presence we
   // enforce registry storage usage, and the capabilities branch may exist
   // even if we are using INI file
-  UnicodeString CapabilitiesKey = IncludeTrailingBackslash(GetCompanyRegistryKey()) + L"WinSCPCapabilities";
+  UnicodeString CapabilitiesKey = IncludeTrailingBackslash(GetCompanyRegistryKey()) + L"LinuxSCPCapabilities";
   if (!Registry->OpenKey(CapabilitiesKey, true))
   {
     Abort();
@@ -570,7 +570,7 @@ static void __fastcall UnregisterProtocolForDefaultPrograms(HKEY RootKey,
 
   // remove capabilities record
 
-  UnicodeString CapabilitiesKey = IncludeTrailingBackslash(GetCompanyRegistryKey()) + L"WinSCPCapabilities";
+  UnicodeString CapabilitiesKey = IncludeTrailingBackslash(GetCompanyRegistryKey()) + L"LinuxSCPCapabilities";
   UnicodeString UrlAssociationsKey = CapabilitiesKey + L"\\UrlAssociations";
   if (Registry->OpenKey(UrlAssociationsKey, false))
   {
@@ -607,7 +607,7 @@ static void __fastcall UnregisterProtocolForDefaultPrograms(HKEY RootKey,
 static void __fastcall RegisterProtocolsForDefaultPrograms(HKEY RootKey)
 {
   // register URL handler, if it does not exist yet
-  RegisterAsUrlHandler(RootKey, GenericUrlHandler, L"WinSCP URL");
+  RegisterAsUrlHandler(RootKey, GenericUrlHandler, L"LinuxSCP URL");
 
   RegisterProtocolForDefaultPrograms(RootKey, FtpProtocol);
   RegisterProtocolForDefaultPrograms(RootKey, FtpsProtocol);
@@ -674,14 +674,14 @@ void __fastcall RegisterForDefaultProtocols()
   RegisterForDefaultPrograms();
 
   AppLog(L"Registering for non-browser protocols with prefix");
-  RegisterAsNonBrowserUrlHandler(WinSCPProtocolPrefix);
+  RegisterAsNonBrowserUrlHandler(LinuxSCPProtocolPrefix);
   AppLog(L"Registering for browser protocols with prefix");
-  RegisterAsUrlHandler(WinSCPProtocolPrefix + FtpProtocol.UpperCase());
-  RegisterAsUrlHandler(WinSCPProtocolPrefix + FtpsProtocol.UpperCase());
-  RegisterAsUrlHandler(WinSCPProtocolPrefix + FtpesProtocol.UpperCase());
-  RegisterAsUrlHandler(WinSCPProtocolPrefix + HttpProtocol.UpperCase());
-  RegisterAsUrlHandler(WinSCPProtocolPrefix + HttpsProtocol.UpperCase());
-  RegisterAsUrlHandler(WinSCPProtocolPrefix + SshProtocol.UpperCase());
+  RegisterAsUrlHandler(LinuxSCPProtocolPrefix + FtpProtocol.UpperCase());
+  RegisterAsUrlHandler(LinuxSCPProtocolPrefix + FtpsProtocol.UpperCase());
+  RegisterAsUrlHandler(LinuxSCPProtocolPrefix + FtpesProtocol.UpperCase());
+  RegisterAsUrlHandler(LinuxSCPProtocolPrefix + HttpProtocol.UpperCase());
+  RegisterAsUrlHandler(LinuxSCPProtocolPrefix + HttpsProtocol.UpperCase());
+  RegisterAsUrlHandler(LinuxSCPProtocolPrefix + SshProtocol.UpperCase());
 
   AppLog(L"Notifying about changes");
   NotifyChangedAssociations();
@@ -692,13 +692,13 @@ void __fastcall UnregisterForProtocols()
 {
   AppLog(L"Unregistering from handling protocol URL addresses");
   UnregisterAsUrlHandlers(UnicodeString(), false);
-  UnregisterAsUrlHandlers(WinSCPProtocolPrefix, true);
-  UnregisterAsUrlHandler(WinSCPProtocolPrefix + FtpProtocol.UpperCase(), true);
-  UnregisterAsUrlHandler(WinSCPProtocolPrefix + FtpsProtocol.UpperCase(), true);
-  UnregisterAsUrlHandler(WinSCPProtocolPrefix + FtpesProtocol.UpperCase(), true);
-  UnregisterAsUrlHandler(WinSCPProtocolPrefix + HttpProtocol.UpperCase(), true);
-  UnregisterAsUrlHandler(WinSCPProtocolPrefix + HttpsProtocol.UpperCase(), true);
-  UnregisterAsUrlHandler(WinSCPProtocolPrefix + SshProtocol.UpperCase(), true);
+  UnregisterAsUrlHandlers(LinuxSCPProtocolPrefix, true);
+  UnregisterAsUrlHandler(LinuxSCPProtocolPrefix + FtpProtocol.UpperCase(), true);
+  UnregisterAsUrlHandler(LinuxSCPProtocolPrefix + FtpsProtocol.UpperCase(), true);
+  UnregisterAsUrlHandler(LinuxSCPProtocolPrefix + FtpesProtocol.UpperCase(), true);
+  UnregisterAsUrlHandler(LinuxSCPProtocolPrefix + HttpProtocol.UpperCase(), true);
+  UnregisterAsUrlHandler(LinuxSCPProtocolPrefix + HttpsProtocol.UpperCase(), true);
+  UnregisterAsUrlHandler(LinuxSCPProtocolPrefix + SshProtocol.UpperCase(), true);
 
   UnregisterProtocolsForDefaultPrograms(HKEY_CURRENT_USER, false);
   UnregisterProtocolsForDefaultPrograms(HKEY_LOCAL_MACHINE, false);
@@ -804,7 +804,7 @@ UnicodeString __fastcall CampaignUrl(UnicodeString URL)
   UnicodeString Medium = IsUWP() ? L"uwp" : L"app";
   // Beware that these parameters may get truncated if URL is too long,
   // such as with ERROR_REPORT_URL2
-  UnicodeString Params = FORMAT(L"utm_source=winscp&utm_medium=%s&utm_campaign=%s", (Medium, Version));
+  UnicodeString Params = FORMAT(L"utm_source=linuxscp&utm_medium=%s&utm_campaign=%s", (Medium, Version));
 
   return AppendUrlParams(URL, Params);
 }
@@ -1166,7 +1166,7 @@ void FormatUpdatesMessage(
   UnicodeString Buf = LoadStr(UPDATE_MISSING_ADDRESS2);
   if (!Updates.AuthenticationEmail.IsEmpty())
   {
-    Buf += L"\n\n" + FMTLOAD(UPDATE_MISSING_ADDRESS3, (Updates.AuthenticationEmail, L"WinSCP donation receipt"));
+    Buf += L"\n\n" + FMTLOAD(UPDATE_MISSING_ADDRESS3, (Updates.AuthenticationEmail, L"LinuxSCP donation receipt"));
   }
   Message = ReplaceStr(Message, "%UPDATE_MISSING_ADDRESS%", Buf);
   Message = ReplaceStr(Message, "%UPDATE_TOO_LOW%", LoadStr(UPDATE_TOO_LOW));
@@ -1267,7 +1267,7 @@ static UnicodeString GetInstallationPath(HKEY RootKey)
   std::unique_ptr<TRegistry> Registry(new TRegistry(KEY_READ | KEY_WOW64_32KEY));
   Registry->RootKey = RootKey;
   UnicodeString Result;
-  if (Registry->OpenKey(L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\winscp3_is1", false))
+  if (Registry->OpenKey(L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\linuxscp3_is1", false))
   {
     Result = ExcludeTrailingBackslash(Registry->ReadString(L"Inno Setup: App Path"));
   }
@@ -2641,7 +2641,7 @@ static void DoCollectComRegistration(TConsole * Console, TStrings * Keys)
 
     std::unique_ptr<TStringList> KeyNames(new TStringList());
     Storage->GetSubKeyNames(KeyNames.get());
-    UnicodeString NamespacePrefix = L"WinSCP.";
+    UnicodeString NamespacePrefix = L"LinuxSCP.";
     Console->PrintLine(L"Classes:");
     UnicodeString CommonCodeBase;
     int Found = 0;

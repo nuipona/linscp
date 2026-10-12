@@ -186,7 +186,7 @@ UnicodeString __fastcall TGenerateUrlDialog::GenerateUrl(UnicodeString Path)
 {
   UnicodeString Url =
     FData->GenerateSessionUrl(
-      FLAGMASK(WinSCPSpecificCheck->Checked, sufSpecific) |
+      FLAGMASK(LinuxSCPSpecificCheck->Checked, sufSpecific) |
       FLAGMASK(UserNameCheck->Enabled && UserNameCheck->Checked, sufUserName) |
       FLAGMASK(PasswordCheck->Enabled && PasswordCheck->Checked, sufPassword) |
       FLAGMASK(HostKeyCheck->Enabled && HostKeyCheck->Checked, sufHostKey) |
@@ -424,14 +424,14 @@ UnicodeString __fastcall TGenerateUrlDialog::GenerateScript(UnicodeString & Scri
     Result +=
       RtfPara +
       RtfPara +
-      RtfKeyword(L"set") + RtfText(L" WINSCP_RESULT=%ERRORLEVEL%") + RtfPara +
-      RtfKeyword(L"if") + RtfText(L" %WINSCP_RESULT% ") + RtfKeyword(L"equ") + RtfText(L" 0 (") + RtfPara +
+      RtfKeyword(L"set") + RtfText(L" LINUXSCP_RESULT=%ERRORLEVEL%") + RtfPara +
+      RtfKeyword(L"if") + RtfText(L" %LINUXSCP_RESULT% ") + RtfKeyword(L"equ") + RtfText(L" 0 (") + RtfPara +
       RtfText(L"  ") + RtfKeyword(L"echo") + RtfText(L" Success") + RtfPara +
       RtfText(L") ") + RtfKeyword(L"else") + RtfText(L" (") + RtfPara +
       RtfText(L"  ") + RtfKeyword(L"echo") + RtfText(L" Error") + RtfPara +
       RtfText(L")") + RtfPara +
       RtfPara +
-      RtfKeyword(L"exit") + RtfText(L" /b %WINSCP_RESULT%") + RtfPara;
+      RtfKeyword(L"exit") + RtfText(L" /b %LINUXSCP_RESULT%") + RtfPara;
   }
   else if (ScriptFormatCombo->ItemIndex == sfCommandLine)
   {
@@ -496,8 +496,8 @@ UnicodeString __fastcall TGenerateUrlDialog::GenerateScript(UnicodeString & Scri
     Result +=
       RtfPara +
       RtfPara +
-      RtfText(L"$winscpResult = $LastExitCode") + RtfPara +
-      RtfKeyword(L"if") + RtfText(L" ($winscpResult -eq 0)") + RtfPara +
+      RtfText(L"$linuxscpResult = $LastExitCode") + RtfPara +
+      RtfKeyword(L"if") + RtfText(L" ($linuxscpResult -eq 0)") + RtfPara +
       RtfText(L"{") + RtfPara +
       RtfText(L"  ") + RtfKeyword(L"Write-Host") + L" " + RtfString(L"\"Success\"") + RtfPara +
       RtfText(L"}") + RtfPara +
@@ -506,7 +506,7 @@ UnicodeString __fastcall TGenerateUrlDialog::GenerateScript(UnicodeString & Scri
       RtfText(L"  ") + RtfKeyword(L"Write-Host") + L" " + RtfString(L"\"Error\"") + RtfPara +
       RtfText(L"}") + RtfPara +
       RtfPara +
-      RtfKeyword(L"exit") + RtfText(L" $winscpResult") + RtfPara;
+      RtfKeyword(L"exit") + RtfText(L" $linuxscpResult") + RtfPara;
   }
 
   return Result;

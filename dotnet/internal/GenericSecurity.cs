@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     // All the code to manipulate security object is available in .NET framework,
     // but its API tries to be type-safe and handle-safe, enforcing special implemnentation

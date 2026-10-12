@@ -1272,7 +1272,7 @@ object PreferencesDialog: TPreferencesDialog
             Width = 427
             Height = 25
             Anchors = [akLeft, akTop, akRight]
-            Caption = 'Add WinSCP to &search path'
+            Caption = 'Add LinuxSCP to &search path'
             TabOrder = 4
             OnClick = AddSearchPathButtonClick
           end
@@ -3753,7 +3753,7 @@ object PreferencesDialog: TPreferencesDialog
       OnClick = RegisterAsUrlHandlerItemClick
     end
     object MakeDefaultHandlerItem: TMenuItem
-      Caption = 'Make WinSCP &default handler...'
+      Caption = 'Make LinuxSCP &default handler...'
       OnClick = MakeDefaultHandlerItemClick
     end
     object UnregisterForDefaultProtocolsItem: TMenuItem

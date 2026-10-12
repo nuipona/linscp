@@ -1,6 +1,6 @@
 ﻿using System.IO;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class PatientFileStream : Stream
     {

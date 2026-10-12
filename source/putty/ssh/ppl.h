@@ -24,7 +24,7 @@ struct PacketProtocolLayerVtable {
     /* Protocol-level name of this layer. */
     const char *name;
 
-    unsigned int (*winscp_query)(PacketProtocolLayer *ppl, int query);
+    unsigned int (*linuxscp_query)(PacketProtocolLayer *ppl, int query);
 };
 
 struct PacketProtocolLayer {
@@ -73,8 +73,8 @@ static inline size_t ssh_ppl_queued_data_size(PacketProtocolLayer *ppl)
 { return ppl->vt->queued_data_size(ppl); }
 static inline void ssh_ppl_final_output(PacketProtocolLayer *ppl)
 { ppl->vt->final_output(ppl); }
-static inline unsigned int ssh_ppl_winscp_query(PacketProtocolLayer *ppl, int query)
-{ return ppl->vt->winscp_query(ppl, query); }
+static inline unsigned int ssh_ppl_linuxscp_query(PacketProtocolLayer *ppl, int query)
+{ return ppl->vt->linuxscp_query(ppl, query); }
 
 static inline InteractionReadySeat ppl_get_iseat(PacketProtocolLayer *ppl)
 { return interactor_announce(ppl->interactor); }
@@ -126,7 +126,7 @@ PacketProtocolLayer *ssh2_userauth_new(
     bool try_ki_auth, bool try_gssapi_auth, bool try_gssapi_kex_auth,
     bool gssapi_fwd, struct ssh_connection_shared_gss_state *shgss,
     const char *auth_plugin,
-    const char * loghost, bool change_password, Seat *seat); // WINSCP
+    const char * loghost, bool change_password, Seat *seat); // FORK_BUILD
 PacketProtocolLayer *ssh2_connection_new(
     Ssh *ssh, ssh_sharing_state *connshare, bool is_simple,
     Conf *conf, const char *peer_verstring, bufchain *user_input,

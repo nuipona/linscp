@@ -45,7 +45,7 @@ Filename *filename_copy(const Filename *fn)
     return newfn;
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 const char* in_memory_key_data(const Filename *fn)
 {
     const char* result = fn->cpath;
@@ -81,10 +81,10 @@ const char* in_memory_key_data(const Filename *fn)
 
 const char *filename_to_str(const Filename *fn)
 {
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     if (in_memory_key_data(fn) != NULL) return "in-memory";
     #endif
-    // WINSCP
+    // FORK_BUILD
     return fn->utf8path;                  /* FIXME */
 }
 

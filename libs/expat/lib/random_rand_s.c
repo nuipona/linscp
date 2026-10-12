@@ -37,7 +37,7 @@
 
 #include "random_rand_s.h"
 
-// WINSCP
+// FORK_BUILD
 
 // rand_s is not in C++Builder
 // Have to call semi-documented RtlGenRandom/SystemFunction036 directly
@@ -65,4 +65,4 @@ writeRandomBytes_rand_s(void *target, size_t count) {
   return success;
 }
 
-// /WINSCP
+// /FORK_BUILD

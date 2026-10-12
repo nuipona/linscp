@@ -45,7 +45,7 @@ typedef enum
 
 struct S3RequestContext
 {
-#ifdef WINSCP
+#ifdef FORK_BUILD
     S3SessionCallback *sessionCallback;
     void *sessionCallbackData;
     S3SslCallback *sslCallback;

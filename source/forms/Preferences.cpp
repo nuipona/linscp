@@ -2756,7 +2756,7 @@ void __fastcall TPreferencesDialog::ExtensionHttpError(THttp * /*Sender*/, int S
 {
   if ((Status / 10) == 49)
   {
-    // HTTP 49x indicate user-friendly error message from winscp.net, throw it without HTTP status code
+    // HTTP 49x indicate user-friendly error message from github.com/nuipona/linuxscp, throw it without HTTP status code
     throw Exception(Message);
   }
 }
@@ -2790,8 +2790,8 @@ void __fastcall TPreferencesDialog::AddExtension()
       {
         UnicodeString Url = Path;
         Url = SecureUrl(Url);
-        bool WinSCPURL = IsWinSCPUrl(Url);
-        if (WinSCPURL)
+        bool LinuxSCPURL = IsLinuxSCPUrl(Url);
+        if (LinuxSCPURL)
         {
           Url = ProgramUrl(Url);
           // The EncodeUrlString should not be necessary, but as we get the value from registry, let's be safe
@@ -2808,15 +2808,15 @@ void __fastcall TPreferencesDialog::AddExtension()
         std::unique_ptr<THttp> Http(CreateHttp());
         Http->URL = Url;
         std::unique_ptr<TStrings> Headers(new TStringList());
-        Headers->Values[L"Accept"] = L"text/winscpextension,text/plain";
+        Headers->Values[L"Accept"] = L"text/linuxscpextension,text/plain";
         Http->RequestHeaders = Headers.get();
         Http->OnError = ExtensionHttpError;
         Http->Get();
 
-        UnicodeString TrustedStr = Http->ResponseHeaders->Values[L"WinSCP-Extension-Trusted"];
-        Trusted = WinSCPURL && (StrToIntDef(TrustedStr, 0) != 0);
+        UnicodeString TrustedStr = Http->ResponseHeaders->Values[L"LinuxSCP-Extension-Trusted"];
+        Trusted = LinuxSCPURL && (StrToIntDef(TrustedStr, 0) != 0);
 
-        FileName = MakeValidFileName(Http->ResponseHeaders->Values[L"WinSCP-Extension-Id"]);
+        FileName = MakeValidFileName(Http->ResponseHeaders->Values[L"LinuxSCP-Extension-Id"]);
         if (FileName.IsEmpty())
         {
           FileName = MakeValidFileName(ExtractFileNameFromUrl(Path));
@@ -2824,7 +2824,7 @@ void __fastcall TPreferencesDialog::AddExtension()
         ProvisionaryId = WinConfiguration->GetProvisionaryExtensionId(FileName);
         Lines->Text = Http->Response;
 
-        Latest = Http->ResponseHeaders->Values[L"WinSCP-Extension-Skipped"].Trim().IsEmpty();
+        Latest = Http->ResponseHeaders->Values[L"LinuxSCP-Extension-Skipped"].Trim().IsEmpty();
       }
       else
       {
@@ -2887,11 +2887,11 @@ void __fastcall TPreferencesDialog::AddExtension()
         UnicodeString FileNameOnly = ExtractFileNameOnly(FileName);
         if (FileNameOnly.IsEmpty())
         {
-          FileName = MakeValidFileName(StripHotkey(CustomCommand->Name)) + WinSCPExtensionExt;
+          FileName = MakeValidFileName(StripHotkey(CustomCommand->Name)) + LinuxSCPExtensionExt;
         }
         else
         {
-          FileName = ExtractFileNameOnly(FileName) + WinSCPExtensionExt + ExtractFileExt(FileName);
+          FileName = ExtractFileNameOnly(FileName) + LinuxSCPExtensionExt + ExtractFileExt(FileName);
         }
       }
     }
@@ -2912,7 +2912,7 @@ void __fastcall TPreferencesDialog::AddExtension()
 
         int Counter = 1;
         UnicodeString OriginalExtensionPath = ExtensionPath;
-        int P = Pos(UpperCase(WinSCPExtensionExt), UpperCase(OriginalExtensionPath));
+        int P = Pos(UpperCase(LinuxSCPExtensionExt), UpperCase(OriginalExtensionPath));
 
         while (FileExists(ApiPath(ExtensionPath)))
         {

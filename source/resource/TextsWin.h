@@ -729,7 +729,7 @@
 #define TRANSLATION_COMPLETENESS 3007
 
 #define WIN_VARIABLE_STRINGS    4000
-#define WINSCP_COPYRIGHT        4001
+#define LINUXSCP_COPYRIGHT        4001
 #define HOMEPAGE_URL            4002
 #define HISTORY_URL             4003
 #define FORUM_URL               4005

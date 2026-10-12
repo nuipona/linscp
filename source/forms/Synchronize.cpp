@@ -11,7 +11,7 @@
 #pragma link "GrayedCheckBox"
 #pragma resource "*.dfm"
 //---------------------------------------------------------------------------
-const int WM_USER_STOP = WM_WINSCP_USER + 2;
+const int WM_USER_STOP = WM_FORK_USER + 2;
 //---------------------------------------------------------------------------
 bool __fastcall DoSynchronizeDialog(TSynchronizeParamType & Params,
   const TCopyParamType * CopyParams, TSynchronizeStartStopEvent OnStartStop,

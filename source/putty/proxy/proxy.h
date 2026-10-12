@@ -126,7 +126,7 @@ char *platform_setup_local_proxy(Socket *socket, const char *cmd);
 
 #include "cproxy.h"
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 ProxySocket * get_proxy_plug_socket(Plug * p);
 #endif
 

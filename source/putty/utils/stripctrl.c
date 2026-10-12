@@ -12,7 +12,7 @@
 #include <wctype.h>
 
 #include "putty.h"
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #include "terminal.h"
 #endif
 #include "misc.h"
@@ -31,7 +31,7 @@ struct StripCtrlCharsImpl {
     char buf[SCC_BUFSIZE];
     size_t buflen;
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
     Terminal *term;
     bool last_term_utf;
     struct term_utf8_decode utf8;
@@ -47,7 +47,7 @@ struct StripCtrlCharsImpl {
     StripCtrlChars public;
 };
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static void stripctrl_locale_BinarySink_write(
     BinarySink *bs, const void *vp, size_t len);
 static void stripctrl_term_BinarySink_write(
@@ -106,7 +106,7 @@ void stripctrl_reset(StripCtrlChars *sccpub)
      * start converting a fresh piece of data to send to a channel
      * that hasn't seen the previous output.
      */
-#ifndef WINSCP
+#ifndef FORK_BUILD
     memset(&scc->utf8, 0, sizeof(scc->utf8));
 #endif
     memset(&scc->mbs_in, 0, sizeof(scc->mbs_in));
@@ -134,7 +134,7 @@ void stripctrl_enable_line_limiting(StripCtrlChars *sccpub)
     scc->line_start = true;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static inline bool stripctrl_ctrlchar_ok(StripCtrlCharsImpl *scc, wchar_t wc)
 {
     return wc == L'\n' || (wc == L'\r' && scc->permit_cr);

@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 EXTERN OPENSSL_ia32cap_P
 
@@ -664,7 +664,7 @@ DB 62,0
 ALIGN 64
 
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -787,4 +787,4 @@ $L$SEH_info_RC4_set_key:
 DB 9,0,0,0
  DD key_se_handler wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

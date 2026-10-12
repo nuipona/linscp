@@ -66,13 +66,13 @@ static inline void aes_encrypt_ecb_block(ssh_cipher *ciph, void *blk)
     AES_EXTRA_BITS(impl_c, 192);                \
     AES_EXTRA_BITS(impl_c, 256)
 
-// WINSCP string constants are for avoiding 
+// FORK_BUILD string constants are for avoiding 
 // Warning 1060: Different alignments specified for same segment, %s. Using highest alignment.rdata
 // in objconv
 
 #define AES_CBC_VTABLE(impl_c, impl_display, bits)                      \
-    static const char ssh_aes ## bits ## _cbc ## impl_c ## ssh2_id[] = "aes" #bits "-cbc"; /*WINSCP*/ \
-    static const char ssh_aes ## bits ## _cbc ## impl_c ## text_name[] = "AES-" #bits " CBC (" impl_display ")"; /*WINSCP*/ \
+    static const char ssh_aes ## bits ## _cbc ## impl_c ## ssh2_id[] = "aes" #bits "-cbc"; /*FORK_BUILD*/ \
+    static const char ssh_aes ## bits ## _cbc ## impl_c ## text_name[] = "AES-" #bits " CBC (" impl_display ")"; /*FORK_BUILD*/ \
     const ssh_cipheralg ssh_aes ## bits ## _cbc ## impl_c = {           \
         .new = aes ## impl_c ## _new,                                   \
         .free = aes ## impl_c ## _free,                                 \
@@ -81,18 +81,18 @@ static inline void aes_encrypt_ecb_block(ssh_cipher *ciph, void *blk)
         .encrypt = aes ## bits ## impl_c ## _cbc_encrypt,               \
         .decrypt = aes ## bits ## impl_c ## _cbc_decrypt,               \
         .next_message = nullcipher_next_message,                        \
-        .ssh2_id = ssh_aes ## bits ## _cbc ## impl_c ## ssh2_id, /*WINSCP*/ \
+        .ssh2_id = ssh_aes ## bits ## _cbc ## impl_c ## ssh2_id, /*FORK_BUILD*/ \
         .blksize = 16,                                                  \
         .real_keybits = bits,                                           \
         .padded_keybytes = bits/8,                                      \
         .flags = SSH_CIPHER_IS_CBC,                                     \
-        .text_name = ssh_aes ## bits ## _cbc ## impl_c ## text_name, /*WINSCP*/ \
+        .text_name = ssh_aes ## bits ## _cbc ## impl_c ## text_name, /*FORK_BUILD*/ \
         .extra = &aes ## bits ## impl_c ## _extra,                              \
     }
 
 #define AES_SDCTR_VTABLE(impl_c, impl_display, bits)                    \
-    static const char ssh_aes ## bits ## _sdctr ## impl_c ## ssh2_id[] = "aes" #bits "-ctr"; /*WINSCP*/ \
-    static const char ssh_aes ## bits ## _sdctr ## impl_c ## text_name[] = "AES-" #bits " SDCTR (" impl_display ")"; /*WINSCP*/ \
+    static const char ssh_aes ## bits ## _sdctr ## impl_c ## ssh2_id[] = "aes" #bits "-ctr"; /*FORK_BUILD*/ \
+    static const char ssh_aes ## bits ## _sdctr ## impl_c ## text_name[] = "AES-" #bits " SDCTR (" impl_display ")"; /*FORK_BUILD*/ \
     const ssh_cipheralg ssh_aes ## bits ## _sdctr ## impl_c = {         \
         .new = aes ## impl_c ## _new,                                   \
         .free = aes ## impl_c ## _free,                                 \
@@ -101,18 +101,18 @@ static inline void aes_encrypt_ecb_block(ssh_cipher *ciph, void *blk)
         .encrypt = aes ## bits ## impl_c ## _sdctr,                     \
         .decrypt = aes ## bits ## impl_c ## _sdctr,                     \
         .next_message = nullcipher_next_message,                        \
-        .ssh2_id = ssh_aes ## bits ## _sdctr ## impl_c ## ssh2_id, /*WINSCP*/ \
+        .ssh2_id = ssh_aes ## bits ## _sdctr ## impl_c ## ssh2_id, /*FORK_BUILD*/ \
         .blksize = 16,                                                  \
         .real_keybits = bits,                                           \
         .padded_keybytes = bits/8,                                      \
         .flags = 0,                                                     \
-        .text_name = ssh_aes ## bits ## _sdctr ## impl_c ## text_name, /*WINSCP*/ \
+        .text_name = ssh_aes ## bits ## _sdctr ## impl_c ## text_name, /*FORK_BUILD*/ \
         .extra = &aes ## bits ## impl_c ## _extra,                      \
     }
 
 #define AES_GCM_VTABLE(impl_c, impl_display, bits)                      \
-    static const char ssh_aes ## bits ## _gcm ## impl_c ## ssh2_id[] = "aes" #bits "-gcm@openssh.com"; /*WINSCP*/ \
-    static const char ssh_aes ## bits ## _gcm ## impl_c ## text_name[] = "AES-" #bits " GCM (" impl_display ")"; /*WINSCP*/ \
+    static const char ssh_aes ## bits ## _gcm ## impl_c ## ssh2_id[] = "aes" #bits "-gcm@openssh.com"; /*FORK_BUILD*/ \
+    static const char ssh_aes ## bits ## _gcm ## impl_c ## text_name[] = "AES-" #bits " GCM (" impl_display ")"; /*FORK_BUILD*/ \
     const ssh_cipheralg ssh_aes ## bits ## _gcm ## impl_c = {           \
         .new = aes ## impl_c ## _new,                                   \
         .free = aes ## impl_c ## _free,                                 \

@@ -11,7 +11,7 @@ HKEY open_regkey_fn(bool create, bool write, HKEY hk, const char *path, ...)
     bool hk_needs_close = false;
     va_list ap;
     va_start(ap, path);
-    assert(!reg_override_winscp());
+    assert(!reg_override_linuxscp());
 
     for (; path; path = va_arg(ap, const char *)) {
         HKEY hk_sub = NULL;
@@ -47,15 +47,15 @@ HKEY open_regkey_fn(bool create, bool write, HKEY hk, const char *path, ...)
 
 void close_regkey(HKEY key)
 {
-    if (reg_override_winscp())
+    if (reg_override_linuxscp())
     {
-        close_regkey_winscp(key);
+        close_regkey_linuxscp(key);
         return;
     }
     RegCloseKey(key);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 void del_regkey(HKEY key, const char *name)
 {
     RegDeleteKey(key, name);
@@ -66,7 +66,7 @@ char *enum_regkey(HKEY key, int index)
 {
     size_t regbuf_size = MAX_PATH + 1;
     char *regbuf = snewn(regbuf_size, char);
-    assert(!reg_override_winscp());
+    assert(!reg_override_linuxscp());
 
     while (1) {
         LONG status = RegEnumKey(key, index, regbuf, regbuf_size);
@@ -83,9 +83,9 @@ char *enum_regkey(HKEY key, int index)
 bool get_reg_dword(HKEY key, const char *name, DWORD *out)
 {
     DWORD type, size;
-    if (reg_override_winscp())
+    if (reg_override_linuxscp())
     {
-        return get_reg_dword_winscp(key, name, out);
+        return get_reg_dword_linuxscp(key, name, out);
     }
     size = sizeof(*out);
 
@@ -99,9 +99,9 @@ bool get_reg_dword(HKEY key, const char *name, DWORD *out)
 
 bool put_reg_dword(HKEY key, const char *name, DWORD value)
 {
-    if (reg_override_winscp())
+    if (reg_override_linuxscp())
     {
-        return put_reg_dword_winscp(key, name, value);
+        return put_reg_dword_linuxscp(key, name, value);
     }
 
     return RegSetValueEx(key, name, 0, REG_DWORD, (CONST BYTE *) &value,
@@ -112,9 +112,9 @@ char *get_reg_sz(HKEY key, const char *name)
 {
     DWORD type, size;
 
-    if (reg_override_winscp())
+    if (reg_override_linuxscp())
     {
-        return get_reg_sz_winscp(key, name);
+        return get_reg_sz_linuxscp(key, name);
     }
 
     if (RegQueryValueEx(key, name, 0, &type, NULL,
@@ -137,9 +137,9 @@ char *get_reg_sz(HKEY key, const char *name)
 
 bool put_reg_sz(HKEY key, const char *name, const char *str)
 {
-    if (reg_override_winscp())
+    if (reg_override_linuxscp())
     {
-        return put_reg_sz_winscp(key, name, str);
+        return put_reg_sz_linuxscp(key, name, str);
     }
 
     /* You have to store the trailing NUL as well */
@@ -147,7 +147,7 @@ bool put_reg_sz(HKEY key, const char *name, const char *str)
                          1 + strlen(str)) == ERROR_SUCCESS;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /*
  * REG_MULTI_SZ items are stored as a concatenation of NUL-terminated
  * strings, terminated in turn with an empty string, i.e. a second
@@ -211,4 +211,4 @@ char *get_reg_sz_simple(HKEY key, const char *name, const char *leaf)
     RegCloseKey(subkey);
     return toret;
 }
-#endif // WINSCP
+#endif // FORK_BUILD

@@ -118,7 +118,7 @@ typedef struct RequestParams
 // (and thus live while a curl_multi is in use).
 typedef struct Request
 {
-#ifdef WINSCP
+#ifdef FORK_BUILD
     struct S3RequestContext *requestContext;
 #else
     // These put the request on a doubly-linked list of requests in a
@@ -136,7 +136,7 @@ typedef struct Request
     // errors the same way
     int httpResponseCode;
 
-    ne_session *NeonSession; // WINSCP (neon)
+    ne_session *NeonSession; // FORK_BUILD (neon)
     ne_request *NeonRequest;
 
     // libcurl requires that the uri be stored outside of the curl handle
@@ -171,7 +171,7 @@ typedef struct Request
     // Parser of errors
     ErrorParser errorParser;
 
-    string_buffer(statusMessage, 1024); // WINSCP
+    string_buffer(statusMessage, 1024); // FORK_BUILD
 } Request;
 
 
@@ -191,9 +191,9 @@ void request_perform(const RequestParams *params, S3RequestContext *context);
 
 // Called by the internal request code or internal request context code when a
 // curl has finished the request
-void request_finish(Request *request, NeonCode code); // WINSCP (code)
+void request_finish(Request *request, NeonCode code); // FORK_BUILD (code)
 
-S3Status request_neon_code_to_status(NeonCode code); // WINSCP (neon)
+S3Status request_neon_code_to_status(NeonCode code); // FORK_BUILD (neon)
 
 
 #endif /* REQUEST_H */

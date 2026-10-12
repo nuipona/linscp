@@ -41,7 +41,7 @@ type
     property NumGlyphs stored False;
   end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 {$IF RTLVersion >= 24.0 }
   TPngBitBtnStyleHook = class(TBitBtnStyleHook)
   strict protected
@@ -310,7 +310,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 { TPngBitBtnStyleHook }
 {$IF RTLVersion >= 24.0 }
 procedure TPngBitBtnStyleHook.DrawButton(ACanvas: TCanvas;

@@ -36,7 +36,7 @@
 #include "libs3.h"
 #include "string_buffer.h"
 #include "util.h"
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #include "ne_request.h"
 #endif
 
@@ -65,12 +65,12 @@ typedef struct ResponseHeadersHandler
 void response_headers_handler_initialize(ResponseHeadersHandler *handler);
 
 void response_headers_handler_add(ResponseHeadersHandler *handler,
-                                  const char * header_name, const char * header_value); // WINSCP (neon API)
+                                  const char * header_name, const char * header_value); // FORK_BUILD (neon API)
 
 void response_headers_handler_done(ResponseHeadersHandler *handler, 
-                                   ne_request *NeonRequest); // WINSCP (neon API)
+                                   ne_request *NeonRequest); // FORK_BUILD (neon API)
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 typedef int NeonCode;
 #endif
 

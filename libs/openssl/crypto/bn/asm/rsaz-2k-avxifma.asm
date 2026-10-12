@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 EXTERN OPENSSL_ia32cap_P
 global ossl_rsaz_avxifma_eligible
@@ -16,7 +16,7 @@ ossl_rsaz_avxifma_eligible:
  cmove eax,ecx
  DB 0F3h,0C3h ;repret
 
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 global ossl_rsaz_amm52x20_x1_avxifma256
@@ -523,7 +523,7 @@ $L$ossl_rsaz_amm52x20_x1_avxifma256_epilogue:
  DB 0F3h,0C3h ;repret
 
 $L$SEH_end_ossl_rsaz_amm52x20_x1_avxifma256:
-section .rodata align=32 ; WINSCP (rodata)
+section .rodata align=32 ; FORK_BUILD (rodata)
 ALIGN 32
 $L$mask52x4:
  DQ 0xfffffffffffff
@@ -616,7 +616,7 @@ $L$kmasklut:
  DQ 0xffffffffffffffff
  DQ 0xffffffffffffffff
  DQ 0xffffffffffffffff
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 global ossl_rsaz_amm52x20_x2_avxifma256
@@ -1142,7 +1142,7 @@ $L$ossl_rsaz_amm52x20_x2_avxifma256_epilogue:
  DB 0F3h,0C3h ;repret
 
 $L$SEH_end_ossl_rsaz_amm52x20_x2_avxifma256:
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 ALIGN 32
@@ -1239,14 +1239,14 @@ $L$loop:
  DB 0F3h,0C3h ;repret
 
 
-section .rodata align=32 ; WINSCP (rodata)
+section .rodata align=32 ; FORK_BUILD (rodata)
 ALIGN 32
 $L$ones:
  DQ 1,1,1,1
 $L$zeros:
  DQ 0,0,0,0
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -1357,4 +1357,4 @@ DB 9,0,0,0
  DD rsaz_def_handler wrt ..imagebase
  DD $L$ossl_rsaz_amm52x20_x2_avxifma256_body wrt ..imagebase,$L$ossl_rsaz_amm52x20_x2_avxifma256_epilogue wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

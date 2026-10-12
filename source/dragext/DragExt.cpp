@@ -27,8 +27,8 @@
     DoDebug(__FUNC__, MSG); \
   }
 //---------------------------------------------------------------------------
-#define DRAG_EXT_REG_KEY L"Software\\Martin Prikryl\\WinSCP 2\\DragExt"
-#define DRAG_EXT_NAME L"WinSCP Shell Extension"
+#define DRAG_EXT_REG_KEY L"Software\\nuipona\\LinuxSCP 2\\DragExt"
+#define DRAG_EXT_NAME L"LinuxSCP Shell Extension"
 #define THREADING_MODEL L"Apartment"
 #define CLSID_SIZE 39
 //---------------------------------------------------------------------------
@@ -363,11 +363,11 @@ static bool RegisterServer(bool AllUsers)
     if ((RegOpenKeyEx(RootKey, L"Software\\Classes",
            0, KEY_WRITE, &HKey) == ERROR_SUCCESS) &&
         (RegCreateKeyEx(HKey,
-           L"directory\\shellex\\CopyHookHandlers\\WinSCPCopyHook",
+           L"directory\\shellex\\CopyHookHandlers\\LinuxSCPCopyHook",
            0, nullptr, REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &HKey,
            &Unused) == ERROR_SUCCESS))
     {
-      Debug(L"WinSCPCopyHook created");
+      Debug(L"LinuxSCPCopyHook created");
 
       RegSetValueEx(HKey, nullptr, 0, REG_SZ,
         reinterpret_cast<unsigned char*>(ClassID), (wcslen(ClassID) + 1) * sizeof(wchar_t));
@@ -435,7 +435,7 @@ static bool UnregisterServer(bool AllUsers)
       (RegOpenKeyEx(HKey, L"directory\\shellex\\CopyHookHandlers",
         0, KEY_WRITE, &HKey) == ERROR_SUCCESS))
   {
-    RegDeleteKey(HKey, L"WinSCPCopyHook");
+    RegDeleteKey(HKey, L"LinuxSCPCopyHook");
 
     RegCloseKey(HKey);
   }

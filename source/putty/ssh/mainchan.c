@@ -139,13 +139,13 @@ static void mainchan_open_confirmation(Channel *chan)
          * Send the CHANNEL_REQUESTS for the main session channel.
          */
         char *key, *val, *cmd;
-        #ifndef WINSCP
+        #ifndef FORK_BUILD
         struct X11Display *x11disp;
         struct X11FakeAuth *x11auth;
         #endif
         bool retry_cmd_now = false;
 
-        #ifndef WINSCP
+        #ifndef FORK_BUILD
         if (conf_get_bool(mc->conf, CONF_x11_forward)) {
             char *x11_setup_err;
             if ((x11disp = x11_setup_display(
@@ -219,7 +219,7 @@ static void mainchan_try_fallback_command(mainchan *mc)
     } else if (*cmd) {
         sshfwd_start_command(mc->sc, true, cmd);
     } else {
-        sshfwd_start_shell(mc->sc, true); // WINSCP
+        sshfwd_start_shell(mc->sc, true); // FORK_BUILD
     }
     mc->req_cmd_fallback = true;
 }
@@ -298,7 +298,7 @@ static void mainchan_request_response(Channel *chan, bool success)
         if (success) {
             ppl_logevent("Started a shell/command");
             mainchan_ready(mc);
-        } else if (*conf_get_str_ambi(mc->conf, CONF_remote_cmd2, NULL) || conf_get_bool(mc->conf, CONF_force_remote_cmd2)) { // WINSCP
+        } else if (*conf_get_str_ambi(mc->conf, CONF_remote_cmd2, NULL) || conf_get_bool(mc->conf, CONF_force_remote_cmd2)) { // FORK_BUILD
             ppl_logevent("Primary command failed; attempting fallback");
             mainchan_try_fallback_command(mc);
         } else {
@@ -479,7 +479,7 @@ void mainchan_get_specials(
 {
     /* FIXME: this _does_ depend on whether these services are supported */
 
-    /* WINSCP (causes linker warning and we do not use these)
+    /* FORK_BUILD (causes linker warning and we do not use these)
     add_special(ctx, "Break", SS_BRK, 0);
 
     #define SIGNAL_MAIN(name, desc) \

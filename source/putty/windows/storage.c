@@ -18,12 +18,12 @@
 #define CSIDL_LOCAL_APPDATA 0x001c
 #endif
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static const char *const reg_jumplist_key = PUTTY_REG_POS "\\Jumplist";
 static const char *const reg_jumplist_value = "Recent sessions";
 #endif
 static const char *const puttystr = PUTTY_REG_POS "\\Sessions";
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static const char *const host_ca_key = PUTTY_REG_POS "\\SshHostCAs";
 #endif
 
@@ -177,7 +177,7 @@ Filename *read_setting_filename(settings_r *handle, const char *name)
 {
     char *tmp = read_setting_s(handle, name);
     if (tmp) {
-        Filename *ret = filename_from_utf8(tmp); // WINSCP (though it might not have any effect for our uses of the code)
+        Filename *ret = filename_from_utf8(tmp); // FORK_BUILD (though it might not have any effect for our uses of the code)
         sfree(tmp);
         return ret;
     } else
@@ -214,7 +214,7 @@ void close_settings_r(settings_r *handle)
     }
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 void del_settings(const char *sessionname)
 {
     HKEY rkey = open_regkey_rw(HKEY_CURRENT_USER, puttystr);
@@ -380,7 +380,7 @@ int check_stored_host_key(const char *hostname, int port,
 
     if (!otherstr)
         return 1;                      /* key does not exist in registry */
-#ifndef WINSCP
+#ifndef FORK_BUILD
     else if (compare)
         return 2;                      /* key is different in registry */
 #endif
@@ -416,7 +416,7 @@ void store_host_key(Seat *seat, const char *hostname, int port,
     strbuf_free(regname);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 struct host_ca_enum {
     HKEY key;
     int i;
@@ -721,7 +721,7 @@ void write_random_seed(void *data, int len)
     }
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /*
  * Internal function supporting the jump list registry code. All the
  * functions to add, remove and read the list have substantially
@@ -896,4 +896,4 @@ void cleanup_all(void)
      * Now we're done.
      */
 }
-#endif // WINSCP
+#endif // FORK_BUILD

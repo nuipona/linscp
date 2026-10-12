@@ -73,7 +73,7 @@ ne_207_parser *ne_207_create(ne_xml_parser *parser, const ne_uri *base,
 
 /* Enable special href escaping hacks for Microsoft SharePoint. */
 #define NE_207_MSSP_ESCAPING (0x0001)
-#ifdef WINSCP
+#ifdef FORK_BUILD
 /* Enable any character in file name in URL */
 #define NE_207_LIBERAL_ESCAPING (0x0002)
 #endif

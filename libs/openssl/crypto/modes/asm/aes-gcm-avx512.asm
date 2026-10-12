@@ -16,7 +16,7 @@ ossl_vaes_vpclmulqdq_capable:
  cmove rax,rcx
  DB 0F3h,0C3h ;repret
 
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 global ossl_aes_gcm_init_avx512
 
@@ -131902,7 +131902,7 @@ $L$abort_gmult:
 
 
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 section .pdata rdata align=4
 ALIGN 4
@@ -132167,8 +132167,8 @@ DB $L$decrypt_seh_push_rbp-$L$decrypt_seh_begin
 DB 80
 DB $L$decrypt_seh_push_rbx-$L$decrypt_seh_begin
 DB 48
-%endif ; WINSCP
-section .rodata align=16 ; WINSCP (rodata)
+%endif ; FORK_BUILD
+section .rodata align=16 ; FORK_BUILD (rodata)
 ALIGN 16
 POLY: DQ 0x0000000000000001,0xC200000000000000
 

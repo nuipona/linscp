@@ -434,7 +434,7 @@ type
   TDigitValue = -1..35;  // invalid, '0'..'9', 'A'..'Z'
   TNumericSystemBase = 2..Succ(High(TDigitValue));
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
   TJclNumericFormat = class(TObject)
   private
@@ -493,7 +493,7 @@ type
     property PositiveSign: Char read GetPositiveSign write SetPositiveSign;
   end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function IntToStrZeroPad(Value, Count: Integer): string;
 
@@ -642,10 +642,10 @@ type
     property Output: string read GetOutput;
   end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 // Console Utilities
 function ReadKey: Char;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 // Loading of modules (DLLs)
 type
@@ -680,7 +680,7 @@ function TryStrToUInt(const Value: string; out Res: Cardinal): Boolean;
 function StrToUIntDef(const Value: string; const Default: Cardinal): Cardinal;
 function StrToUInt(const Value: string): Cardinal;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 const
   {$IFDEF MSWINDOWS}
   ListSeparator = ';';
@@ -746,7 +746,7 @@ type
   TFileHandle = THandle;
   {$ENDIF ~BORLAND}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
   TJclSimpleLog = class (TObject)
   private
     FDateTimeFormatStr: String;
@@ -776,7 +776,7 @@ type
     property LoggingActive: Boolean read FLoggingActive write FLoggingActive default True;
     property LogOpen: Boolean read GetLogOpen;
   end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 type
   TJclFormatSettings = class
@@ -851,7 +851,7 @@ type
 var
   JclFormatSettings: TJclFormatSettings;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 // Procedure to initialize the SimpleLog Variable
 procedure InitSimpleLog(const ALogFileName: string = ''; AOpenLog: Boolean = true);
 
@@ -859,7 +859,7 @@ procedure InitSimpleLog(const ALogFileName: string = ''; AOpenLog: Boolean = tru
 // Must be initialized with InitSimpleLog before using
 var
   SimpleLog : TJclSimpleLog;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 
 // Validates if then variant value is null or is empty
@@ -887,9 +887,9 @@ uses
   Libc,
   {$ENDIF HAS_UNIT_LIBC}
   {$IFDEF MSWINDOWS}
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   JclConsole,
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
   {$ENDIF MSWINDOWS}
   {$IFDEF HAS_UNITSCOPE}
   System.Variants, System.Types, System.Contnrs,
@@ -902,8 +902,8 @@ uses
   AnsiStrings,
   {$ENDIF HAS_UNIT_ANSISTRINGS}
   {$ENDIF ~HAS_UNITSCOPE}
-  JclFileUtils, {$IFNDEF WINSCP}JclMath,{$ENDIF ~WINSCP} JclResources, JclStrings,
-  {$IFNDEF WINSCP}JclStringConversions,{$ENDIF ~WINSCP} JclSysInfo, JclWin32;
+  JclFileUtils, {$IFNDEF FORK_BUILD}JclMath,{$ENDIF ~FORK_BUILD} JclResources, JclStrings,
+  {$IFNDEF FORK_BUILD}JclStringConversions,{$ENDIF ~FORK_BUILD} JclSysInfo, JclWin32;
 
 // memory initialization
 procedure ResetMemory(out P; Size: Longint);
@@ -2383,7 +2383,7 @@ const
   BinaryPrecision = 24;
   {$ENDIF MATH_SINGLE_PRECISION}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 constructor TJclNumericFormat.Create;
 begin
@@ -2764,7 +2764,7 @@ begin
   FSignChars[True] := Value;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 //=== Child processes ========================================================
 
@@ -3485,7 +3485,7 @@ end;
 
 //=== Console Utilities ======================================================
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function ReadKey: Char;
 {$IFDEF MSWINDOWS}
 { TODO -cHelp : Contributor: Robert Rossmair }
@@ -3542,7 +3542,7 @@ begin
   end;
 end;
 {$ENDIF UNIX}
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 //=== Loading of modules (DLLs) ==============================================
 
@@ -3964,7 +3964,7 @@ begin
   Result := -1;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 //=== { TJclSimpleLog } ======================================================
 
@@ -4164,7 +4164,7 @@ begin
     SimpleLog.OpenLog;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function TJclFormatSettings.GetCurrencyDecimals: Byte;
 begin
@@ -4541,9 +4541,9 @@ end;
 
 
 initialization
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   SimpleLog := nil;
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
   {$IFDEF UNITVERSIONING}
   RegisterUnitVersion(HInstance, UnitVersioning);
   {$ENDIF UNITVERSIONING}
@@ -4561,8 +4561,8 @@ finalization
   FreeAndNil(GlobalMMFHandleListCS);
   {$ENDIF THREADSAFE}
   {$ENDIF MSWINDOWS}
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   if Assigned(SimpleLog) then
     FreeAndNil(SimpleLog);
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
 end.

@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 
@@ -851,7 +851,7 @@ $L$gcm_enc_abort:
  DB 0F3h,0C3h ;repret
 
 $L$SEH_end_aesni_gcm_encrypt:
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 64
 $L$bswap_mask:
 DB 15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0
@@ -869,7 +869,7 @@ DB 89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112
 DB 114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 section .text
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 ALIGN 64
 EXTERN __imp_RtlVirtualUnwind
@@ -985,4 +985,4 @@ DB 9,0,0,0
  DD gcm_se_handler wrt ..imagebase
  DD $L$gcm_enc_body wrt ..imagebase,$L$gcm_enc_abort wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

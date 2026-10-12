@@ -37,7 +37,7 @@ const UnicodeString LocalInvalidChars(TraceInitStr(L"/\\:*?\"<>|"));
 const UnicodeString PasswordMask(TraceInitStr(L"***"));
 const UnicodeString Ellipsis(TraceInitStr(L"..."));
 const UnicodeString TitleSeparator(TraceInitStr(L" \u2013 ")); // En-Dash
-const UnicodeString OfficialPackage(TraceInitStr(L"MartinPikryl.WinSCP_tvv458r3h9r5m"));
+const UnicodeString OfficialPackage(TraceInitStr(L"nuipona.LinuxSCP_tvv458r3h9r5m"));
 const wchar_t HostKeyDelimiter = L';';
 //---------------------------------------------------------------------------
 UnicodeString ReplaceChar(UnicodeString Str, wchar_t A, wchar_t B)
@@ -1563,7 +1563,7 @@ UnicodeString GetOSInfo()
 //---------------------------------------------------------------------------
 UnicodeString GetEnvironmentInfo()
 {
-  UnicodeString Result = FORMAT(L"WinSCP %s (OS %s)", (Configuration->VersionStr, GetOSInfo()));
+  UnicodeString Result = FORMAT(L"LinuxSCP %s (OS %s)", (Configuration->VersionStr, GetOSInfo()));
   return Result;
 }
 //---------------------------------------------------------------------------
@@ -3740,7 +3740,7 @@ UnicodeString __fastcall ChangeUrlProtocol(const UnicodeString & S, const Unicod
 }
 //---------------------------------------------------------------------------
 const UnicodeString RtfPara(TraceInitStr(L"\\par\n"));
-const UnicodeString AssemblyNamespace(TraceInitStr(L"WinSCP"));
+const UnicodeString AssemblyNamespace(TraceInitStr(L"LinuxSCP"));
 const UnicodeString TransferOptionsClassName(TraceInitStr(L"TransferOptions"));
 const UnicodeString SessionClassName(TraceInitStr(L"Session"));
 const UnicodeString RtfHyperlinkField(TraceInitStr(L"HYPERLINK"));

@@ -32,11 +32,11 @@
 
 #include <ctype.h>
 #include <string.h>
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #include <strings.h>
 #endif
 #include "response_headers_handler.h"
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #include "ne_dates.h"
 #endif
 
@@ -60,7 +60,7 @@ void response_headers_handler_initialize(ResponseHeadersHandler *handler)
 
 
 void response_headers_handler_add(ResponseHeadersHandler *handler,
-                                  const char * header_name, const char * header_value) // WINSCP (neon API)
+                                  const char * header_name, const char * header_value) // FORK_BUILD (neon API)
 {
     S3ResponseProperties *responseProperties = &(handler->responseProperties);
     
@@ -84,7 +84,7 @@ void response_headers_handler_add(ResponseHeadersHandler *handler,
     int namelen = strlen(header_name);
     const char * header = header_name;
 
-    #define strncasecmp strnicmp // WINSCP
+    #define strncasecmp strnicmp // FORK_BUILD
 
     if (!strncasecmp(header, "x-amz-request-id", namelen)) {
         responseProperties->requestId = 
@@ -174,7 +174,7 @@ void response_headers_handler_add(ResponseHeadersHandler *handler,
 }
 
 
-void response_headers_handler_done(ResponseHeadersHandler *handler, ne_request *NeonRequest) // WINSCP (neon API)
+void response_headers_handler_done(ResponseHeadersHandler *handler, ne_request *NeonRequest) // FORK_BUILD (neon API)
 {
     const char * value = ne_get_response_header(NeonRequest, "Last-Modified");
     if (value != NULL) {

@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 ALIGN 16
 
@@ -1293,7 +1293,7 @@ $L$abort:
 
 $L$SEH_end_rc4_md5_enc:
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -1390,4 +1390,4 @@ $L$SEH_info_rc4_md5_enc:
 DB 9,0,0,0
  DD se_handler wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

@@ -339,7 +339,7 @@ UnicodeString __fastcall StoreForm(TForm * Form)
   UnicodeString Result =
     FORMAT(L"%d;%d;%d;%d;%d;%s", (SaveDimension(Bounds.Left), SaveDimension(Bounds.Top),
       SaveDimension(Bounds.Right), SaveDimension(Bounds.Bottom),
-      // we do not want WinSCP to start minimized next time (we cannot handle that anyway).
+      // we do not want LinuxSCP to start minimized next time (we cannot handle that anyway).
       static_cast<int>(Form->WindowState == wsMinimized ? GetWindowStateBeforeMimimize(Form) : Form->WindowState),
       SavePixelsPerInch(Form)));
   return Result;
@@ -725,7 +725,7 @@ void __fastcall ExitActiveControl(TForm * Form)
   }
 }
 //---------------------------------------------------------------------------
-bool __fastcall IsWinSCPUrl(const UnicodeString & Url)
+bool __fastcall IsLinuxSCPUrl(const UnicodeString & Url)
 {
   UnicodeString HomePageUrl = LoadStr(HOMEPAGE_URL);
   UnicodeString HttpHomePageUrl = ChangeUrlProtocol(HomePageUrl, HttpProtocol);
@@ -738,7 +738,7 @@ bool __fastcall IsWinSCPUrl(const UnicodeString & Url)
 UnicodeString __fastcall SecureUrl(const UnicodeString & Url)
 {
   UnicodeString Result = Url;
-  if (IsWinSCPUrl(Url) && IsHttpUrl(Url))
+  if (IsLinuxSCPUrl(Url) && IsHttpUrl(Url))
   {
     Result = ChangeUrlProtocol(Result, HttpsProtocol);
   }
@@ -755,7 +755,7 @@ void ShellOpen(const UnicodeString & Param)
 //---------------------------------------------------------------------------
 void __fastcall OpenBrowser(UnicodeString URL)
 {
-  if (IsWinSCPUrl(URL))
+  if (IsLinuxSCPUrl(URL))
   {
     DebugAssert(!IsHttpUrl(URL));
     URL = CampaignUrl(URL);

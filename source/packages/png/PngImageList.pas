@@ -18,7 +18,7 @@ type
   TImageName = type string;
 {$IFEND}
 
-{$IFDEF WINSCP}
+{$IFDEF FORK_BUILD}
 type
   TImageIndex = System.UITypes.TImageIndex;
 {$IFEND}

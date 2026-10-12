@@ -61,7 +61,7 @@ const UnicodeString WebDAVSProtocol(L"davs");
 const UnicodeString S3Protocol(L"s3");
 const UnicodeString S3PlainProtocol(L"s3plain");
 const UnicodeString SshProtocol(L"ssh");
-const UnicodeString WinSCPProtocolPrefix(L"winscp-");
+const UnicodeString LinuxSCPProtocolPrefix(L"linuxscp-");
 const wchar_t UrlParamSeparator = L';';
 const wchar_t UrlParamValueSeparator = L'=';
 const UnicodeString UrlHostKeyParamName(L"fingerprint");
@@ -2097,7 +2097,7 @@ bool __fastcall TSessionData::IsProtocolUrl(
 {
   return
     DoIsProtocolUrl(Url, Protocol, ProtocolLen) ||
-    DoIsProtocolUrl(Url, WinSCPProtocolPrefix + Protocol, ProtocolLen);
+    DoIsProtocolUrl(Url, LinuxSCPProtocolPrefix + Protocol, ProtocolLen);
 }
 //---------------------------------------------------------------------
 bool __fastcall TSessionData::IsSensitiveOption(const UnicodeString & Option, const UnicodeString & Value)
@@ -3684,7 +3684,7 @@ UnicodeString __fastcall TSessionData::GenerateSessionUrl(unsigned int Flags)
 
   if (FLAGSET(Flags, sufSpecific))
   {
-    Url += WinSCPProtocolPrefix;
+    Url += LinuxSCPProtocolPrefix;
   }
 
   Url += GetProtocolUrl(FLAGSET(Flags, sufHttpForWebDAV));
@@ -3915,7 +3915,7 @@ void __fastcall TSessionData::GenerateAssemblyCode(
     case alPowerShell:
       Head +=
         AssemblyCommentLine(Language, LoadStr(CODE_PS_ADD_TYPE)) +
-        RtfKeyword(L"Add-Type") + RtfText(" -Path ") + AssemblyString(Language, "WinSCPnet.dll") + RtfPara +
+        RtfKeyword(L"Add-Type") + RtfText(" -Path ") + AssemblyString(Language, "LinuxSCPnet.dll") + RtfPara +
         RtfPara;
       break;
 

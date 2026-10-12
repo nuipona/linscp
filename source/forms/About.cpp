@@ -78,7 +78,7 @@ __fastcall TAboutDialog::TAboutDialog(TComponent * AOwner,
     ApplicationLabel->Font->Style = ApplicationLabel->Font->Style << fsBold;
   }
 
-  WinSCPCopyrightLabel->Caption = LoadStr(WINSCP_COPYRIGHT);
+  LinuxSCPCopyrightLabel->Caption = LoadStr(LINUXSCP_COPYRIGHT);
 
   if (Registration == NULL)
   {
@@ -498,7 +498,7 @@ void __fastcall TAboutDialog::FormKeyDown(TObject *, WORD & Key, TShiftState Shi
         ApplicationLabel->Caption + sLineBreak +
         VersionLabel->Caption + sLineBreak +
         sLineBreak +
-        WinSCPCopyrightLabel->Caption + sLineBreak +
+        LinuxSCPCopyrightLabel->Caption + sLineBreak +
         HomepageLabel->Caption + sLineBreak +
         sLineBreak +
         ProductSpecificMessageLabel->Caption + sLineBreak +

@@ -88,7 +88,7 @@ static int NeonSspiInitialized = -1;
 //---------------------------------------------------------------------------
 void __fastcall NeonInitialize()
 {
-  // Even if this fails, we do not want to interrupt WinSCP starting for that.
+  // Even if this fails, we do not want to interrupt LinuxSCP starting for that.
   // Anyway, it can hardly fail.
   int NeonResult = ne_sock_init();
   NeonInitialized = (NeonResult == 0);

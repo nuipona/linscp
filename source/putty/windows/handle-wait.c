@@ -56,7 +56,7 @@ static int handlewait_cmp(void *av, void *bv)
     return 0;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static tree234 *handlewaits_tree_real;
 #endif
 

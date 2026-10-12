@@ -25,7 +25,7 @@
 
 #include "tree234.h"
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #include "help.h"
 #else
 typedef const char *HelpCtx;
@@ -254,7 +254,7 @@ void launch_help(HWND hwnd, const char *topic);
 void quit_help(HWND hwnd);
 int has_embedded_chm(void);            /* 1 = yes, 0 = no, -1 = N/A */
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /*
  * GUI seat methods in dialog.c, so that the vtable definition in
  * window.c can refer to them.
@@ -355,7 +355,7 @@ DECL_WINDOWS_FUNCTION(extern, int, select,
  * Implemented differently depending on the client of network.c, and
  * called by network.c to turn on or off WSA*Select for a given socket.
  */
-const char *do_select(Plug * plug, SOCKET skt, bool enable); // WINSCP
+const char *do_select(Plug * plug, SOCKET skt, bool enable); // FORK_BUILD
 void done_with_socket(SOCKET skt);
 
 /*
@@ -381,14 +381,14 @@ Socket *make_deferred_handle_socket(DeferredSocketOpener *opener,
 void setup_handle_socket(Socket *s, HANDLE send_H, HANDLE recv_H,
                          HANDLE stderr_H, bool overlapped);
 void handle_socket_set_psb_prefix(Socket *s, const char *prefix);
-Socket *new_named_pipe_client(const char *pipename, Plug *plug, bool allow_system); /* winnpc */ // WINSCP
+Socket *new_named_pipe_client(const char *pipename, Plug *plug, bool allow_system); /* winnpc */ // FORK_BUILD
 Socket *new_named_pipe_listener(const char *pipename, Plug *plug); /* winnps */
 
 /* A lower-level function in named-pipe-client.c, which does most of
  * the work of new_named_pipe_client (including checking the ownership
  * of what it's connected to), but returns a plain HANDLE instead of
  * wrapping it into a Socket. */
-HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system); // WINSCP
+HANDLE connect_to_named_pipe(const char *pipename, char **err, bool allow_system); // FORK_BUILD
 
 /*
  * Exports from controls.c.
@@ -706,9 +706,9 @@ typedef size_t (*handle_inputfn_t)(
     struct handle *h, const void *data, size_t len, int err);
 typedef void (*handle_outputfn_t)(
     struct handle *h, size_t new_backlog, int err, bool close);
-struct handle *handle_input_new(struct callback_set * callback_set, HANDLE handle, handle_inputfn_t gotdata, // WINSCP
+struct handle *handle_input_new(struct callback_set * callback_set, HANDLE handle, handle_inputfn_t gotdata, // FORK_BUILD
                                 void *privdata, int flags);
-struct handle *handle_output_new(struct callback_set * callback_set, HANDLE handle, handle_outputfn_t sentdata, // WINSCP
+struct handle *handle_output_new(struct callback_set * callback_set, HANDLE handle, handle_outputfn_t sentdata, // FORK_BUILD
                                  void *privdata, int flags);
 size_t handle_write(struct handle *h, const void *data, size_t len);
 void handle_write_eof(struct handle *h);
@@ -727,7 +727,7 @@ void handle_sink_init(handle_sink *sink, struct handle *h);
  * Exports from handle-wait.c.
  */
 typedef struct HandleWait HandleWait;
-typedef bool (*handle_wait_callback_fn_t)(struct callback_set * callback_set, void *); // WINSCP
+typedef bool (*handle_wait_callback_fn_t)(struct callback_set * callback_set, void *); // FORK_BUILD
 HandleWait *add_handle_wait(struct callback_set * callback_set, HANDLE h, handle_wait_callback_fn_t callback,
                             void *callback_ctx);
 void delete_handle_wait(struct callback_set * callback_set, HandleWait *hw);
@@ -737,7 +737,7 @@ typedef struct HandleWaitList {
     int nhandles;
 } HandleWaitList;
 HandleWaitList *get_handle_wait_list(struct callback_set * callback_set);
-bool handle_wait_activate(struct callback_set * callback_set, HandleWaitList *hwl, int index); // WINSCP
+bool handle_wait_activate(struct callback_set * callback_set, HandleWaitList *hwl, int index); // FORK_BUILD
 void handle_wait_list_free(HandleWaitList *hwl);
 
 /*
@@ -800,28 +800,28 @@ char *get_jumplist_registry_entries(void);
 #define CLIPUI_DEFAULT_INS CLIPUI_EXPLICIT
 
 /* In utils */
-int reg_override_winscp(void);
+int reg_override_linuxscp(void);
 HKEY open_regkey_fn(bool create, bool write, HKEY base, const char *path, ...);
-HKEY open_regkey_fn_winscp(bool create, bool write, HKEY base, const char *path, ...);
+HKEY open_regkey_fn_linuxscp(bool create, bool write, HKEY base, const char *path, ...);
 #define open_regkey_ro(base, ...) \
-    reg_override_winscp() ? open_regkey_fn_winscp(false, false, base, __VA_ARGS__, (const char *)NULL) : open_regkey_fn(false, false, base, __VA_ARGS__, (const char *)NULL)
+    reg_override_linuxscp() ? open_regkey_fn_linuxscp(false, false, base, __VA_ARGS__, (const char *)NULL) : open_regkey_fn(false, false, base, __VA_ARGS__, (const char *)NULL)
 #define open_regkey_rw(base, ...) \
     DebugFail();
 #define create_regkey(base, ...) \
-    reg_override_winscp() ? open_regkey_fn_winscp(true, true, base, __VA_ARGS__, (const char *)NULL) : open_regkey_fn(true, true, base, __VA_ARGS__, (const char *)NULL)
+    reg_override_linuxscp() ? open_regkey_fn_linuxscp(true, true, base, __VA_ARGS__, (const char *)NULL) : open_regkey_fn(true, true, base, __VA_ARGS__, (const char *)NULL)
 void close_regkey(HKEY key);
-void close_regkey_winscp(HKEY key);
+void close_regkey_linuxscp(HKEY key);
 void putty_registry_pass(bool enable);
 void del_regkey(HKEY key, const char *name);
 char *enum_regkey(HKEY key, int index);
 bool get_reg_dword(HKEY key, const char *name, DWORD *out);
-bool get_reg_dword_winscp(HKEY key, const char *name, DWORD *out);
+bool get_reg_dword_linuxscp(HKEY key, const char *name, DWORD *out);
 bool put_reg_dword(HKEY key, const char *name, DWORD value);
-bool put_reg_dword_winscp(HKEY key, const char *name, DWORD value);
+bool put_reg_dword_linuxscp(HKEY key, const char *name, DWORD value);
 char *get_reg_sz(HKEY key, const char *name);
-char *get_reg_sz_winscp(HKEY key, const char *name);
+char *get_reg_sz_linuxscp(HKEY key, const char *name);
 bool put_reg_sz(HKEY key, const char *name, const char *str);
-bool put_reg_sz_winscp(HKEY key, const char *name, const char *str);
+bool put_reg_sz_linuxscp(HKEY key, const char *name, const char *str);
 strbuf *get_reg_multi_sz(HKEY key, const char *name);
 bool put_reg_multi_sz(HKEY key, const char *name, strbuf *str);
 

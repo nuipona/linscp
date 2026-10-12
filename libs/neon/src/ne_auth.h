@@ -151,7 +151,7 @@ void ne_add_server_auth(ne_session *sess, unsigned protocol,
 void ne_add_proxy_auth(ne_session *sess, unsigned protocol, 
                        ne_auth_creds creds, void *userdata);
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 void ne_remove_server_auth(ne_session *sess);
 #endif
 

@@ -2,7 +2,7 @@
 LanguageISOCode=en
 LocalLanguageName=English
 
-ApplicationComponent=WinSCP application
+ApplicationComponent=LinuxSCP application
 ShellExtComponent=Drag & drop shell extension (allows direct downloads, may require restart)
 PuTTYgenComponent=PuTTYgen (key generator)
 PageantComponent=Pageant (SSH authentication agent)
@@ -18,14 +18,14 @@ EnableCollectUsage=Enable collecting &anonymous usage statistics
 RegisteringAsUrlHandlers=Registering to handle URL addresses...
 AddingSearchPath=Adding installation directory to search path (%PATH%)
 
-SendToHookNew=WinSCP (for upload)
-Launch=Launch &WinSCP
+SendToHookNew=LinuxSCP (for upload)
+Launch=Launch &LinuxSCP
 OpenGettingStarted=Open &Getting started page
 
 HelpButton=&Help
-ProgramComment2=WinSCP: SFTP, FTP, WebDAV and SCP client
+ProgramComment2=LinuxSCP: SFTP, FTP, WebDAV and SCP client
 
-; WinSCP Runtime
+; LinuxSCP Runtime
 Recommended=%1 (recommended)
 SetupTypeTitle=Setup Type
 SetupTypePrompt=What type of setup do you want?
@@ -52,20 +52,20 @@ ExplorerInterface1=- only remote directory
 ExplorerInterface2=- keyboard shortcuts like in Windows File Explorer
 ExplorerInterface3=- drag && drop
 UserSettingsOverview=Initial user settings (can be changed later)
-FinishedRestartDragExtLabel=To complete the installation of WinSCP, Setup must restart your computer to load updated version of Drag & drop shell extension. You can restart your computer later, if you do not need to use the extension. Would you like to restart now?
-PleaseDonate=Please consider donating to support WinSCP development.
+FinishedRestartDragExtLabel=To complete the installation of LinuxSCP, Setup must restart your computer to load updated version of Drag & drop shell extension. You can restart your computer later, if you do not need to use the extension. Would you like to restart now?
+PleaseDonate=Please consider donating to support LinuxSCP development.
 AboutDonations=About donations
 Donate=Donate %s
 Currency=USD
 ImportSites=Looking for sites to import...
 AcceptButton=&Accept
-IncompleteTranslation=You are about to use an incomplete translation. It is completed by %1%% only.%n%nUntranslated parts of the user interface will be shown in their original English version.%n%nVisit WinSCP website at winscp.net to check, if newer version of the translation is available.
-MsiInstallation=WinSCP is already installed on this system using an MSI installer. Please uninstall that before running this standalone executable installer.
-ApplicationsFoundDragExt=The following applications have loaded WinSCP Drag & drop shell extension that needs to be updated by Setup. It is recommended that you allow Setup to automatically close these applications. After the installation has completed, Setup will attempt to restart the applications.
+IncompleteTranslation=You are about to use an incomplete translation. It is completed by %1%% only.%n%nUntranslated parts of the user interface will be shown in their original English version.%n%nVisit LinuxSCP website at github.com/nuipona/linuxscp to check, if newer version of the translation is available.
+MsiInstallation=LinuxSCP is already installed on this system using an MSI installer. Please uninstall that before running this standalone executable installer.
+ApplicationsFoundDragExt=The following applications have loaded LinuxSCP Drag & drop shell extension that needs to be updated by Setup. It is recommended that you allow Setup to automatically close these applications. After the installation has completed, Setup will attempt to restart the applications.
 ApplicationsFoundRestart=You can restart your computer later instead, if you do not need to use the extension.
 
 ; MSI (sic)
-InnoSetupInstallation=WinSCP is already installed on this system using a standalone executable installer. Please uninstall that before running this MSI installer.
+InnoSetupInstallation=LinuxSCP is already installed on this system using a standalone executable installer. Please uninstall that before running this MSI installer.
 
 [CustomOptions]
 TranslationCompleteness=100

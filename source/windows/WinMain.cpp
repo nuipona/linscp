@@ -604,7 +604,7 @@ void __fastcall UpdateStaticUsage()
   UnicodeString ParentProcess = GetAncestorProcessName();
   // do not record the installer as a parent process
   if (!ParentProcess.IsEmpty() &&
-      (!StartsText(L"winscp-", ParentProcess) || !ContainsText(ParentProcess, L"-setup")))
+      (!StartsText(L"linuxscp-", ParentProcess) || !ContainsText(ParentProcess, L"-setup")))
   {
     UnicodeString ParentProcesses = Configuration->Usage->Get(L"ParentProcesses");
     std::unique_ptr<TStringList> ParentProcessesList(CreateSortedStringList());
@@ -947,7 +947,7 @@ int __fastcall Execute()
     Mode = cmComRegistration;
   }
   // We have to check for /console only after the other options,
-  // as the /console is always used when we are run by winscp.com
+  // as the /console is always used when we are run by linuxscp.com
   // (ambiguous use to pass console version)
   else if (Params->FindSwitch(L"Console") || Params->FindSwitch(SCRIPT_SWITCH) ||
       Params->FindSwitch(COMMAND_SWITCH))
@@ -1008,7 +1008,7 @@ int __fastcall Execute()
       // The innosetup cannot skip UninstallCleanup run task for silent uninstalls,
       // workaround is that we create mutex in uninstaller, if it runs silent, and
       // ignore the UninstallCleanup, when the mutex exists.
-      if (OpenMutex(SYNCHRONIZE, false, L"WinSCPSilentUninstall") == NULL)
+      if (OpenMutex(SYNCHRONIZE, false, L"LinuxSCPSilentUninstall") == NULL)
       {
         DoCleanupDialogIfAnyDataAndWanted();
       }
@@ -1088,7 +1088,7 @@ int __fastcall Execute()
     else if (Params->FindSwitch(L"MaintenanceTask"))
     {
       // Parameter /MaintenanceTask can be added to command-line when executing maintenance tasks
-      // (e.g. from installer) just in case old version of WinSCP is called by mistake
+      // (e.g. from installer) just in case old version of LinuxSCP is called by mistake
       MaintenanceTask();
       Configuration->DontSave();
     }

@@ -1,7 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class ImplicitEnumerable<T> : IEnumerable<T>
     {

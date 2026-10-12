@@ -37,15 +37,15 @@
  * Generic definitions.
  */
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 // Moved to putty.h
 typedef struct handle_list_node handle_list_node;
 struct handle_list_node {
     handle_list_node *next, *prev;
 };
 #endif
-struct handle_generic; // WINSCP
-static void add_to_ready_list(struct handle_generic *ctx); // WINSCP
+struct handle_generic; // FORK_BUILD
+static void add_to_ready_list(struct handle_generic *ctx); // FORK_BUILD
 
 /*
  * Maximum amount of backlog we will allow to build up on an input
@@ -73,7 +73,7 @@ struct handle_generic {
     bool defunct;                      /* has the subthread already gone? */
     bool busy;                         /* operation currently in progress? */
     void *privdata;                    /* for client to remember who they are */
-    struct callback_set * callback_set; // WINSCP
+    struct callback_set * callback_set; // FORK_BUILD
 };
 
 typedef enum { HT_INPUT, HT_OUTPUT } HandleType;
@@ -97,7 +97,7 @@ struct handle_input {
     bool defunct;                      /* has the subthread already gone? */
     bool busy;                         /* operation currently in progress? */
     void *privdata;                    /* for client to remember who they are */
-    struct callback_set * callback_set; // WINSCP
+    struct callback_set * callback_set; // FORK_BUILD
 
     /*
      * Data set at initialisation and then read-only.
@@ -188,7 +188,7 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
          */
         finished = (ctx->len == 0);
 
-        add_to_ready_list((struct handle_generic *)ctx); // WINSCP
+        add_to_ready_list((struct handle_generic *)ctx); // FORK_BUILD
 
         if (finished)
             break;
@@ -201,7 +201,7 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
              * not touch ctx at all, because the main thread might
              * have freed it.
              */
-            add_to_ready_list((struct handle_generic *)ctx); // WINSCP
+            add_to_ready_list((struct handle_generic *)ctx); // FORK_BUILD
             break;
         }
     }
@@ -259,7 +259,7 @@ struct handle_output {
     bool defunct;                      /* has the subthread already gone? */
     bool busy;                         /* operation currently in progress? */
     void *privdata;                    /* for client to remember who they are */
-    struct callback_set * callback_set; // WINSCP
+    struct callback_set * callback_set; // FORK_BUILD
 
     /*
      * Data set at initialisation and then read-only.
@@ -317,7 +317,7 @@ static DWORD WINAPI handle_output_threadfunc(void *param)
              * not touch ctx at all, because the main thread might
              * have freed it.
              */
-            add_to_ready_list((struct handle_generic *)ctx); // WINSCP
+            add_to_ready_list((struct handle_generic *)ctx); // FORK_BUILD
             break;
         }
         if (povl) {
@@ -340,7 +340,7 @@ static DWORD WINAPI handle_output_threadfunc(void *param)
                 ctx->writeerr = 0;
         }
 
-        add_to_ready_list((struct handle_generic *)ctx); // WINSCP
+        add_to_ready_list((struct handle_generic *)ctx); // FORK_BUILD
         if (!writeret) {
             /*
              * The write operation has suffered an error. Telling that
@@ -388,7 +388,7 @@ struct handle {
     } u;
 };
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /*
  * Linked list storing the current list of handles ready to have
  * something done to them by the main thread.
@@ -403,9 +403,9 @@ static CRITICAL_SECTION ready_critsec[1];
 static HANDLE ready_event = INVALID_HANDLE_VALUE;
 #endif
 
-static void add_to_ready_list(struct handle_generic *ctx) // WINSCP
+static void add_to_ready_list(struct handle_generic *ctx) // FORK_BUILD
 {
-    handle_list_node *node = &ctx->ready_node; // WINSCP
+    handle_list_node *node = &ctx->ready_node; // FORK_BUILD
     struct callback_set * callback_set = ctx->callback_set;
     /*
      * Called from subthreads, when their handle has done something
@@ -422,9 +422,9 @@ static void add_to_ready_list(struct handle_generic *ctx) // WINSCP
     LeaveCriticalSection(callback_set->ready_critsec);
 }
 
-static void remove_from_ready_list(struct handle_generic *ctx) // WINSCP
+static void remove_from_ready_list(struct handle_generic *ctx) // FORK_BUILD
 {
-    handle_list_node *node = &ctx->ready_node; // WINSCP
+    handle_list_node *node = &ctx->ready_node; // FORK_BUILD
     struct callback_set * callback_set = ctx->callback_set;
     /*
      * Called from the main thread, just before destroying a 'struct
@@ -439,9 +439,9 @@ static void remove_from_ready_list(struct handle_generic *ctx) // WINSCP
     LeaveCriticalSection(callback_set->ready_critsec);
 }
 
-static bool handle_ready(struct handle *h); /* process one handle (below) */ // WINSCP
+static bool handle_ready(struct handle *h); /* process one handle (below) */ // FORK_BUILD
 
-static bool handle_ready_callback(struct callback_set * callback_set, void *vctx) // WINSCP
+static bool handle_ready_callback(struct callback_set * callback_set, void *vctx) // FORK_BUILD
 {
     /*
      * Called when the main thread detects ready_event, indicating
@@ -466,17 +466,17 @@ static bool handle_ready_callback(struct callback_set * callback_set, void *vctx
         node->next = node->prev = node;
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Weverything"
-        if (handle_ready(container_of(node, struct handle, u.g.ready_node))) // WINSCP
+        if (handle_ready(container_of(node, struct handle, u.g.ready_node))) // FORK_BUILD
 #pragma clang diagnostic pop
         {
-            result = true; // WINSCP
+            result = true; // FORK_BUILD
         }
     }
     LeaveCriticalSection(callback_set->ready_critsec);
     return result;
 }
 
-static inline void ensure_ready_event_setup(struct callback_set * callback_set) // WINSCP
+static inline void ensure_ready_event_setup(struct callback_set * callback_set) // FORK_BUILD
 {
     if (callback_set->ready_event == INVALID_HANDLE_VALUE) {
         callback_set->ready_head->prev = callback_set->ready_head->next = callback_set->ready_head;
@@ -501,7 +501,7 @@ struct handle *handle_input_new(struct callback_set * callback_set, HANDLE handl
     h->u.i.done = false;
     h->u.i.privdata = privdata;
     h->u.i.flags = flags;
-    h->u.i.callback_set = callback_set; // WINSCP
+    h->u.i.callback_set = callback_set; // FORK_BUILD
 
     ensure_ready_event_setup(callback_set);
     HANDLE hThread = CreateThread(NULL, 0, handle_input_threadfunc,
@@ -513,7 +513,7 @@ struct handle *handle_input_new(struct callback_set * callback_set, HANDLE handl
     return h;
 }
 
-struct handle *handle_output_new(struct callback_set * callback_set, HANDLE handle, handle_outputfn_t sentdata, // WINSCP
+struct handle *handle_output_new(struct callback_set * callback_set, HANDLE handle, handle_outputfn_t sentdata, // FORK_BUILD
                                  void *privdata, int flags)
 {
     struct handle *h = snew(struct handle);
@@ -532,7 +532,7 @@ struct handle *handle_output_new(struct callback_set * callback_set, HANDLE hand
     h->u.o.sentdata = sentdata;
     h->u.o.sentdata_param = h;
     h->u.o.flags = flags;
-    h->u.o.callback_set = callback_set; // WINSCP
+    h->u.o.callback_set = callback_set; // FORK_BUILD
 
     ensure_ready_event_setup(callback_set);
     HANDLE hThread = CreateThread(NULL, 0, handle_output_threadfunc,
@@ -573,7 +573,7 @@ static void handle_destroy(struct handle *h)
     if (h->type == HT_OUTPUT)
         bufchain_clear(&h->u.o.queued_data);
     CloseHandle(h->u.g.ev_from_main);
-    remove_from_ready_list(&h->u.g); // WINSCP
+    remove_from_ready_list(&h->u.g); // FORK_BUILD
     sfree(h);
 }
 
@@ -612,9 +612,9 @@ void handle_free(struct handle *h)
     }
 }
 
-static bool handle_ready(struct handle *h) // WINSCP
+static bool handle_ready(struct handle *h) // FORK_BUILD
 {
-    bool result = false; // WINSCP
+    bool result = false; // FORK_BUILD
     if (h->u.g.moribund) {
         /*
          * A moribund handle is one which we have either already

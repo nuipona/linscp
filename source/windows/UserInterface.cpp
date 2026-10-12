@@ -10,7 +10,7 @@
 #include "ProgParams.h"
 #include "Custom.h"
 //---------------------------------------------------------------------------
-const UnicodeString AppName = L"WinSCP";
+const UnicodeString AppName = L"LinuxSCP";
 //---------------------------------------------------------------------------
 TConfiguration * __fastcall CreateConfiguration()
 {
@@ -66,22 +66,22 @@ TCustomScpExplorerForm * __fastcall CreateScpExplorer()
 //---------------------------------------------------------------------------
 UnicodeString __fastcall SshVersionString()
 {
-  return FORMAT(L"WinSCP-release-%s", (Configuration->Version));
+  return FORMAT(L"LinuxSCP-release-%s", (Configuration->Version));
 }
 //---------------------------------------------------------------------------
 UnicodeString __fastcall AppNameString()
 {
-  return L"WinSCP";
+  return L"LinuxSCP";
 }
 //---------------------------------------------------------------------------
 UnicodeString __fastcall GetCompanyRegistryKey()
 {
-  return L"Software\\Martin Prikryl";
+  return L"Software\\nuipona";
 }
 //---------------------------------------------------------------------------
 UnicodeString __fastcall GetRegistryKey()
 {
-  return GetCompanyRegistryKey() + L"\\WinSCP 2";
+  return GetCompanyRegistryKey() + L"\\LinuxSCP 2";
 }
 //---------------------------------------------------------------------------
 static bool ForcedOnForeground = false;
@@ -439,7 +439,7 @@ void __fastcall DoAboutDialog(TConfiguration *Configuration)
 //---------------------------------------------------------------------
 void __fastcall DoProductLicense()
 {
-  DoLicenseDialog(lcWinScp);
+  DoLicenseDialog(lcLinuxSCP);
 }
 //---------------------------------------------------------------------------
 const UnicodeString PixelsPerInchKey = L"PixelsPerInch";

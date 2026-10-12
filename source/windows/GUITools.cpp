@@ -286,7 +286,7 @@ void TPuttyCleanupThread::DoExecute(bool HasExpired)
     Sessions2->Sort();
     if (!FSessions->Equals(Sessions2.get()))
     {
-      // Just in case new sessions from another WinSCP instance are added, delay the cleanup
+      // Just in case new sessions from another LinuxSCP instance are added, delay the cleanup
       // (to avoid having to implement some inter-process communication).
       // Both instances will attempt to do the cleanup, but that not a problem
       FSessions->Assign(Sessions2.get());
@@ -602,7 +602,7 @@ void OpenSessionInPutty(TSessionData * SessionData)
       if (UsePuttyPwFile)
       {
         PipeCounter++;
-        UnicodeString PipeName = FORMAT(L"\\\\.\\PIPE\\WinSCPPuTTYPassword.%.8x.%.8x.%.4x", (GetCurrentProcessId(), PipeCounter, rand()));
+        UnicodeString PipeName = FORMAT(L"\\\\.\\PIPE\\LinuxSCPPuTTYPassword.%.8x.%.8x.%.4x", (GetCurrentProcessId(), PipeCounter, rand()));
         new TPuttyPasswordThread(Password, PipeName);
         PasswordParam = FORMAT(L"-pwfile \"%s\"", (PipeName));
       }

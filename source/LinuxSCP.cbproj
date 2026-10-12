@@ -1,8 +1,8 @@
-﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
     <PropertyGroup>
         <ProjectGuid>{0B0C5EC6-5DCB-4F16-9504-1E6D37FFBB77}</ProjectGuid>
         <ProjectVersion>19.5</ProjectVersion>
-        <MainSource>WinSCP.cpp</MainSource>
+        <MainSource>LinuxSCP.cpp</MainSource>
         <Config Condition="'$(Config)'==''">Release</Config>
         <FrameworkType>VCL</FrameworkType>
         <Base>True</Base>
@@ -66,7 +66,7 @@
         <DCC_SYMBOL_DEPRECATED>false</DCC_SYMBOL_DEPRECATED>
         <DCC_SYMBOL_PLATFORM>false</DCC_SYMBOL_PLATFORM>
         <DCC_UNSUPPORTED_CONSTRUCT>false</DCC_UNSUPPORTED_CONSTRUCT>
-        <Defines>WINSCP;STRICT;UNICODE;OPENSSL_API_COMPAT=11000;OPENSSL_NO_DEPRECATED;$(Defines)</Defines>
+        <Defines>FORK_BUILD;STRICT;UNICODE;OPENSSL_API_COMPAT=11000;OPENSSL_NO_DEPRECATED;$(Defines)</Defines>
         <FinalOutputDir>$(FINAL_PATH)\$(Platform)\$(Config)</FinalOutputDir>
         <Icon_MainIcon>resource\Application.ico</Icon_MainIcon>
         <ILINK_GenerateDRC>True</ILINK_GenerateDRC>
@@ -75,16 +75,16 @@
         <ILINK_MapFileType>DetailedSegments</ILINK_MapFileType>
         <IncludePath>console;windows\;forms\;core;resource;components;dragext;packages\filemng;packages\dragndrop;packages\my;packages\tb2k;packages\tbx;packages\png;packages\jcl;..\libs\mfc\include;$(BDS)\include\windows;$(BDS)\include\windows\sdk;$(BDS)\include\windows\vcl;$(IncludePath)</IncludePath>
         <IntermediateOutputDir>$(INTERM_PATH)\$(Platform)\$(Config)</IntermediateOutputDir>
-        <Manifest_File>windows\WinSCP.exe.manifest</Manifest_File>
+        <Manifest_File>windows\LinuxSCP.exe.manifest</Manifest_File>
         <Multithreaded>true</Multithreaded>
         <OutputExt>exe</OutputExt>
         <ProjectType>CppVCLApplication</ProjectType>
         <RunBCCOutOfProcess>true</RunBCCOutOfProcess>
-        <SanitizedProjectName>WinSCP</SanitizedProjectName>
+        <SanitizedProjectName>LinuxSCP</SanitizedProjectName>
         <SubProcessesNumber>8</SubProcessesNumber>
         <UsingDelphiRTL>true</UsingDelphiRTL>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
-        <VerInfo_Keys>CompanyName=Martin Prikryl;FileDescription=WinSCP: SFTP, FTP, WebDAV, S3 and SCP client$(DescPlaform);FileVersion=6.6.5.0;InternalName=winscp;LegalCopyright=(c) 2000-2026 Martin Prikryl;LegalTrademarks=;OriginalFilename=winscp.exe;ProductName=WinSCP;ProductVersion=6.6.5.0;ReleaseType=stable;WWW=https://winscp.net/</VerInfo_Keys>
+        <VerInfo_Keys>CompanyName=nuipona;FileDescription=LinuxSCP file transfer client and remote file manager$(DescPlaform);FileVersion=6.6.5.0;InternalName=linuxscp;LegalCopyright=(c) 2000-2026 Martin Prikryl;LegalTrademarks=;OriginalFilename=linuxscp.exe;ProductName=LinuxSCP;ProductVersion=6.6.5.0;ReleaseType=stable;WWW=https://github.com/nuipona/linuxscp/</VerInfo_Keys>
         <VerInfo_Locale>1033</VerInfo_Locale>
         <VerInfo_MajorVer>6</VerInfo_MajorVer>
         <VerInfo_MinorVer>6</VerInfo_MinorVer>
@@ -228,7 +228,7 @@
             <BuildOrder>65</BuildOrder>
             <BuildOrder>2</BuildOrder>
         </CppCompile>
-        <CppCompile Include="WinSCP.cpp">
+        <CppCompile Include="LinuxSCP.cpp">
             <BuildOrder>2</BuildOrder>
             <BuildOrder>19</BuildOrder>
         </CppCompile>
@@ -302,7 +302,7 @@
         <BorlandProject>
             <CPlusPlusBuilder.Personality>
                 <Source>
-                    <Source Name="MainSource">WinSCP.cpp</Source>
+                    <Source Name="MainSource">LinuxSCP.cpp</Source>
                 </Source>
                 <ProjectProperties>
                     <ProjectProperties Name="AutoShowDeps">False</ProjectProperties>

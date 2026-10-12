@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     [Guid("62FB0733-C24F-4DC2-8452-560148931927")]
     [ClassInterface(Constants.ClassInterface)]

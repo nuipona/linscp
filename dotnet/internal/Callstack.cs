@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class Callstack : IDisposable
     {

@@ -124,7 +124,7 @@ int uname(struct utsname *u)
     return 0;
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 /* 
  * public domain strtok_r() by Charlie Gordon

@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Security;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     public interface ISessionOptions
     {

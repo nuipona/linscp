@@ -81,7 +81,7 @@ static void free_proxies(ne_session *sess)
 
 void ne_session_destroy(ne_session *sess) 
 {
-    NE_DEBUG_WINSCP_CONTEXT(sess);
+    NE_DEBUG_FORK_CONTEXT(sess);
     struct hook *hk;
 
     NE_DEBUG(NE_DBG_HTTP, "sess: Destroying session (connected=%d).\n",
@@ -114,7 +114,7 @@ void ne_session_destroy(ne_session *sess)
     free_proxies(sess);
 
     if (sess->user_agent) ne_free(sess->user_agent);
-#ifdef WINSCP
+#ifdef FORK_BUILD
     if (sess->realhost) ne_free(sess->realhost);
 #endif
     if (sess->socks_user) ne_free(sess->socks_user);
@@ -301,7 +301,7 @@ void ne_session_socks_proxy(ne_session *sess, enum ne_sock_sversion vers,
 
 void ne_session_system_proxy(ne_session *sess, unsigned int flags)
 {
-    NE_DEBUG_WINSCP_CONTEXT(sess);
+    NE_DEBUG_FORK_CONTEXT(sess);
 #ifdef HAVE_LIBPROXY
     pxProxyFactory *pxf = px_proxy_factory_new();
     struct host_info *hi, **lasthi;
@@ -510,7 +510,7 @@ void ne_fill_server_uri(ne_session *sess, ne_uri *uri)
     uri->scheme = ne_strdup(sess->scheme);
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 void ne_set_realhost(ne_session *sess, const char *realhost)
 {
     if (sess->realhost) ne_free(sess->realhost);
@@ -541,7 +541,7 @@ const char *ne_get_error(ne_session *sess)
 
 void ne_close_connection(ne_session *sess)
 {
-    NE_DEBUG_WINSCP_CONTEXT(sess);
+    NE_DEBUG_FORK_CONTEXT(sess);
     if (sess->connected) {
         struct hook *hk;
 
@@ -726,7 +726,7 @@ int ne__negotiate_ssl(ne_session *sess)
     /* Pass through the hostname if SNI is enabled. */
     snihost = sess->flags[NE_SESSFLAG_TLS_SNI] ? sess->server.hostname : NULL;
 
-    if (ne_sock_handshake(sess->socket, ctx, snihost, 0, sess)) { // WINSCP
+    if (ne_sock_handshake(sess->socket, ctx, snihost, 0, sess)) { // FORK_BUILD
         ne_set_error(sess, _("SSL handshake failed: %s"),
                      ne_sock_error(sess->socket));
         return NE_ERROR;

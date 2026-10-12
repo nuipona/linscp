@@ -11,24 +11,24 @@
 
 #include "putty.h"
 
-// #define WINSCP_LOG_PACKETS
+// #define FORK_LOG_PACKETS
 
 /* log session to file stuff ... */
 struct LogContext {
-#ifndef WINSCP
+#ifndef FORK_BUILD
     FILE *lgfp;
     enum { L_CLOSED, L_OPENING, L_OPEN, L_ERROR } state;
     bufchain queue;
     Filename *currlogfilename;
 #endif
     LogPolicy *lp;
-#ifndef WINSCP
+#ifndef FORK_BUILD
     Conf *conf;
 #endif
     int logtype;                       /* cached out of conf */
 };
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 static Filename *xlatlognam(const Filename *s,
                             const char *hostname, int port,
@@ -44,10 +44,10 @@ static Filename *xlatlognam(const Filename *s,
  */
 static void logwrite(LogContext *ctx, ptrlen data)
 {
-#if defined(WINSCP_LOG_PACKETS)
-    // WINSCP: All out uses of logwrite call it with ptrlen_from_asciz, so it's safe to ignore data.len
+#if defined(FORK_LOG_PACKETS)
+    // FORK_BUILD: All out uses of logwrite call it with ptrlen_from_asciz, so it's safe to ignore data.len
     ctx->lp->vt->eventlog(ctx->lp, data.ptr);
-#elif defined(WINSCP)
+#elif defined(FORK_BUILD)
     assert(false);
 #else
     /*
@@ -81,7 +81,7 @@ static PRINTF_LIKE(2, 3) void logprintf(LogContext *ctx, const char *fmt, ...)
     va_list ap;
     char *data;
 
-#ifndef WINSCP_LOG_PACKETS
+#ifndef FORK_LOG_PACKETS
     assert(false);
 #endif
 
@@ -98,7 +98,7 @@ static PRINTF_LIKE(2, 3) void logprintf(LogContext *ctx, const char *fmt, ...)
  */
 void logflush(LogContext *ctx)
 {
-#ifndef WINSCP
+#ifndef FORK_BUILD
     if (ctx->logtype > 0)
         if (ctx->state == L_OPEN)
             fflush(ctx->lgfp);
@@ -110,7 +110,7 @@ LogPolicy *log_get_policy(LogContext *ctx)
     return ctx->lp;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 static void logfopen_callback(void *vctx, int mode)
 {
@@ -141,7 +141,7 @@ static void logfopen_callback(void *vctx, int mode)
                   " =~=~=~=~=~=~=~=~=~=~=~=\r\n", buf);
     }
 
-    event = dupprintf(WINSCP_BOM "%s session log (%s mode) to file: %s",
+    event = dupprintf(FORK_BOM "%s session log (%s mode) to file: %s",
                       ctx->state == L_ERROR ?
                       (mode == 0 ? "Disabled writing" : "Error writing") :
                       (mode == 1 ? "Appending" : "Writing new"),
@@ -296,7 +296,7 @@ void log_packet(LogContext *ctx, int direction, int type,
     size_t p = 0, b = 0, omitted = 0;
     int output_pos = 0; /* NZ if pending output in dumpdata */
 
-#ifndef WINSCP_LOG_PACKETS
+#ifndef FORK_LOG_PACKETS
     if (!(ctx->logtype == LGTYP_SSHRAW ||
           (ctx->logtype == LGTYP_PACKETS && texttype)))
         return;
@@ -413,23 +413,23 @@ void log_packet(LogContext *ctx, int direction, int type,
 LogContext *log_init(LogPolicy *lp, Conf *conf)
 {
     LogContext *ctx = snew(LogContext);
-#ifndef WINSCP
+#ifndef FORK_BUILD
     ctx->lgfp = NULL;
     ctx->state = L_CLOSED;
 #endif
     ctx->lp = lp;
-#ifndef WINSCP
+#ifndef FORK_BUILD
     ctx->conf = conf_copy(conf);
 #endif
     ctx->logtype = conf_get_int(conf, CONF_logtype);
-#ifndef WINSCP
+#ifndef FORK_BUILD
     ctx->currlogfilename = NULL;
     bufchain_init(&ctx->queue);
 #endif
     return ctx;
 }
 
-// WINSCP
+// FORK_BUILD
 LogPolicy *log_get_logpolicy(LogContext *ctx)
 {
     return ctx->lp;
@@ -437,7 +437,7 @@ LogPolicy *log_get_logpolicy(LogContext *ctx)
 
 void log_free(LogContext *ctx)
 {
-#ifndef WINSCP
+#ifndef FORK_BUILD
     logfclose(ctx);
     bufchain_clear(&ctx->queue);
     if (ctx->currlogfilename)
@@ -447,13 +447,13 @@ void log_free(LogContext *ctx)
     sfree(ctx);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 void log_reconfig(LogContext *ctx, Conf *conf)
 {
     bool reset_logging;
 
-    assert(false); // WINSCP
+    assert(false); // FORK_BUILD
 
     if (!filename_equal(conf_get_filename(ctx->conf, CONF_logfilename),
                         conf_get_filename(conf, CONF_logfilename)) ||
@@ -492,7 +492,7 @@ static Filename *xlatlognam(const Filename *src,
     const char *s;
     Filename *ret;
 
-    assert(false); // WINSCP
+    assert(false); // FORK_BUILD
 
     buffer = strbuf_new();
     s = filename_to_str(src);

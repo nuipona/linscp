@@ -1,4 +1,4 @@
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /** **************************************************************************
  * mingw_s3_functions.c
  * 
@@ -42,4 +42,4 @@ int unsetenv(const char *a)
 {
     return SetEnvironmentVariable(a, 0);
 }
-#endif // WINSCP
+#endif // FORK_BUILD

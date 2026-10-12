@@ -98,7 +98,7 @@ extern const UnicodeString WebDAVProtocol;
 extern const UnicodeString WebDAVSProtocol;
 extern const UnicodeString S3Protocol;
 extern const UnicodeString SshProtocol;
-extern const UnicodeString WinSCPProtocolPrefix;
+extern const UnicodeString LinuxSCPProtocolPrefix;
 extern const wchar_t UrlParamSeparator;
 extern const wchar_t UrlParamValueSeparator;
 extern const UnicodeString UrlHostKeyParamName;

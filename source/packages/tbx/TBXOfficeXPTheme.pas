@@ -845,7 +845,7 @@ begin
 
     if (ItemOptions and IO_COMBO) <> 0 then
     begin
-      // WinSCP: One pixel to the right (+ 1) to make combos with keyboard accelerator look better.
+      // LinuxSCP: One pixel to the right (+ 1) to make combos with keyboard accelerator look better.
       // This moves the line into hitarea of the arrow (while it was in hitarea of the command originally)
       // Further move would require changes in hitarea testing.
       X := R.Right - ArrowWidth - 1 + 1;

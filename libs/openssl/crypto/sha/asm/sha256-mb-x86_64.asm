@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 EXTERN OPENSSL_ia32cap_P
@@ -7964,7 +7964,7 @@ $L$epilogue_avx2:
  DB 0F3h,0C3h ;repret
 
 $L$SEH_end_sha256_multi_block_avx2:
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 256
 K256:
  DD 1116352408,1116352408,1116352408,1116352408
@@ -8121,7 +8121,7 @@ DB 32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71
 DB 65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112
 DB 101,110,115,115,108,46,111,114,103,62,0
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 section .text
 EXTERN __imp_RtlVirtualUnwind
@@ -8295,4 +8295,4 @@ DB 9,0,0,0
  DD avx2_handler wrt ..imagebase
  DD $L$body_avx2 wrt ..imagebase,$L$epilogue_avx2 wrt ..imagebase
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

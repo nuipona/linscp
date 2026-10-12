@@ -84,9 +84,9 @@ uses
   Classes, SysUtils,
   {$ENDIF ~HAS_UNITSCOPE}
   JclAnsiStrings,
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
   JclWideStrings,
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
   JclBase;
 
 // Exceptions
@@ -178,9 +178,9 @@ function StrIsAlphaNum(const S: string): Boolean;
 function StrIsAlphaNumUnderscore(const S: string): Boolean;
 function StrContainsChars(const S: string; const Chars: TCharValidator; CheckAll: Boolean): Boolean; overload;
 function StrContainsChars(const S: string; const Chars: array of Char; CheckAll: Boolean): Boolean; overload;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function StrConsistsOfNumberChars(const S: string): Boolean;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function StrIsDigit(const S: string): Boolean;
 function StrIsSubset(const S: string; const ValidChars: TCharValidator): Boolean; overload;
 function StrIsSubset(const S: string; const ValidChars: array of Char): Boolean; overload;
@@ -232,9 +232,9 @@ procedure StrSkipChars(const S: string; var Index: SizeInt; const Chars: array o
 function StrSmartCase(const S: string; const Delimiters: TCharValidator): string; overload;
 function StrSmartCase(const S: string; const Delimiters: array of Char): string; overload;
 function StrStringToEscaped(const S: string): string;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function StrStripNonNumberChars(const S: string): string;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function StrToHex(const Source: string): string;
 function StrTrimCharLeft(const S: string; C: Char): string;
 function StrTrimCharsLeft(const S: string; const Chars: TCharValidator): string; overload;
@@ -315,10 +315,10 @@ function CharIsDigit(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {
 function CharIsFracDigit(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
 function CharIsHexDigit(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
 function CharIsLower(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CharIsNumberChar(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} {$IFDEF COMPILER16_UP} inline; {$ENDIF} {$ENDIF}
 function CharIsNumber(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} {$IFDEF COMPILER16_UP} inline; {$ENDIF} {$ENDIF}
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function CharIsPrintable(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
 function CharIsPunctuation(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
 function CharIsReturn(const C: Char): Boolean; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
@@ -350,7 +350,7 @@ function PCharVectorCount(Source: PCharVector): SizeInt;
 procedure PCharVectorToStrings(const Dest: TStrings; Source: PCharVector);
 procedure FreePCharVector(var Dest: PCharVector);
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 // MultiSz Routines
 type
   PMultiSz = PChar;
@@ -384,7 +384,7 @@ function WideMultiSzLength(const Source: PWideMultiSz): SizeInt; {$IFDEF SUPPORT
 procedure AllocateWideMultiSz(var Dest: PWideMultiSz; Len: SizeInt); {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
 procedure FreeWideMultiSz(var Dest: PWideMultiSz); {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
 function WideMultiSzDup(const Source: PWideMultiSz): PWideMultiSz; {$IFDEF SUPPORTS_INLINE} inline; {$ENDIF}
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 // TStrings Manipulation
 procedure StrIToStrings(S, Sep: string; const List: TStrings; const AllowEmptyString: Boolean = True);
@@ -412,10 +412,10 @@ function StrWord(const S: string; var Index: SizeInt; out Word: string): Boolean
 function StrWord(var S: PChar; out Word: string): Boolean; overload;
 function StrIdent(const S: string; var Index: SizeInt; out Ident: string): Boolean; overload;
 function StrIdent(var S: PChar; out Ident: string): Boolean; overload;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function StrToFloatSafe(const S: string): Float;
 function StrToIntSafe(const S: string): Integer;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 procedure StrNormIndex(const StrLen: SizeInt; var Index: SizeInt; var Count: SizeInt); overload;
 
 function ArrayOf(List: TStrings): TDynStringArray; overload;
@@ -616,10 +616,10 @@ procedure StrResetLength(var S: UnicodeString); overload;
 {$ENDIF SUPPORTS_UNICODE_STRING}
 
 // natural comparison functions
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CompareNaturalStr(const S1, S2: string): SizeInt;
 function CompareNaturalText(const S1, S2: string): SizeInt;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 {$IFNDEF UNICODE_RTL_DATABASE}
 // internal structures published to make function inlining working
@@ -661,7 +661,7 @@ uses
   StrUtils,
   {$ENDIF ~HAS_UNITSCOPE}
   {$ENDIF SUPPORTS_UNICODE}
-  {$IFNDEF WINSCP}JclLogic,{$ELSE}Math,{$ENDIF ~WINSCP} JclResources, {$IFNDEF WINSCP}JclStreams,{$ENDIF} JclSynch{$IFNDEF WINSCP}, JclSysUtils{$ENDIF ~WINSCP};
+  {$IFNDEF FORK_BUILD}JclLogic,{$ELSE}Math,{$ENDIF ~FORK_BUILD} JclResources, {$IFNDEF FORK_BUILD}JclStreams,{$ENDIF} JclSynch{$IFNDEF FORK_BUILD}, JclSysUtils{$ENDIF ~FORK_BUILD};
 
 //=== Internal ===============================================================
 
@@ -868,7 +868,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function StrConsistsofNumberChars(const S: string): Boolean;
 var
   I: SizeInt;
@@ -883,7 +883,7 @@ begin
     end;
   end;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function StrContainsChars(const S: string; const Chars: TCharValidator; CheckAll: Boolean): Boolean;
 var
@@ -1833,7 +1833,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function StrStripNonNumberChars(const S: string): string;
 var
   I: SizeInt;
@@ -1847,7 +1847,7 @@ begin
       Result := Result + C;
   end;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function StrToHex(const Source: string): string;
 var
@@ -2891,7 +2891,7 @@ begin
   {$ENDIF ~UNICODE_RTL_DATABASE}
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CharIsNumberChar(const C: Char): Boolean;
 begin
   Result := CharIsDigit(C) or (C = '+') or (C = '-') or (C = JclFormatSettings.DecimalSeparator);
@@ -2901,7 +2901,7 @@ function CharIsNumber(const C: Char): Boolean;
 begin
   Result := CharIsDigit(C) or (C = JclFormatSettings.DecimalSeparator);
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function CharIsPrintable(const C: Char): Boolean;
 begin
@@ -3172,7 +3172,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 //=== MultiSz ================================================================
 
 function StringsToMultiSz(var Dest: PMultiSz; const Source: TStrings): PMultiSz;
@@ -3328,7 +3328,7 @@ begin
   Result := JclWideStrings.MultiSzDup(Source);
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 //=== TStrings Manipulation ==================================================
 
@@ -3772,7 +3772,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function StrToFloatSafe(const S: string): Float;
 var
   Temp: string;
@@ -3847,7 +3847,7 @@ function StrToIntSafe(const S: string): Integer;
 begin
   Result := Trunc(StrToFloatSafe(S));
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 procedure StrNormIndex(const StrLen: SizeInt; var Index: SizeInt; var Count: SizeInt); overload;
 begin
@@ -5276,7 +5276,7 @@ begin
   CreateRes(@RsArg_NullReferenceException);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CompareNatural(const S1, S2: string; CaseInsensitive: Boolean): SizeInt;
 var
   Cur1, Len1,
@@ -5425,7 +5425,7 @@ function CompareNaturalText(const S1, S2: string): SizeInt; overload;
 begin
   Result := CompareNatural(S1, S2, True);
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 initialization
   {$IFNDEF UNICODE_RTL_DATABASE}

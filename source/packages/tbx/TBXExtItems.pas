@@ -839,7 +839,7 @@ begin
     SetBkMode(DC, TRANSPARENT);
     SetBkColor(DC, CurrentTheme.GetSysColor(FillColors[Item.Enabled]));
     SetTextColor(DC, CurrentTheme.GetSysColor(TextColors[Item.Enabled]));
-    // WinSCP: Align edit text with toolbar labels
+    // LinuxSCP: Align edit text with toolbar labels
     InflateRect(R, 0, -1);
     DrawText(DC, PChar(S), Length(S), R, DT_SINGLELINE or DT_NOPREFIX or Alignments[Item.Alignment]);
     SelectObject(DC, OldFnt);

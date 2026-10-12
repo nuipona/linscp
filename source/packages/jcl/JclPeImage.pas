@@ -55,7 +55,7 @@ uses
   {$ELSE ~HAS_UNITSCOPE}
   Windows, Classes, SysUtils, TypInfo, Contnrs,
   {$ENDIF ~HAS_UNITSCOPE}
-  JclBase, {$IFNDEF WINSCP}JclDateTime,{$ENDIF ~WINSCP} JclFileUtils, JclWin32;
+  JclBase, {$IFNDEF FORK_BUILD}JclDateTime,{$ENDIF ~FORK_BUILD} JclFileUtils, JclWin32;
 
 type
   // Smart name compare function
@@ -71,7 +71,7 @@ type
   // Base list
   EJclPeImageError = class(EJclError);
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   TJclPeImage = class;
 
   TJclPeImageClass = class of TJclPeImage;
@@ -313,7 +313,7 @@ type
     property TotalResolveCheck: TJclPeResolveCheck read FTotalResolveCheck;
   end;
 
-  {$ENDIF WINSCP}
+  {$ENDIF FORK_BUILD}
 
   // Resource section related classes
   TJclPeResourceKind = (
@@ -344,7 +344,7 @@ type
     rtManifest,
     rtUserDefined);
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
 
   TJclPeResourceList = class;
   TJclPeResourceItem = class;
@@ -516,7 +516,7 @@ type
     property Image: TJclPeImage read FImage;
   end;
 
-  {$ENDIF WINSCP}
+  {$ENDIF FORK_BUILD}
 
   // PE Image
   TJclPeHeader = (
@@ -586,7 +586,7 @@ type
   TJclPeImageStatus = (stNotLoaded, stOk, stNotPE, stNotSupported, stNotFound, stError);
   TJclPeTarget = (taUnknown, taWin32, taWin64);
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
 
   TJclPeImage = class(TObject)
   private
@@ -615,9 +615,9 @@ type
     function GetDirectories(Directory: Word): TImageDataDirectory;
     function GetDirectoryExists(Directory: Word): Boolean;
     function GetExportList: TJclPeExportFuncList;
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     function GetFileProperties: TJclPeFileProperties;
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
     function GetImageSectionCount: Integer;
     function GetImageSectionHeaders(Index: Integer): TImageSectionHeader;
     function GetImageSectionNames(Index: Integer): string;
@@ -687,9 +687,9 @@ type
     property DirectoryExists[Directory: Word]: Boolean read GetDirectoryExists;
     property ExportList: TJclPeExportFuncList read GetExportList;
     property FileName: TFileName read FFileName write SetFileName;
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     property FileProperties: TJclPeFileProperties read GetFileProperties;
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
     property HeaderValues[Index: TJclPeHeader]: string read GetHeaderValues;
     property ImageSectionCount: Integer read GetImageSectionCount;
     property ImageSectionHeaders[Index: Integer]: TImageSectionHeader read GetImageSectionHeaders;
@@ -893,9 +893,9 @@ function PeGetNtHeaders64(const FileName: TFileName; out NtHeaders: TImageNtHead
 
 { Image modifications }
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function PeCreateNameHintTable(const FileName: TFileName): Boolean;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 // use PeRebaseImage32
 //function PeRebaseImage(const ImageName: TFileName; NewBase: DWORD = 0; TimeStamp: DWORD = 0;
@@ -905,25 +905,25 @@ function PeRebaseImage32(const ImageName: TFileName; NewBase: TJclAddr32 = 0; Ti
 function PeRebaseImage64(const ImageName: TFileName; NewBase: TJclAddr64 = 0; TimeStamp: DWORD = 0;
   MaxNewSize: DWORD = 0): TJclRebaseImageInfo64;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function PeUpdateLinkerTimeStamp(const FileName: TFileName; const Time: TDateTime): Boolean;
 function PeReadLinkerTimeStamp(const FileName: TFileName): TDateTime;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function PeInsertSection(const FileName: TFileName; SectionStream: TStream; SectionName: string): Boolean;
 
 { Image Checksum }
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function PeVerifyCheckSum(const FileName: TFileName): Boolean;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 function PeClearCheckSum(const FileName: TFileName): Boolean;
 function PeUpdateCheckSum(const FileName: TFileName): Boolean;
 
 // Various simple PE Image searching and listing routines
 { Exports searching }
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function PeDoesExportFunction(const FileName: TFileName; const FunctionName: string;
   Options: TJclSmartCompOptions = []): Boolean;
 
@@ -973,7 +973,7 @@ function PeFindMissingImports(const FileName: TFileName; MissingImportsList: TSt
 function PeFindMissingImports(RequiredImportsList, MissingImportsList: TStrings): Boolean; overload;
 
 function PeCreateRequiredImportList(const FileName: TFileName; RequiredImportsList: TStrings): Boolean;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 // Mapped or loaded image related routines
 // use PeMapImgNtHeaders32
@@ -1022,16 +1022,16 @@ function PeMapImgFindSection(const ImageSectionHeaders: TImageSectionHeaderArray
 function PeMapImgFindSectionFromModule(const BaseAddress: Pointer;
   const SectionName: string): PImageSectionHeader;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function PeMapImgExportedVariables(const Module: HMODULE; const VariablesList: TStrings): Boolean;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function PeMapImgResolvePackageThunk(Address: Pointer): Pointer;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function PeMapFindResource(const Module: HMODULE; const ResourceType: PChar;
   const ResourceName: string): Pointer;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 type
   TJclPeSectionStream = class(TCustomMemoryStream)
@@ -1152,7 +1152,7 @@ uses
   Character,
   {$ENDIF HAS_UNIT_CHARACTER}
   {$ENDIF ~HAS_UNITSCOPE}
-  {$IFNDEF WINSCP}JclLogic,{$ELSE}Math, System.AnsiStrings, {$ENDIF ~WINSCP} JclResources, JclSysUtils, JclAnsiStrings, JclStrings{$IFNDEF WINSCP}, JclStringConversions, JclTD32{$ENDIF ~WINSCP};
+  {$IFNDEF FORK_BUILD}JclLogic,{$ELSE}Math, System.AnsiStrings, {$ENDIF ~FORK_BUILD} JclResources, JclSysUtils, JclAnsiStrings, JclStrings{$IFNDEF FORK_BUILD}, JclStringConversions, JclTD32{$ENDIF ~FORK_BUILD};
 
 const
   MANIFESTExtension = '.manifest';
@@ -1172,7 +1172,7 @@ const
   DVclAlResName         = 'DVCLAL';
   {$ENDIF BORLAND}
 
-{$IFDEF WINSCP}
+{$IFDEF FORK_BUILD}
 // Stubs for JclStringConversions functions
 
 function TryUTF8ToString(const S: TUTF8String; out D: string): Boolean;
@@ -1222,7 +1222,7 @@ begin
     Result := (StrIComp(T1, T2) = 0);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function CreatePeImage(const FileName: TFileName): TJclPeImage;
 begin
@@ -1320,7 +1320,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 //=== { TJclPeImagesCache } ==================================================
 
@@ -3495,7 +3495,7 @@ begin
   Result := FExportList;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function TJclPeImage.GetFileProperties: TJclPeFileProperties;
 var
   FileAttributesEx: WIN32_FILE_ATTRIBUTE_DATA;
@@ -3513,7 +3513,7 @@ begin
     Result.Attributes := FileAttributesEx.dwFileAttributes;
   end;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function TJclPeImage.GetHeaderValues(Index: TJclPeHeader): string;
 
@@ -5032,7 +5032,7 @@ begin
   {$ENDIF ~RTL210_UP}
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 //=== PE Image miscellaneous functions =======================================
 
@@ -5114,7 +5114,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function PeCreateNameHintTable(const FileName: TFileName): Boolean;
 var
@@ -5212,7 +5212,7 @@ begin
   end;
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function PeRebaseImage32(const ImageName: TFileName; NewBase: TJclAddr32;
   TimeStamp, MaxNewSize: DWORD): TJclRebaseImageInfo32;
@@ -5295,7 +5295,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function PeUpdateLinkerTimeStamp(const FileName: TFileName; const Time: TDateTime): Boolean;
 var
@@ -5334,7 +5334,7 @@ begin
   end;
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 { TODO -cHelp : Author: Uwe Schuster(just a generic version of JclDebug.InsertDebugDataIntoExecutableFile) }
 function PeInsertSection(const FileName: TFileName; SectionStream: TStream; SectionName: string): Boolean;
@@ -5618,7 +5618,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function PeVerifyCheckSum(const FileName: TFileName): Boolean;
 begin
@@ -5630,7 +5630,7 @@ begin
   end;
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function PeClearCheckSum(const FileName: TFileName): Boolean;
   function PeClearCheckSum32(ModuleAddress: Pointer): Boolean;
@@ -5685,7 +5685,7 @@ end;
 
 // Various simple PE Image searching and listing routines
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function PeDoesExportFunction(const FileName: TFileName; const FunctionName: string;
   Options: TJclSmartCompOptions): Boolean;
@@ -6045,7 +6045,7 @@ begin
   Result := PeImportedFunctions(FileName, RequiredImportsList, '', True);
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 // Mapped or loaded image related functions
 
@@ -6447,7 +6447,7 @@ begin
   end;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function PeMapImgExportedVariables(const Module: HMODULE; const VariablesList: TStrings): Boolean;
 var
@@ -6475,7 +6475,7 @@ begin
   end;
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function PeMapImgResolvePackageThunk(Address: Pointer): Pointer;
 {$IFDEF BORLAND}
@@ -6515,7 +6515,7 @@ begin
 end;
 {$ENDIF FPC}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function PeMapFindResource(const Module: HMODULE; const ResourceType: PChar;
   const ResourceName: string): Pointer;
@@ -6537,7 +6537,7 @@ begin
   end;
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 //=== { TJclPeSectionStream } ================================================
 

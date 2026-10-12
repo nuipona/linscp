@@ -12,7 +12,7 @@
 #define VALUE_OBSOLETE(eval, sval) { eval, sval, true }
 
 #pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wmissing-variable-declarations" // WINSCP
+#pragma clang diagnostic ignored "-Wmissing-variable-declarations" // FORK_BUILD
 
 #include "conf-enums.h"
 

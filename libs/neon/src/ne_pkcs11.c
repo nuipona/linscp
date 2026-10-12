@@ -456,7 +456,7 @@ static void pk11_provide(void *userdata, ne_session *sess,
                          const ne_ssl_dname *const *dnames,
                          int dncount)
 {
-    NE_DEBUG_WINSCP_CONTEXT(sess);
+    NE_DEBUG_FORK_CONTEXT(sess);
     ne_ssl_pkcs11_provider *prov = userdata;
     ck_slot_id_t *slots;
     unsigned long scount, n;

@@ -3,11 +3,11 @@
     <assemblyIdentity
         processorArchitecture="*"
         type="win32"
-        name="WinSCP"
+        name="LinuxSCP"
         version="5.0.0.0"
     />
     <description>
-        WinSCP
+        LinuxSCP
     </description>
     <dependency>
         <dependentAssembly>

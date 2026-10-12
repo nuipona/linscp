@@ -6,11 +6,11 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("WinSCPnet")]
-[assembly: AssemblyDescription("WinSCP scripting interface .NET wrapper")]
+[assembly: AssemblyTitle("LinuxSCPnet")]
+[assembly: AssemblyDescription("LinuxSCP scripting interface .NET wrapper")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Martin Prikryl")]
-[assembly: AssemblyProduct("WinSCP")]
+[assembly: AssemblyProduct("LinuxSCP")]
 [assembly: AssemblyCopyright("")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
@@ -21,15 +21,15 @@ using System.Runtime.InteropServices;
 // Duplicated in ConsoleRunner.cpp
 [assembly: Guid("a0b93468-d98a-4845-a234-8076229ad93f")]
 
-[assembly: AssemblyVersion(WinSCP.AssemblyConstants.Version)]
-[assembly: AssemblyFileVersion(WinSCP.AssemblyConstants.Version)]
-[assembly: AssemblyInformationalVersion(WinSCP.AssemblyConstants.ProductVersion)]
+[assembly: AssemblyVersion(LinuxSCP.AssemblyConstants.Version)]
+[assembly: AssemblyFileVersion(LinuxSCP.AssemblyConstants.Version)]
+[assembly: AssemblyInformationalVersion(LinuxSCP.AssemblyConstants.ProductVersion)]
 
 [assembly: CLSCompliant(true)]
 
 [assembly: InternalsVisibleTo("Tests")]
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal static class AssemblyConstants
     {

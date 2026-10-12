@@ -98,30 +98,30 @@ function ExpandEnvironmentVar(var Value: string): Boolean;
 function ExpandEnvironmentVarCustom(var Value: string; Vars: TStrings): Boolean;
 function GetEnvironmentVar(const Name: string; out Value: string): Boolean; overload;
 function GetEnvironmentVar(const Name: string; out Value: string; Expand: Boolean): Boolean; overload;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetEnvironmentVars(const Vars: TStrings): Boolean; overload;
 function GetEnvironmentVars(const Vars: TStrings; Expand: Boolean): Boolean; overload;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function SetEnvironmentVar(const Name, Value: string): Boolean;
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CreateEnvironmentBlock(const Options: TEnvironmentOptions; const AdditionalVars: TStrings): PChar;
 procedure DestroyEnvironmentBlock(var Env: PChar);
 procedure SetGlobalEnvironmentVariable(VariableName, VariableContent: string);
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 {$ENDIF MSWINDOWS}
 
 // Common Folder Locations
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetCommonFilesFolder: string;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 {$ENDIF MSWINDOWS}
 function GetCurrentFolder: string;
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetProgramFilesFolder: string;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 function GetWindowsFolder: string;
 function GetWindowsSystemFolder: string;
 function GetWindowsTempFolder: string;
@@ -129,11 +129,11 @@ function GetWindowsTempFolder: string;
 function GetDesktopFolder: string;
 function GetProgramsFolder: string;
 {$ENDIF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetPersonalFolder: string;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetFavoritesFolder: string;
 function GetStartupFolder: string;
 function GetRecentFolder: string;
@@ -157,7 +157,7 @@ function GetTemplatesFolder: string;
 function GetInternetCacheFolder: string;
 function GetCookiesFolder: string;
 function GetHistoryFolder: string;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 // Advanced Power Management (APM)
 type
@@ -195,12 +195,12 @@ type
 
   TFileSystemFlags = set of TFileSystemFlag;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetVolumeName(const Drive: string): string;
 function GetVolumeSerialNumber(const Drive: string): string;
 function GetVolumeFileSystem(const Drive: string): string;
 function GetVolumeFileSystemFlags(const Volume: string): TFileSystemFlags;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 {$ENDIF MSWINDOWS}
 function GetIPAddress(const HostName: string): string;
 {$IFDEF MSWINDOWS}
@@ -215,26 +215,26 @@ function GetWorkGroupName: WideString;
 {$ENDIF MSWINDOWS}
 function GetDomainName: string;
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetRegisteredCompany: string;
 function GetRegisteredOwner: string;
 function GetWindowsProductId: string;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 function GetBIOSName: string;
 function GetBIOSCopyright: string;
 function GetBIOSExtendedInfo: string;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetBIOSDate: TDateTime;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 {$ENDIF MSWINDOWS}
 
 // Processes, Tasks and Modules
 type
   TJclTerminateAppResult = (taError, taClean, taKill);
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function RunningProcessesList(const List: TStrings; FullPath: Boolean = True): Boolean;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 {$IFDEF MSWINDOWS}
 function LoadedModulesList(const List: TStrings; ProcessID: DWORD; HandlesOnly: Boolean = False): Boolean;
@@ -258,21 +258,21 @@ function TerminateApp(ProcessID: DWORD; Timeout: Integer): TJclTerminateAppResul
 
 {$IFDEF MSWINDOWS}
 {.$IFNDEF FPC}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetPidFromProcessName(const ProcessName: string): THandle;
 function GetProcessNameFromWnd(Wnd: THandle): string;
 function GetProcessNameFromPid(PID: DWORD): string;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 function GetMainAppWndFromPid(PID: DWORD): THandle;
 function GetWndFromPid(PID: DWORD; const WindowClassName: string): HWND;
 {.$ENDIF ~FPC}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetShellProcessName: string;
 {.$IFNDEF FPC}
 function GetShellProcessHandle: THandle;
 {.$ENDIF ~FPC}
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 // Version Information
 type
@@ -306,7 +306,7 @@ type
 
 var
   { in case of additions, don't forget to update initialization section! }
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   IsWin95: Boolean = False;
   IsWin95OSR2: Boolean = False;
   IsWin98: Boolean = False;
@@ -314,7 +314,7 @@ var
   IsWinME: Boolean = False;
   {$ENDIF}
   IsWinNT: Boolean = False;
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   IsWinNT3: Boolean = False;
   IsWinNT31: Boolean = False;
   IsWinNT35: Boolean = False;
@@ -364,7 +364,7 @@ const
   Windows11InitialBuildNumber = 22000;
   Windows2025ServerInitialBuildNumber = 26100;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetWindowsVersion: TWindowsVersion;
 function GetWindowsEdition: TWindowsEdition;
 function NtProductType: TNtProductType;
@@ -374,13 +374,13 @@ function GetWindowsProductString: string;
 function GetWindowsProductName: string;
 function NtProductTypeString: string;
 function GetWindowsBuildNumber: Integer;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 function GetWindowsMajorVersionNumber: Integer;
 function GetWindowsMinorVersionNumber: Integer;
 function GetWindowsVersionNumber: string;
 function GetWindowsServicePackVersion: Integer;
 function GetWindowsServicePackVersionString: string;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetWindowsDisplayVersion: string;
 function GetWindowsReleaseId: Integer;
 function GetWindowsReleaseName: String;
@@ -396,22 +396,22 @@ function GetWindowsServerDisplayVersion: string; {$IFDEF SUPPORTS_DEPRECATED}dep
 function GetWindowsServerReleaseId: Integer; {$IFDEF SUPPORTS_DEPRECATED}deprecated {$IFDEF SUPPORTS_DEPRECATED_DETAILS}'Use GetWindowsReleaseId'{$ENDIF};{$ENDIF}
 function GetWindowsServerReleaseVersion: String; {$IFDEF SUPPORTS_DEPRECATED}deprecated {$IFDEF SUPPORTS_DEPRECATED_DETAILS}'Use GetWindowsReleaseVersion'{$ENDIF};{$ENDIF}
 function GetOpenGLVersion(const Win: THandle; out Version, Vendor: AnsiString): Boolean;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function GetNativeSystemInfo(var SystemInfo: TSystemInfo): Boolean;
 function GetProcessorArchitecture: TProcessorArchitecture;
 function IsWindows64: Boolean;
 function JclCheckWinVersion(Major, Minor: Integer): Boolean;
 {$ENDIF MSWINDOWS}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetOSVersionString: string;
 {$ENDIF}
 
 // Hardware
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetMacAddresses(const Machine: string; const Addresses: TStrings): Integer;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 {$ENDIF MSWINDOWS}
 function ReadTimeStampCounter: Int64;
 {$IFDEF WIN64}
@@ -1391,9 +1391,9 @@ const
     (D: $FF; Family: cfOther;              Size: 0;     WaysOfAssoc: 0;  LineSize: 0;  LinePerSector: 0; Entries: 0;   I: @RsIntelCacheDescrFF)
   );
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 procedure GetCpuInfo(var CpuInfo: TCpuInfo);
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function GetIntelCacheDescription(const D: Byte): string;
 function RoundFrequency(const Frequency: Integer): Integer;
@@ -1406,9 +1406,9 @@ type
 
 function GetOSEnabledFeatures: TOSEnabledFeatures;
 {$ENDIF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CPUID: TCpuInfo;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 function TestFDIVInstruction: Boolean;
 
 // Memory Information
@@ -1490,22 +1490,22 @@ const
 implementation
 
 uses
-  {$IFDEF WINSCP}
+  {$IFDEF FORK_BUILD}
   Registry,
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
   {$IFDEF HAS_UNITSCOPE}
   System.SysUtils, System.Math,
   {$IFDEF MSWINDOWS}
-  Winapi.Messages, Winapi.Winsock, {$IFNDEF WINSCP}Snmp,{$ENDIF ~WINSCP}
+  Winapi.Messages, Winapi.Winsock, {$IFNDEF FORK_BUILD}Snmp,{$ENDIF ~FORK_BUILD}
   {$IFDEF FPC}
   JwaTlHelp32, JwaPsApi,
   {$ELSE ~FPC}
   Winapi.TLHelp32, Winapi.PsApi,
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   JclShell,
-  {$ENDIF ~WINSCP}
+  {$ENDIF ~FORK_BUILD}
   {$ENDIF ~FPC}
-  {$IFNDEF WINSCP}JclRegistry,{$ENDIF ~WINSCP} JclWin32,
+  {$IFNDEF FORK_BUILD}JclRegistry,{$ENDIF ~FORK_BUILD} JclWin32,
   {$ENDIF MSWINDOWS}
   {$ELSE ~HAS_UNITSCOPE}
   SysUtils,
@@ -1521,10 +1521,10 @@ uses
   JclRegistry, JclWin32,
   {$ENDIF MSWINDOWS}
   {$ENDIF ~HAS_UNITSCOPE}
-  {$IFNDEF WINSCP}Jcl8087, JclIniFiles,{$ENDIF ~WINSCP}
+  {$IFNDEF FORK_BUILD}Jcl8087, JclIniFiles,{$ENDIF ~FORK_BUILD}
   JclSysUtils, JclFileUtils, JclAnsiStrings, JclStrings;
 
-{$IFDEF WINSCP}
+{$IFDEF FORK_BUILD}
 
 type
   DelphiHKEY = {$IFDEF CPUX64}type Winapi.Windows.HKEY{$ELSE}Longword{$ENDIF CPUX64};
@@ -1551,7 +1551,7 @@ begin
   end;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 {.$IFDEF FPC}
 {$IFDEF MSWINDOWS}
@@ -1589,7 +1589,7 @@ end;
 {$ENDIF MSWINDOWS}
 {.$ENDIF FPC}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 //=== Registry helpers =======================================================
 
@@ -1651,7 +1651,7 @@ begin
   Result := RegReadHklmKeyIntegerValue(HKLM_CURRENT_VERSION_NT, Name, Def, ForceNative);
 end;
 
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 //=== Environment ============================================================
 
@@ -1854,7 +1854,7 @@ end;
 {$ENDIF LINUX}
 
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetEnvironmentVars(const Vars: TStrings): Boolean;
 begin
   Result := GetEnvironmentVars(Vars, True);
@@ -1889,7 +1889,7 @@ begin
     Vars.EndUpdate;
   end;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 {$ENDIF MSWINDOWS}
 
@@ -1906,7 +1906,7 @@ end;
 
 {$IFDEF MSWINDOWS}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function CreateEnvironmentBlock(const Options: TEnvironmentOptions; const AdditionalVars: TStrings): PChar;
 const
   RegLocalEnvironment = 'SYSTEM\CurrentControlSet\Control\Session Manager\Environment';
@@ -1971,12 +1971,12 @@ begin
     FreeAndNil(TempList);
   end;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 // frees an environment block allocated by CreateEnvironmentBlock and
 // sets Env to nil
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 procedure DestroyEnvironmentBlock(var Env: PChar);
 begin
   FreeMultiSz(Env);
@@ -2012,7 +2012,7 @@ begin
     'CommonFilesDir', '');
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 {$ENDIF MSWINDOWS}
 
@@ -2058,7 +2058,7 @@ end;
 {$ENDIF MSWINDOWS}
 
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 { TODO : Check for documented solution }
 function GetProgramFilesFolder: string;
 begin
@@ -2066,7 +2066,7 @@ begin
   // as we want the platform (x86/x64) specific common folder.
   Result := RegReadStringDef(HKEY_LOCAL_MACHINE, HKLM_CURRENT_VERSION_WINDOWS, 'ProgramFilesDir', '');
 end;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 { TODO : Check for documented solution }
 function GetWindowsFolder: string;
@@ -2115,7 +2115,7 @@ begin
 end;
 
 {$ENDIF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetPersonalFolder: string;
 begin
   {$IFDEF UNIX}
@@ -2241,7 +2241,7 @@ function GetProfileFolder: string;
 begin
   Result := GetSpecialFolderLocation(CSIDL_PROFILE);
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 // the following special folders are pure virtual and cannot be
 // mapped to a directory path:
@@ -2553,7 +2553,7 @@ end;
 {$ENDIF MSWINDOWS}
 
 {$IFDEF MSWINDOWS}
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetRegisteredCompany: string;
 begin
   { TODO : check for MSDN documentation }
@@ -2580,7 +2580,7 @@ begin
   else
     Result := ReadWindowsCurrentVersionStringValue('ProductId', '', True);
 end;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 { TODO: Check supported platforms, maybe complete rewrite }
 
@@ -2715,7 +2715,7 @@ end;
 // http://support.microsoft.com/default.aspx?scid=kb;en-us;q195268
 
 { TODO : the date string can be e.g. 00/00/00 }
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetBIOSDate: TDateTime;
 const
   WIN10_REG_PATH = 'HARDWARE\DESCRIPTION\System\BIOS';
@@ -2779,7 +2779,7 @@ begin
   end;
   {$ENDIF ~RTL150_UP}
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 {$ENDIF MSWINDOWS}
 
@@ -2862,7 +2862,7 @@ end;
 
 {$IFDEF MSWINDOWS}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function RunningProcessesList(const List: TStrings; FullPath: Boolean): Boolean;
 
   // This function always returns an empty string on Win9x
@@ -2994,7 +2994,7 @@ begin
     List.EndUpdate;
   end;
 end;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 { TODO Windows 9x ? }
 
@@ -3438,7 +3438,7 @@ begin
     Result := taError;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetProcessNameFromWnd(Wnd: THandle): string;
 var
   List: TStringList;
@@ -3580,7 +3580,7 @@ begin
   Result := EnumWndStruct.ResultWnd;
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetShellProcessName: string;
 const
   cShellKey = HKLM_CURRENT_VERSION_NT + '\WinLogon';
@@ -4282,17 +4282,17 @@ begin
   else
     Result := Win32BuildNumber;
 end;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 
 function GetWindowsMajorVersionNumber: Integer;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 var
   Ver: string;
   I: Integer;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 begin
-{$IFNDEF WINSCP}
-  // WINSCP: We have the manifest
+{$IFNDEF FORK_BUILD}
+  // FORK_BUILD: We have the manifest
   // Starting with Windows 8.1, the GetVersion(Ex) API is deprecated and will detect the
   // application as Windows 8 (kernel version 6.2) until an application manifest is included
   // See https://msdn.microsoft.com/en-us/library/windows/desktop/dn302074.aspx
@@ -4312,19 +4312,19 @@ begin
     end;
   end
   else
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
     Result := Win32MajorVersion;
 end;
 
 function GetWindowsMinorVersionNumber: Integer;
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 var
   Ver: string;
   I: Integer;
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
 begin
-{$IFNDEF WINSCP}
-  // WINSCP: We have the manifest
+{$IFNDEF FORK_BUILD}
+  // FORK_BUILD: We have the manifest
   // Starting with Windows 8.1, the GetVersion(Ex) API is deprecated and will detect the
   // application as Windows 8 (kernel version 6.2) until an application manifest is included
   // See https://msdn.microsoft.com/en-us/library/windows/desktop/dn302074.aspx
@@ -4344,7 +4344,7 @@ begin
     end;
   end
   else
-{$ENDIF WINSCP}
+{$ENDIF FORK_BUILD}
     Result := Win32MinorVersion;
 end;
 
@@ -4358,9 +4358,9 @@ function GetWindowsServicePackVersion: Integer;
 const
   RegWindowsControl = 'SYSTEM\CurrentControlSet\Control\Windows';
 var
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
   SP: Integer;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
   VersionInfo: TOSVersionInfoEx;
 begin
   Result := 0;
@@ -4371,8 +4371,8 @@ begin
     if GetVersionEx(VersionInfo) then
       Result := VersionInfo.wServicePackMajor;
   end
-{$IFNDEF WINSCP}
-  // WINSCP: We support Windows XP (5.1) and newer only
+{$IFNDEF FORK_BUILD}
+  // FORK_BUILD: We support Windows XP (5.1) and newer only
   else
   begin
     SP := RegReadIntegerDef(HKEY_LOCAL_MACHINE, RegWindowsControl, 'CSDVersion', 0);
@@ -4382,7 +4382,7 @@ begin
       on EConvertError do
         Result := 0;
     end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 end;
 
 function GetWindowsServicePackVersionString: string;
@@ -4396,7 +4396,7 @@ begin
     Result := '';
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetWindowsDisplayVersion: string;
 begin
   // Starting with Windows 10 20H2, the DisplayVersion registry entry is being populated ("20H2")
@@ -4855,7 +4855,7 @@ begin
   end;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function GetNativeSystemInfo(var SystemInfo: TSystemInfo): Boolean;
 type
@@ -4929,7 +4929,7 @@ end;
 
 {$ENDIF MSWINDOWS}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function GetOSVersionString: string;
 {$IFDEF UNIX}
 var
@@ -4959,7 +4959,7 @@ begin
     Integer(Adapter[4]), Integer(Adapter[5])]);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 { TODO: RTLD version of NetBios }
 {$IFDEF MSWINDOWS}
@@ -5166,7 +5166,7 @@ begin
     Addresses.EndUpdate;
   end;
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 {$ENDIF MSWINDOWS}
 
 function ReadTimeStampCounter: Int64; assembler;
@@ -5197,7 +5197,7 @@ begin
     Result := Format(LoadResString(@RsIntelUnknownCache),[D]);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 procedure GetCpuInfo(var CpuInfo: TCpuInfo);
 begin
@@ -5212,7 +5212,7 @@ begin
   end;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function RoundFrequency(const Frequency: Integer): Integer;
 const
@@ -5391,7 +5391,7 @@ begin
 end;
 {$ENDIF MSWINDOWS}
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 function CPUID: TCpuInfo;
 
@@ -6148,7 +6148,7 @@ begin
   end;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 function TestFDIVInstruction: Boolean;
 {$IFDEF CPU32}
@@ -6716,7 +6716,7 @@ end;
 procedure InitSysInfo;
 var
   SystemInfo: TSystemInfo;
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
   Kernel32FileName: string;
   VerFixedFileInfo: TVSFixedFileInfo;
   {$ENDIF}
@@ -6734,7 +6734,7 @@ begin
 
     IsWinNT := Win32Platform = VER_PLATFORM_WIN32_NT;
 
-  {$IFNDEF WINSCP}
+  {$IFNDEF FORK_BUILD}
     Kernel32FileName := GetModulePath(GetModuleHandle(kernel32));
     VerFixedFileInfo.dwFileDateLS := 0;
     if not IsWinNT and VersionFixedFileInfo(Kernel32FileName, VerFixedFileInfo) then

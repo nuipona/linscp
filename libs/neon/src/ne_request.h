@@ -38,7 +38,7 @@ NE_BEGIN_DECLS
 #define NE_FAILED (7) /* The precondition failed */
 #define NE_RETRY (8) /* Retry request (ne_end_request ONLY) */
 #define NE_REDIRECT (9) /* See ne_redirect.h */
-#define NE_SOCKET (10) /* Socket error - WINSCP */
+#define NE_SOCKET (10) /* Socket error - FORK_BUILD */
 
 /* Opaque object representing a single HTTP request. */
 typedef struct ne_request_s ne_request;
@@ -94,7 +94,7 @@ void ne_set_request_body_provider(ne_request *req, ne_off_t length,
                                   ne_provide_body provider, void *userdata)
     ne_attribute((nonnull (1, 3)));
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 void ne_set_request_body_provider_pre(ne_request *req,
   ne_provide_body provider, void * ud);
 

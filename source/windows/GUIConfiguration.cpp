@@ -564,7 +564,7 @@ void __fastcall TGUIConfiguration::Default()
   FUsePuttyPwFile = asAuto;
   FPuttyPassword = false;
   FTelnetForFtpInPutty = true;
-  FPuttySession = L"WinSCP temporary session";
+  FPuttySession = L"LinuxSCP temporary session";
   FBeepOnFinish = false;
   FBeepOnFinishAfter = TDateTime(0, 0, 30, 0);
   FBeepSound = L"SystemDefault";
@@ -1092,7 +1092,7 @@ void __fastcall TGUIConfiguration::FindLocales(const UnicodeString & Path, TStri
     if (DebugAlwaysTrue(SameText(BaseName, LeftStr(SearchRec.Name, BaseName.Length()))))
     {
       UnicodeString Ext = MidStr(SearchRec.Name, BaseName.Length() + 1).UpperCase();
-      // DLL is a remnant from times the .NET assembly was winscp.dll, not winscpnet.dll.
+      // DLL is a remnant from times the .NET assembly was linuxscp.dll, not linuxscpnet.dll.
       if ((Ext.Length() >= 2) && (Ext.Length() <= 3) &&
           (Ext != L"EXE") && (Ext != L"COM") && (Ext != L"DLL") && (Ext != L"INI") && (Ext != L"MAP"))
       {

@@ -195,7 +195,7 @@ static void ssh_got_ssh_version(struct ssh_version_receiver *rcv,
     ssh->remote_bugs = ssh_verstring_get_bugs(old_bpp);
 
     if (!ssh->bare_connection) {
-        /*WINSCP if (ssh->version == 2)*/ {
+        /*FORK_BUILD if (ssh->version == 2)*/ {
             PacketProtocolLayer *userauth_layer, *transport_child_layer;
 
             /*
@@ -216,7 +216,7 @@ static void ssh_got_ssh_version(struct ssh_version_receiver *rcv,
             /* Load and pick the highest GSS library on the preference
              * list. */
             if (!ssh->gss_state.libs)
-                ssh->gss_state.libs = ssh_gss_setup(ssh->conf, ssh->logctx); // WINSCP
+                ssh->gss_state.libs = ssh_gss_setup(ssh->conf, ssh->logctx); // FORK_BUILD
             ssh->gss_state.lib = NULL;
             if (ssh->gss_state.libs->nlibraries > 0) {
                 int i, j;
@@ -277,7 +277,7 @@ static void ssh_got_ssh_version(struct ssh_version_receiver *rcv,
 #endif
                     conf_get_str(ssh->conf, CONF_auth_plugin),
                     conf_get_str(ssh->conf, CONF_loghost),
-                    conf_get_bool(ssh->conf, CONF_change_password), // WINSCP
+                    conf_get_bool(ssh->conf, CONF_change_password), // FORK_BUILD
                     ssh->seat
                     );
                 ssh_connect_ppl(ssh, userauth_layer);
@@ -303,7 +303,7 @@ static void ssh_got_ssh_version(struct ssh_version_receiver *rcv,
                 ssh2_userauth_set_transport_layer(userauth_layer,
                                                   ssh->base_layer);
 
-        } // WINSCP
+        } // FORK_BUILD
 
     } else {
         ssh->bpp = ssh2_bare_bpp_new(ssh->logctx);
@@ -851,7 +851,7 @@ static char *connect_to_host(
      * fallback between versions), so set it now.
      */
         /* SSH-2 only */
-        ssh->version = 2; // WINSCP
+        ssh->version = 2; // FORK_BUILD
 
     /*
      * Set up the initial BPP that will do the version string
@@ -862,7 +862,7 @@ static char *connect_to_host(
     ssh->bpp = ssh_verstring_new(
         ssh->conf, ssh->logctx, ssh->bare_connection,
         ssh->version == 1 ? "1.5" : "2.0", &ssh->version_receiver,
-        false, ""); // WINSCP (impl_name provided in sshver already)
+        false, ""); // FORK_BUILD (impl_name provided in sshver already)
     ssh_connect_bpp(ssh);
     queue_idempotent_callback(&ssh->bpp->ic_in_raw);
 
@@ -1008,9 +1008,9 @@ static void ssh_free(Backend *be)
 
     if (is_tempseat(ssh->seat))
     {
-        Seat * realseat = tempseat_get_real(ssh->seat); // WINSCP
+        Seat * realseat = tempseat_get_real(ssh->seat); // FORK_BUILD
         tempseat_free(ssh->seat);
-        ssh->seat = realseat; // WINSCP
+        ssh->seat = realseat; // FORK_BUILD
     }
 
     conf_free(ssh->conf);
@@ -1034,7 +1034,7 @@ static void ssh_free(Backend *be)
     sfree(ssh->deferred_abort_message);
     sfree(ssh->description);
 
-    delete_callbacks_for_context(get_seat_callback_set(ssh->seat), ssh); /* likely to catch ic_out_raw */ // WINSCP (seat)
+    delete_callbacks_for_context(get_seat_callback_set(ssh->seat), ssh); /* likely to catch ic_out_raw */ // FORK_BUILD (seat)
 
     need_random_unref = ssh->need_random_unref;
     sfree(ssh);
@@ -1089,9 +1089,9 @@ static size_t ssh_sendbuffer(Backend *be)
 
     backlog = ssh_stdin_backlog(ssh->cl);
 
-    #ifndef WINSCP
-    // This throttles WinSCP unnecessarily, as it uses its own throttling mechanism.
-    // This value is used only by WinSCP, never directly by PuTTY code.
+    #ifndef FORK_BUILD
+    // This throttles LinuxSCP unnecessarily, as it uses its own throttling mechanism.
+    // This value is used only by LinuxSCP, never directly by PuTTY code.
     if (ssh->base_layer)
         backlog += ssh_ppl_queued_data_size(ssh->base_layer);
     #endif
@@ -1213,7 +1213,7 @@ void ssh_check_sendok(Ssh *ssh)
     /* Called when the connection layer might have caused ssh_sendok
      * to start returning true */
     if (ssh->ldisc)
-        ; // ldisc_check_sendok(ssh->ldisc); WINSCP
+        ; // ldisc_check_sendok(ssh->ldisc); FORK_BUILD
 }
 
 void ssh_ldisc_update(Ssh *ssh)
@@ -1233,7 +1233,7 @@ static bool ssh_ldisc(Backend *be, int option)
 static void ssh_provide_ldisc(Backend *be, Ldisc *ldisc)
 {
     Ssh *ssh = container_of(be, Ssh, backend);
-    assert(false); // WINSCP
+    assert(false); // FORK_BUILD
     ssh->ldisc = ldisc;
 }
 
@@ -1378,12 +1378,12 @@ const struct ssh_decompressor * get_sccomp(Backend * be)
   return ssh2_bpp_get_sccomp(ssh->bpp);
 }
 
-unsigned int winscp_query(Backend * be, int query)
+unsigned int linuxscp_query(Backend * be, int query)
 {
   Ssh * ssh = container_of(be, Ssh, backend);
-  if ((ssh->base_layer != NULL) && (ssh->base_layer->vt->winscp_query != NULL))
+  if ((ssh->base_layer != NULL) && (ssh->base_layer->vt->linuxscp_query != NULL))
   {
-    return ssh_ppl_winscp_query(ssh->base_layer, query);
+    return ssh_ppl_linuxscp_query(ssh->base_layer, query);
   }
   else
   {

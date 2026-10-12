@@ -55,7 +55,7 @@
 #include "ne_internal.h"
 #include "ne_utils.h"
 #include "ne_privssl.h"
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #include "ne_private.h"
 #endif
 
@@ -282,14 +282,14 @@ void ne_ssl_cert_validity_time(const ne_ssl_certificate *cert,
 
 /* Check certificate identity per RFC 2818 and RFC 3280. */
 static int check_identity(const ne_ssl_certificate *server_cert,
-                          const char *hostname, /*WINSCP*/ const char * realhost, const ne_inet_addr *address,
+                          const char *hostname, /*FORK_BUILD*/ const char * realhost, const ne_inet_addr *address,
                           char **identity)
 {
     STACK_OF(GENERAL_NAME) *names;
     int match = 0, found = 0;
     X509 *cert = server_cert->subject;
 
-    if (realhost) hostname = realhost; // WINSCP
+    if (realhost) hostname = realhost; // FORK_BUILD
       else
     if (!hostname) hostname = "";
 
@@ -373,7 +373,7 @@ static int check_identity(const ne_ssl_certificate *server_cert,
         ne_buffer_destroy(cname);
     }
 
-    NE_DEBUG(match ? NE_DBG_SSL : NE_DBG_WINSCP_HTTP_DETAIL, "ssl: Identity match for '%s': %s\n",
+    NE_DEBUG(match ? NE_DBG_SSL : NE_DBG_FORK_HTTP_DETAIL, "ssl: Identity match for '%s': %s\n",
              hostname && *hostname ? hostname : "(no host)",
              match ? "good" : "bad");
     return match ? 0 : 1;
@@ -410,7 +410,7 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
     /* If there's no error, nothing to do here. */
     if (ok) return ok;
 
-    NE_DEBUG(NE_DBG_WINSCP_HTTP_DETAIL, "ssl: Verify callback @ %d => %d\n", depth, err);
+    NE_DEBUG(NE_DBG_FORK_HTTP_DETAIL, "ssl: Verify callback @ %d => %d\n", depth, err);
 
     /* Map the error code onto any of the exported cert validation
      * errors, if possible. */
@@ -442,7 +442,7 @@ static int verify_callback(int ok, X509_STORE_CTX *ctx)
 
     sslsock->failures |= failures;
 
-    NE_DEBUG(NE_DBG_WINSCP_HTTP_DETAIL, "ssl: Verify failures |= %d => %d\n", failures,
+    NE_DEBUG(NE_DBG_FORK_HTTP_DETAIL, "ssl: Verify failures |= %d => %d\n", failures,
              sslsock->failures);
     
     return 1;
@@ -454,13 +454,13 @@ ne_ssl_certificate *ne__ssl_make_chain(STACK_OF(X509) *chain)
     int n, count = sk_X509_num(chain);
     ne_ssl_certificate *top = NULL, *current = NULL;
     
-    NE_DEBUG(NE_DBG_WINSCP_HTTP_DETAIL, "Chain depth: %d\n", count);
+    NE_DEBUG(NE_DBG_FORK_HTTP_DETAIL, "Chain depth: %d\n", count);
 
     for (n = 0; n < count; n++) {
         ne_ssl_certificate *cert = ne_malloc(sizeof *cert);
         populate_cert(cert, X509_dup(sk_X509_value(chain, n)));
 #ifdef NE_DEBUGGING
-#ifndef WINSCP
+#ifndef FORK_BUILD
         if (ne_debug_mask & NE_DBG_SSL) {
             fprintf(ne_debug_stream, "Cert #%d:\n", n);
             X509_print_fp(ne_debug_stream, cert->subject);
@@ -500,7 +500,7 @@ int ne_ssl_check_certificate(ne_ssl_context *ctx, ne_socket *sock,
 
     /* Check certificate was issued to this server; pass URI of
      * server. */
-    ret = check_identity(cert, hostname, /*WINSCP*/ctx->realhost, address, NULL);
+    ret = check_identity(cert, hostname, /*FORK_BUILD*/ctx->realhost, address, NULL);
     if (ret < 0) {
         ne_sock_set_error(sock, _("Server certificate was missing commonName "
                                   "attribute in subject name"));
@@ -783,7 +783,7 @@ void ne_ssl_context_trustdefca(ne_ssl_context *ctx)
 #endif
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 void ne_ssl_set_certificates_storage(ne_session *sess, const char * filename)
 {
     SSL_CTX_load_verify_locations(sess->ssl_context->ctx, filename, 0);
@@ -882,7 +882,7 @@ static ne_ssl_client_cert *parse_client_cert(PKCS12 *p12)
     }
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 ne_ssl_client_cert * ne_ssl_clicert_create(X509 * cert, EVP_PKEY * pkey)
 {
     /* Copy from parse_client_cert */
@@ -1514,7 +1514,7 @@ void ne__ssl_exit(void)
 }
 
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 // see also CAsyncSslSocketLayer::PrintSessionInfo()
 const char * ne_ssl_get_version(ne_session *sess)

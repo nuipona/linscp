@@ -30,7 +30,7 @@
  *
  ************************************************************************** **/
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #include <curl/curl.h>
 #else
 #define CURLM void
@@ -53,7 +53,7 @@ S3Status S3_create_request_context_ex(S3RequestContext **requestContextReturn,
         return S3StatusOutOfMemory;
     }
     
-#ifdef WINSCP
+#ifdef FORK_BUILD
     memset(*requestContextReturn, 0, sizeof(S3RequestContext));
 #else
     if (curlm) {
@@ -88,7 +88,7 @@ S3Status S3_create_request_context(S3RequestContext **requestContextReturn)
 
 void S3_destroy_request_context(S3RequestContext *requestContext)
 {
-#ifndef WINSCP
+#ifndef FORK_BUILD
     // For each request in the context, remove curl handle, call back its done
     // method with 'interrupted' status
     Request *r = requestContext->requests, *rFirst = r;
@@ -110,7 +110,7 @@ void S3_destroy_request_context(S3RequestContext *requestContext)
 }
 
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 void S3_set_request_context_session_callback(S3RequestContext *requestContext,
                                              S3SessionCallback sessionCallback,

@@ -2,7 +2,7 @@
 using System;
 using Microsoft.Win32.SafeHandles;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     public enum ConsoleEvent { None, Print, Input, Choice, Title, Init, Progress, TransferOut, TransferIn }
 

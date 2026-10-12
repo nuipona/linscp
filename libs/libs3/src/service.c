@@ -139,12 +139,12 @@ static void completeCallback(S3Status requestStatus,
 void S3_list_service(S3Protocol protocol, const char *accessKeyId,
                      const char *secretAccessKey, const char *securityToken,
                      const char *hostName, const char *authRegion,
-                     int maxkeys, // WINSCP
+                     int maxkeys, // FORK_BUILD
                      S3RequestContext *requestContext,
                      int timeoutMs,
                      const S3ListServiceHandler *handler, void *callbackData)
 {
-    char queryParams[64]; // WINSCP
+    char queryParams[64]; // FORK_BUILD
     queryParams[0] = '\0';
 
     // Create and set up the callback data
@@ -169,7 +169,7 @@ void S3_list_service(S3Protocol protocol, const char *accessKeyId,
     string_buffer_initialize(data->bucketName);
     string_buffer_initialize(data->creationDate);
 
-    if (maxkeys) { // WINSCP 
+    if (maxkeys) { // FORK_BUILD 
         snprintf(queryParams, sizeof(queryParams), "max-keys=%d", maxkeys);
     }
 
@@ -186,7 +186,7 @@ void S3_list_service(S3Protocol protocol, const char *accessKeyId,
           securityToken,                              // securityToken
           authRegion },                               // authRegion
         0,                                            // key
-        queryParams[0] ? queryParams : 0,             // queryParams WINSCP
+        queryParams[0] ? queryParams : 0,             // queryParams FORK_BUILD
         0,                                            // subResource
         0,                                            // copySourceBucketName
         0,                                            // copySourceKey

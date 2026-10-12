@@ -64,7 +64,7 @@ void __fastcall TOptions::Add(UnicodeString Value)
           ValueDelimiter = Value[Index];
           break;
         }
-        // This is to treat /home/martin as parameter, not as switch.
+        // This is to treat /home/user as parameter, not as switch.
         else if ((Value[Index] == L'?') ||
                  IsLetter(Value[Index]) ||
                  ((Value[Index] == L'-') && (SwitchMark == L'-') && (Value[2] == L'-'))) // allow --puttygen-switches

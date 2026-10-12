@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 EXTERN OPENSSL_ia32cap_P
@@ -2094,13 +2094,13 @@ $L$SEH_end_rsaz_512_gather4:
 
 
 
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 64
 $L$inc:
  DD 0,0,1,1
  DD 2,2,2,2
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 section .text
 EXTERN __imp_RtlVirtualUnwind
@@ -2265,4 +2265,4 @@ DB 0x10,0x78,0x01,0x00
 DB 0x0b,0x68,0x00,0x00
 DB 0x07,0x01,0x15,0x00
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

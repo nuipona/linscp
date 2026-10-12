@@ -11,7 +11,7 @@
 # The one monster makefile better suits building in non-unix
 # environments.
 
-# The makefile was further modified for WinSCP build.
+# The makefile was further modified for LinuxSCP build.
 
 !include ../Makefile.inc
 
@@ -32,7 +32,7 @@ DEFINES=$(DEFINES);OPENSSL_SYS_WIN32
 DEFINES=$(DEFINES);OPENSSL_NO_CAMELLIA;OPENSSL_NO_RC5;OPENSSL_NO_MDC2;OPENSSL_NO_WHIRLPOOL
 DEFINES=$(DEFINES);OPENSSL_NO_SEED;OPENSSL_NO_CAPIENG;OPENSSL_NO_ENGINE
 DEFINES=$(DEFINES);OPENSSL_NO_QUIC;OPENSSL_NO_COMP;OPENSSL_NO_QLOG;OPENSSL_NO_DGRAM;OPENSSL_NO_TS
-DEFINES=$(DEFINES);WINSCP
+DEFINES=$(DEFINES);FORK_BUILD
 
 CFLAG=$(CFLAG) $(CFLAG_OPENSSL) -D$(DEFINES:;= -D)
 
@@ -65,7 +65,7 @@ ASM_ARG=-Ox -f elf64 -DNEAR
 ASM_ARG=-d__omf__ -f obj
 !endif
 
-ASM=$(BUILDTOOLS)\tools\nasm $(ASM_ARG) -DWINSCP
+ASM=$(BUILDTOOLS)\tools\nasm $(ASM_ARG) -DFORK_BUILD
 
 ######################################################
 # You should not need to touch anything below this point

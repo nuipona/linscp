@@ -14,7 +14,7 @@
 #include "FtpFileSystem.h"
 #include "SessionInfo.h"
 //---------------------------------------------------------------------------
-#define WM_INTERUPT_IDLE (WM_WINSCP_USER + 3)
+#define WM_INTERUPT_IDLE (WM_FORK_USER + 3)
 #define BATCH_INPUT_TIMEOUT 10000
 //---------------------------------------------------------------------------
 void TrimNewLine(UnicodeString & Str)
@@ -573,8 +573,8 @@ __fastcall TExternalConsole::TExternalConsole(
   if (DebugAlwaysTrue(Job != NULL))
   {
     AssignProcessToJobObject(Job, GetCurrentProcess());
-    // winscp.com/winscp.dll keeps the only reference to the job.
-    // once it gets closed (because winscp.com is forcefully terminated),
+    // linuxscp.com/linuxscp.dll keeps the only reference to the job.
+    // once it gets closed (because linuxscp.com is forcefully terminated),
     // we get terminated as well
     CloseHandle(Job);
   }
@@ -2157,7 +2157,7 @@ int TConsoleRunner::Run(
             FBatchScript = false;
             FScript->StartInteractive();
           }
-          Print(L"winscp> ");
+          Print(L"linuxscp> ");
           Result = DoInput(Command, true, 0, false);
         }
 
@@ -2272,9 +2272,9 @@ static void __fastcall RegisterSwitch(
 //---------------------------------------------------------------------------
 void __fastcall Usage(TConsole * Console)
 {
-  Console->PrintLine(FORMAT(L"WinSCP, %s", (Configuration->VersionStr)));
+  Console->PrintLine(FORMAT(L"LinuxSCP, %s", (Configuration->VersionStr)));
   UnicodeString Copyright =
-    ReplaceText(LoadStr(WINSCP_COPYRIGHT), L"©", L"(c)");
+    ReplaceText(LoadStr(LINUXSCP_COPYRIGHT), L"©", L"(c)");
   Console->PrintLine(Copyright);
   Console->PrintLine();
   Console->PrintLine(LoadStr(USAGE_SYNTAX_LABEL));
@@ -2891,7 +2891,7 @@ int __fastcall Console(TConsoleMode Mode)
   try
   {
     UnicodeString ConsoleInstance;
-    // First check for /consoleinstance as /console is always used by winscp.com
+    // First check for /consoleinstance as /console is always used by linuxscp.com
     if (Params->FindSwitch(L"consoleinstance", ConsoleInstance))
     {
       Configuration->Usage->Inc(L"ConsoleExternal");

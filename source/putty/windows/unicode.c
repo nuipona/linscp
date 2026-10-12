@@ -440,7 +440,7 @@ static const struct cp_list_item cp_list[] = {
     {0, 0}
 };
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 static void link_font(WCHAR *line_tbl, WCHAR *font_tbl, WCHAR attr);
 
@@ -519,7 +519,7 @@ static reverse_mapping *make_reverse_mapping_inner(
     return added;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 static void make_reverse_mapping(int codepage, const wchar_t *mapping)
 {
@@ -555,7 +555,7 @@ static reverse_mapping *get_reverse_mapping(int codepage)
     return make_reverse_mapping_inner(codepage, mapping);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 void init_ucs(Conf *conf, struct unicode_data *ucsdata)
 {

@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 global rsaz_1024_sqr_avx2
@@ -1832,7 +1832,7 @@ rsaz_avx2_eligible:
  DB 0F3h,0C3h ;repret
 
 
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 64
 $L$and_mask:
  DQ 0x1fffffff,0x1fffffff,0x1fffffff,0x1fffffff
@@ -1846,7 +1846,7 @@ $L$inc:
  DD 4,4,4,4,4,4,4,4
 section .text
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 ALIGN 64
 EXTERN __imp_RtlVirtualUnwind
@@ -1985,4 +1985,4 @@ DB 0x09,0x68,0x00,0x00
 DB 0x04,0x01,0x15,0x00
 DB 0x00,0xb3,0x00,0x00
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

@@ -73,7 +73,7 @@ static void InitialMultipartCompleteCallback
     free(mdata);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static void AbortMultipartUploadCompleteCallback
     (S3Status requestStatus, const S3ErrorDetails *s3ErrorDetails,
      void *callbackData)
@@ -95,7 +95,7 @@ static S3Status initialMultipartXmlCallback(const char *elementPath,
     if (data) {
         if (!strcmp(elementPath, "InitiateMultipartUploadResult/UploadId")) {
             string_buffer_append(mdata->upload_id,data, dataLen, fit);
-            if (!fit) // WINSCP
+            if (!fit) // FORK_BUILD
             {
                 return S3StatusUploadIdTooLong;
             }
@@ -167,8 +167,8 @@ void S3_abort_multipart_upload(S3BucketContext *bucketContext, const char *key,
                                const char *uploadId,
                                int timeoutMs,
                                S3AbortMultipartUploadHandler *handler,
-                               S3RequestContext *requestContext, // WINSCP
-                               void *callbackData) // WINSCP
+                               S3RequestContext *requestContext, // FORK_BUILD
+                               void *callbackData) // FORK_BUILD
 {
     char subResource[512];
     snprintf(subResource, 512, "uploadId=%s", uploadId);
@@ -197,13 +197,13 @@ void S3_abort_multipart_upload(S3BucketContext *bucketContext, const char *key,
         0,                                            // toS3Callback
         0,                                            // toS3CallbackTotalSize
         0,                                            // fromS3Callback
-        handler->responseHandler.completeCallback,    // completeCallback WINSCP
-        callbackData,                                 // callbackData WINSCP
+        handler->responseHandler.completeCallback,    // completeCallback FORK_BUILD
+        callbackData,                                 // callbackData FORK_BUILD
         timeoutMs                                     // timeoutMs
     };
 
     // Perform the request
-    request_perform(&params, requestContext); // WINSCP
+    request_perform(&params, requestContext); // FORK_BUILD
 }
 
 

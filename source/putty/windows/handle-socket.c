@@ -162,7 +162,7 @@ static void sk_handle_close(Socket *s)
     }
 
     #ifdef MPEXT
-    // WinSCP core uses do_select as signalization of connection up/down
+    // LinuxSCP core uses do_select as signalization of connection up/down
     do_select(hs->plug, INVALID_SOCKET, 0);
     #endif
 
@@ -391,7 +391,7 @@ Socket *make_handle_socket(HANDLE send_H, HANDLE recv_H, HANDLE stderr_H,
 {
     HandleSocket *hs;
     int flags = (overlapped ? HANDLE_FLAG_OVERLAPPED : 0);
-    struct callback_set * callback_set = get_callback_set(plug); // WINSCP
+    struct callback_set * callback_set = get_callback_set(plug); // FORK_BUILD
 
     hs = snew(HandleSocket);
     hs->sock.vt = &HandleSocket_sockvt;
@@ -405,19 +405,19 @@ Socket *make_handle_socket(HANDLE send_H, HANDLE recv_H, HANDLE stderr_H,
     psb_init(&hs->psb);
 
     hs->recv_H = recv_H;
-    hs->recv_h = handle_input_new(callback_set, hs->recv_H, handle_gotdata, hs, flags); // WINSCP
+    hs->recv_h = handle_input_new(callback_set, hs->recv_H, handle_gotdata, hs, flags); // FORK_BUILD
     hs->send_H = send_H;
-    hs->send_h = handle_output_new(callback_set, hs->send_H, handle_sentdata, hs, flags); // WINSCP
+    hs->send_h = handle_output_new(callback_set, hs->send_H, handle_sentdata, hs, flags); // FORK_BUILD
     hs->stderr_H = stderr_H;
-    hs->stderr_h = NULL; // WINSCP
+    hs->stderr_h = NULL; // FORK_BUILD
     if (hs->stderr_H)
-        hs->stderr_h = handle_input_new(callback_set, hs->stderr_H, handle_stderr, // WINSCP
+        hs->stderr_h = handle_input_new(callback_set, hs->stderr_H, handle_stderr, // FORK_BUILD
                                         hs, flags);
 
     hs->defer_close = hs->deferred_close = false;
 
     #ifdef MPEXT
-    // WinSCP core uses do_select as signalization of connection up/down
+    // LinuxSCP core uses do_select as signalization of connection up/down
     do_select(plug, INVALID_SOCKET, 1);
     #endif
 
@@ -549,7 +549,7 @@ void setup_handle_socket(Socket *s, HANDLE send_H, HANDLE recv_H,
     hs->defer_close = hs->deferred_close = false;
 
     #ifdef MPEXT
-    // WinSCP core uses do_select as signalization of connection up/down
+    // LinuxSCP core uses do_select as signalization of connection up/down
     do_select(hs->plug, INVALID_SOCKET, 1);
     #endif
 

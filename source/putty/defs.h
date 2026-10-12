@@ -11,7 +11,7 @@
 #ifndef PUTTY_DEFS_H
 #define PUTTY_DEFS_H
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 #define HAVE_AES_NI 1
 #define HAVE_SHA_NI 0 // to be enabled
 #define HAVE_CLMUL 0 // to be enabled
@@ -25,14 +25,14 @@
 #define HAVE_STRTOUMAX 1
 #define HAVE_ADDDLLDIRECTORY 1
 #define HAVE_GETNAMEDPIPECLIENTPROCESSID 1
-#define HAVE_AFUNIX_H 0 // maybe have, but we are not using them in WINSCP anyway
+#define HAVE_AFUNIX_H 0 // maybe have, but we are not using them in FORK_BUILD anyway
 #define HAVE_COUNTOF 0 // have, but it's implementation does not support non-compile-time constant arrays
 #define SSH 1
 #define OTHERBACKENDS 0
 #define SERIAL 0
 #endif
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 #ifdef NDEBUG
 /*
  * PuTTY is a security project, so assertions are important - if an
@@ -265,7 +265,7 @@ struct unicode_data;
     TYPECHECK(object == &((type *)0)->field,                            \
               ((type *)(((char *)(object)) - offsetof(type, field))))
 
-#undef NORETURN // WINSCP
+#undef NORETURN // FORK_BUILD
 #if defined __GNUC__ || defined __clang__
 #define NORETURN __attribute__((__noreturn__))
 #elif defined _MSC_VER

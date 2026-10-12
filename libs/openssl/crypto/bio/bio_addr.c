@@ -21,7 +21,7 @@
  */
 #undef UNICODE
 
-#if defined(WINSCP) && defined(_WIN64) && defined(_DEBUG)
+#if defined(FORK_BUILD) && defined(_WIN64) && defined(_DEBUG)
 #ifdef gai_strerrorA
 #error gai_strerrorA already defined
 #endif

@@ -84,7 +84,7 @@ object AboutDialog: TAboutDialog
       Caption = 'Version 2.0.0 (Build 12) XX'
       ShowAccelChar = False
     end
-    object WinSCPCopyrightLabel: TLabel
+    object LinuxSCPCopyrightLabel: TLabel
       Left = 62
       Top = 58
       Width = 197
@@ -97,7 +97,7 @@ object AboutDialog: TAboutDialog
       Top = 104
       Width = 305
       Height = 15
-      Caption = 'To send comments and report bugs use support forum at:'
+      Caption = 'To report bugs or request a feature, open an issue at:'
       ShowAccelChar = False
     end
     object Label3: TLabel
@@ -128,7 +128,7 @@ object AboutDialog: TAboutDialog
       Top = 76
       Width = 143
       Height = 19
-      Caption = 'http://XXXXXXwinscp.net/'
+      Caption = 'https://github.com/nuipona/linuxscp'
       TabOrder = 0
       TabStop = True
     end
@@ -137,7 +137,7 @@ object AboutDialog: TAboutDialog
       Top = 122
       Width = 167
       Height = 19
-      Caption = 'http://XXXXwinscp.net/forum/'
+      Caption = 'https://github.com/nuipona/linuxscp/issues'
       TabOrder = 1
       TabStop = True
     end

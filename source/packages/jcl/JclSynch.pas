@@ -146,21 +146,21 @@ type
   TJclCriticalSectionEx = class(TJclCriticalSection)
   private
     FSpinCount: Cardinal;
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     function GetSpinCount: Cardinal;
     procedure SetSpinCount(const Value: Cardinal);
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
   public
     constructor Create; override;
     constructor CreateEx(SpinCount: Cardinal; NoFailEnter: Boolean); virtual;
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     class function GetSpinTimeOut: Cardinal;
     class procedure SetSpinTimeOut(const Value: Cardinal);
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
     function TryEnter: Boolean;
-    {$IFNDEF WINSCP}
+    {$IFNDEF FORK_BUILD}
     property SpinCount: Cardinal read GetSpinCount write SetSpinCount;
-    {$ENDIF ~WINSCP}
+    {$ENDIF ~FORK_BUILD}
   end;
 
   TJclEvent = class(TJclDispatcherObject)
@@ -209,7 +209,7 @@ type
     RecursionCount: Integer; // number of times the optex is owned, 0 if free
   end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
   TJclOptex = class(TObject)
   private
@@ -233,7 +233,7 @@ type
     property UniProcess: Boolean read GetUniProcess;
   end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
   TMrewPreferred = (mpReaders, mpWriters, mpEqual);
 
@@ -374,8 +374,8 @@ uses
   {$ELSE ~HAS_UNITSCOPE}
   SysUtils,
   {$ENDIF ~HAS_UNITSCOPE}
-  {$IFNDEF WINSCP}JclLogic, JclRegistry,{$ELSE}Math,{$ENDIF ~WINSCP} JclResources,
-  {$IFNDEF WINSCP}JclSysInfo,{$ENDIF ~WINSCP} JclStrings;
+  {$IFNDEF FORK_BUILD}JclLogic, JclRegistry,{$ELSE}Math,{$ENDIF ~FORK_BUILD} JclResources,
+  {$IFNDEF FORK_BUILD}JclSysInfo,{$ENDIF ~FORK_BUILD} JclStrings;
 
 const
   RegSessionManager = {HKLM\} 'SYSTEM\CurrentControlSet\Control\Session Manager';
@@ -916,7 +916,7 @@ begin
     raise EJclCriticalSectionError.CreateRes(@RsSynchInitCriticalSection);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 function TJclCriticalSectionEx.GetSpinCount: Cardinal;
 begin
   // Spinning only makes sense on multiprocessor systems. On a single processor
@@ -945,7 +945,7 @@ begin
   RegWriteInteger(HKEY_LOCAL_MACHINE, RegSessionManager, RegCritSecTimeout,
     Integer(Value));
 end;
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 { TODO: Use RTLD version of TryEnterCriticalSection }
 function TJclCriticalSectionEx.TryEnter: Boolean;
@@ -1114,7 +1114,7 @@ begin
   Result := {$IFDEF HAS_UNITSCOPE}Winapi.{$ENDIF}Windows.ReleaseMutex(FHandle);
 end;
 
-{$IFNDEF WINSCP}
+{$IFNDEF FORK_BUILD}
 
 //=== { TJclOptex } ==========================================================
 
@@ -1254,7 +1254,7 @@ begin
   Result := ThreadOwnsOptex;
 end;
 
-{$ENDIF ~WINSCP}
+{$ENDIF ~FORK_BUILD}
 
 //=== { TJclMultiReadExclusiveWrite } ========================================
 

@@ -2,7 +2,7 @@ default rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
-section .text align=256 ; WINSCP (removed code tag)
+section .text align=256 ; FORK_BUILD (removed code tag)
 
 
 EXTERN asm_AES_encrypt
@@ -2627,7 +2627,7 @@ $L$xts_dec_epilogue:
 
 
 
-section .rodata align=256 ; WINSCP (rodata)
+section .rodata align=256 ; FORK_BUILD (rodata)
 ALIGN 64
 _bsaes_const:
 $L$M0ISR:
@@ -2687,7 +2687,7 @@ DB 32,69,109,105,108,105,97,32,75,195,164,115,112,101,114,44
 DB 32,80,101,116,101,114,32,83,99,104,119,97,98,101,44,32
 DB 65,110,100,121,32,80,111,108,121,97,107,111,118,0
 
-%ifndef WINSCP
+%ifndef FORK_BUILD
 
 EXTERN __imp_RtlVirtualUnwind
 
@@ -2828,4 +2828,4 @@ DB 9,0,0,0
  DD $L$xts_dec_tail wrt ..imagebase
  DD 0
 
-%endif ; WINSCP
+%endif ; FORK_BUILD

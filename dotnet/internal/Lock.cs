@@ -1,7 +1,7 @@
 ﻿using System;
 using System.Threading;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     public class Lock
     {

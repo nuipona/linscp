@@ -11,11 +11,11 @@
 #define BYTEORDER 1234
 
 /* Define to 1 if you have the `arc4random' function. */
-// WINSCP
+// FORK_BUILD
 /* #define HAVE_ARC4RANDOM 1 */
 
 /* Define to 1 if you have the `arc4random_buf' function. */
-// WINSCP
+// FORK_BUILD
 /* #undef HAVE_ARC4RANDOM_BUF */
 
 /* define if the compiler supports basic C++11 syntax */

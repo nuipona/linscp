@@ -626,7 +626,7 @@ static void share_remove_channel(struct ssh_sharing_connstate *cs,
     sfree(chan);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 static struct share_xchannel *share_add_xchannel(
     struct ssh_sharing_connstate *cs, unsigned upstream_id, unsigned server_id)
 {
@@ -1094,7 +1094,7 @@ static void share_xchannel_failure(struct ssh_sharing_connstate *cs,
     share_dead_xchannel_respond(cs, xc);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 void share_setup_x11_channel(ssh_sharing_connstate *cs, share_channel *chan,
                              unsigned upstream_id, unsigned server_id,
                              unsigned server_currwin, unsigned server_maxpkt,
@@ -1625,7 +1625,7 @@ static void share_got_pkt_from_downstream(struct ssh_sharing_connstate *cs,
                 break;
             }
 
-            #ifndef WINSCP
+            #ifndef FORK_BUILD
             /*
              * Another thing we treat specially is X11 forwarding
              * requests. For these, we have to make up another set of

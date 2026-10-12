@@ -587,7 +587,7 @@ void __fastcall TSecureShell::Init()
       // (see comment in putty revision 8110)
       // It seems that we do not need to do it.
 
-      while (!winscp_query(FBackendHandle, WINSCP_QUERY_MAIN_CHANNEL))
+      while (!linuxscp_query(FBackendHandle, FORK_QUERY_MAIN_CHANNEL))
       {
         if (Configuration->ActualLogProtocol >= 1)
         {
@@ -628,9 +628,9 @@ struct callback_set * TSecureShell::GetCallbackSet()
 //---------------------------------------------------------------------------
 UnicodeString TSecureShell::ConvertFromPutty(const char * Str, size_t Length)
 {
-  size_t BomLength = std::size(WINSCP_BOM) - 1;
+  size_t BomLength = std::size(FORK_BOM) - 1;
   if ((Length >= BomLength) &&
-      (strncmp(Str, WINSCP_BOM, BomLength) == 0))
+      (strncmp(Str, FORK_BOM, BomLength) == 0))
   {
     return UTF8ArrayToString(Str + BomLength, SizeToIntChecked(Length - BomLength - 1));
   }
@@ -1766,7 +1766,7 @@ void __fastcall TSecureShell::Close()
   FClosed = true;
 
   // Without main channel SS_EOF is ignored and would get stuck waiting for exit code.
-  if ((backend_exitcode(FBackendHandle) < 0) && winscp_query(FBackendHandle, WINSCP_QUERY_MAIN_CHANNEL))
+  if ((backend_exitcode(FBackendHandle) < 0) && linuxscp_query(FBackendHandle, FORK_QUERY_MAIN_CHANNEL))
   {
     // this is particularly necessary when using local proxy command
     // (e.g. plink), otherwise it hangs in sk_localproxy_close
@@ -2082,10 +2082,10 @@ bool __fastcall TSecureShell::EventSelectLoop(unsigned int MSec, bool ReadEventR
         // 1) Check for changes in our pending buffer - wait criteria in Receive()
         int PrevDataLen = (-static_cast<int>(OutLen) + static_cast<int>(PendLen));
         // 2) Changes in session state - wait criteria in Init()
-        unsigned int HadMainChannel = winscp_query(FBackendHandle, WINSCP_QUERY_MAIN_CHANNEL);
+        unsigned int HadMainChannel = linuxscp_query(FBackendHandle, FORK_QUERY_MAIN_CHANNEL);
         if (run_toplevel_callbacks(GetCallbackSet()) &&
             (((-static_cast<int>(OutLen) + static_cast<int>(PendLen)) > PrevDataLen) ||
-             (HadMainChannel != winscp_query(FBackendHandle, WINSCP_QUERY_MAIN_CHANNEL))))
+             (HadMainChannel != linuxscp_query(FBackendHandle, FORK_QUERY_MAIN_CHANNEL))))
         {
           // Note that we still may process new network event now
           Result = true;
@@ -2201,7 +2201,7 @@ void __fastcall TSecureShell::Idle(unsigned int MSec)
 {
   noise_regular();
 
-  winscp_query(FBackendHandle, WINSCP_QUERY_TIMER);
+  linuxscp_query(FBackendHandle, FORK_QUERY_TIMER);
 
   // if we are actively waiting for data in WaitForData,
   // do not read here, otherwise we swallow read event and never wake
@@ -2232,7 +2232,7 @@ unsigned long __fastcall TSecureShell::MaxPacketSize()
     UpdateSessionInfo();
   }
 
-  return winscp_query(FBackendHandle, WINSCP_QUERY_REMMAXPKT);
+  return linuxscp_query(FBackendHandle, FORK_QUERY_REMMAXPKT);
 }
 //---------------------------------------------------------------------------
 UnicodeString __fastcall TSecureShell::FormatKeyStr(UnicodeString KeyStr)

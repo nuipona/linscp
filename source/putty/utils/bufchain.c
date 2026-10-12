@@ -14,7 +14,7 @@
 #include "defs.h"
 #include "misc.h"
 
-/* WINSCP
+/* FORK_BUILD
 * Default granule of 512 leads to low performance.
 */
 #define BUFFER_MIN_GRANULE  512*2*32

@@ -12,7 +12,7 @@
 #include "security-api.h"
 #include "cryptoapi.h"
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 
 #include <puttyexp.h>
 
@@ -150,7 +150,7 @@ static void wm_copydata_agent_query(strbuf *query, void **out, int *outlen)
 Socket *agent_connect(Plug *plug)
 {
     char *pipename = agent_named_pipe_name();
-    Socket *s = new_named_pipe_client(pipename, plug, agent_allow_system()); // WINSCP
+    Socket *s = new_named_pipe_client(pipename, plug, agent_allow_system()); // FORK_BUILD
     sfree(pipename);
     return s;
 }
@@ -223,7 +223,7 @@ static size_t named_pipe_agent_gotdata(
 
 static agent_pending_query *named_pipe_agent_query(
     strbuf *query, void **out, int *outlen,
-    void (*callback)(void *, void *, int), void *callback_ctx, struct callback_set * callback_set) // WINSCP
+    void (*callback)(void *, void *, int), void *callback_ctx, struct callback_set * callback_set) // FORK_BUILD
 {
     agent_pending_query *pq = NULL;
     char *err = NULL, *pipename = NULL;
@@ -231,7 +231,7 @@ static agent_pending_query *named_pipe_agent_query(
     HANDLE pipehandle;
 
     pipename = agent_named_pipe_name();
-    pipehandle = connect_to_named_pipe(pipename, &err, agent_allow_system()); // WINSCP
+    pipehandle = connect_to_named_pipe(pipename, &err, agent_allow_system()); // FORK_BUILD
     if (pipehandle == INVALID_HANDLE_VALUE)
         goto failure;
 
@@ -271,7 +271,7 @@ static agent_pending_query *named_pipe_agent_query(
     }
 
     pq = snew(agent_pending_query);
-    pq->handle = handle_input_new(callback_set, pipehandle, named_pipe_agent_gotdata, pq, 0); // WINSCP
+    pq->handle = handle_input_new(callback_set, pipehandle, named_pipe_agent_gotdata, pq, 0); // FORK_BUILD
     pq->os_handle = pipehandle;
     pipehandle = INVALID_HANDLE_VALUE;  /* prevent it being closed below */
     pq->response = strbuf_new_nm();
@@ -305,10 +305,10 @@ void agent_cancel_query(agent_pending_query *pq)
 
 agent_pending_query *agent_query(
     strbuf *query, void **out, int *outlen,
-    void (*callback)(void *, void *, int), void *callback_ctx, struct callback_set * callback_set) // WINSCP
+    void (*callback)(void *, void *, int), void *callback_ctx, struct callback_set * callback_set) // FORK_BUILD
 {
     agent_pending_query *pq = named_pipe_agent_query(
-        query, out, outlen, callback, callback_ctx, callback_set); // WINSCP
+        query, out, outlen, callback, callback_ctx, callback_set); // FORK_BUILD
     if (pq || *out)
         return pq;
 

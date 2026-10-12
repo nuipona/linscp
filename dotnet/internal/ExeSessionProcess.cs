@@ -18,7 +18,7 @@ using System.ComponentModel;
 using System.Security.Cryptography;
 using System.Linq;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     internal class ExeSessionProcess : IDisposable
     {
@@ -179,7 +179,7 @@ namespace WinSCP
                     _process.StartInfo.LoadUserProfile = true;
 
                     // Without granting both window station and desktop access permissions,
-                    // WinSCP process aborts with C0000142 (DLL Initialization Failed) error,
+                    // LinuxSCP process aborts with C0000142 (DLL Initialization Failed) error,
                     // when "running as user"
                     _logger.WriteLine("Granting access to window station");
                     try
@@ -826,7 +826,7 @@ namespace WinSCP
                 int timeout;
 
                 #if DEBUG
-                // in debug build, we expect the winscp.exe to run in tracing mode, being very slow
+                // in debug build, we expect the linuxscp.exe to run in tracing mode, being very slow
                 timeout = 10000;
                 #else
                 timeout = 2000;
@@ -975,14 +975,14 @@ namespace WinSCP
             {
                 programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             }
-            return Path.Combine(programFiles, "WinSCP");
+            return Path.Combine(programFiles, "LinuxSCP");
         }
 
 #if !NETSTANDARD
         private static string GetInstallationPath(RegistryHive hive)
         {
             RegistryKey baseKey = RegistryKey.OpenBaseKey(hive, RegistryView.Registry32);
-            RegistryKey key = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\winscp3_is1");
+            RegistryKey key = baseKey.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\linuxscp3_is1");
             string result = (key != null) ? (string)key.GetValue("Inno Setup: App Path") : null;
             return result;
         }
@@ -1233,7 +1233,7 @@ namespace WinSCP
                     {
                         try
                         {
-                            string eventName = string.Format(CultureInfo.InvariantCulture, "WinSCPCallstack{0}", _process.Id);
+                            string eventName = string.Format(CultureInfo.InvariantCulture, "LinuxSCPCallstack{0}", _process.Id);
                             using (EventWaitHandle ev = EventWaitHandle.OpenExisting(eventName))
                             {
                                 _logger.WriteLine("Setting event {0}", eventName);
@@ -1275,12 +1275,12 @@ namespace WinSCP
         }
 
         private const int MaxAttempts = 10;
-        private const string ConsoleMapping = "WinSCPConsoleMapping";
-        private const string ConsoleEventRequest = "WinSCPConsoleEventRequest";
-        private const string ConsoleEventResponse = "WinSCPConsoleEventResponse";
-        private const string ConsoleEventCancel = "WinSCPConsoleEventCancel";
-        private const string ConsoleJob = "WinSCPConsoleJob";
-        private const string ExeExecutableFileName = "winscp.exe";
+        private const string ConsoleMapping = "LinuxSCPConsoleMapping";
+        private const string ConsoleEventRequest = "LinuxSCPConsoleEventRequest";
+        private const string ConsoleEventResponse = "LinuxSCPConsoleEventResponse";
+        private const string ConsoleEventCancel = "LinuxSCPConsoleEventCancel";
+        private const string ConsoleJob = "LinuxSCPConsoleJob";
+        private const string ExeExecutableFileName = "linuxscp.exe";
 
         private Process _process;
         private readonly object _lock = new object();

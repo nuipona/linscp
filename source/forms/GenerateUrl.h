@@ -30,7 +30,7 @@ __published:
   TTabSheet *AssemblySheet;
   TCheckBox *UserNameCheck;
   TCheckBox *HostKeyCheck;
-  TCheckBox *WinSCPSpecificCheck;
+  TCheckBox *LinuxSCPSpecificCheck;
   TCheckBox *SaveExtensionCheck;
   TCheckBox *RemoteDirectoryCheck;
   TCheckBox *PasswordCheck;

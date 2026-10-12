@@ -201,7 +201,7 @@ const char *S3_get_status_name(S3Status status)
         handlecase(HttpErrorNotFound);
         handlecase(HttpErrorConflict);
         handlecase(HttpErrorUnknown);
-        handlecase(ErrorAuthorizationHeaderMalformed); // WINSCP (was missing)
+        handlecase(ErrorAuthorizationHeaderMalformed); // FORK_BUILD (was missing)
     }
 
     return "Unknown";

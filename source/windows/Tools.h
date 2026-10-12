@@ -47,7 +47,7 @@ void ValidateMask(const UnicodeString & Mask, int ForceDirectoryMasks = -1);
 void __fastcall ValidateMaskEdit(TComboBox * Edit);
 void __fastcall ValidateMaskEdit(TEdit * Edit);
 void __fastcall ValidateMaskEdit(TMemo * Edit, bool Directory);
-bool __fastcall IsWinSCPUrl(const UnicodeString & Url);
+bool __fastcall IsLinuxSCPUrl(const UnicodeString & Url);
 UnicodeString __fastcall SecureUrl(const UnicodeString & Url);
 void ShellOpen(const UnicodeString & Param);
 void __fastcall OpenBrowser(UnicodeString URL);

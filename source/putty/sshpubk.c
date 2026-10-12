@@ -91,7 +91,7 @@ LoadFileStatus lf_load_fp(LoadedFile *lf, FILE *fp)
 
 LoadFileStatus lf_load(LoadedFile *lf, const Filename *filename)
 {
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     const char * data = in_memory_key_data(filename);
     if (data != NULL)
     {
@@ -156,7 +156,7 @@ LoadedFile *lf_load_keyfile(const Filename *filename, const char **errptr)
     return lf;
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 /* This API does not support in-memory keys like lf_load, so make sure it's not in use */
 LoadedFile *lf_load_keyfile_fp(FILE *fp, const char **errptr)
 {
@@ -175,7 +175,7 @@ static bool expect_signature(BinarySource *src, ptrlen realsig)
     return !get_err(src) && ptrlen_eq_ptrlen(realsig, thissig);
 }
 
-#ifndef WINSCP
+#ifndef FORK_BUILD
 
 static int rsa1_load_s_internal(BinarySource *src, RSAKey *key, bool pub_only,
                                 char **commentptr, const char *passphrase,
@@ -1190,7 +1190,7 @@ static bool rfc4716_loadpub(BinarySource *src, char **algorithm,
     return false;
 }
 
-/*WINSCP static*/ bool openssh_loadpub(BinarySource *src, char **algorithm,
+/*FORK_BUILD static*/ bool openssh_loadpub(BinarySource *src, char **algorithm,
                             BinarySink *bs,
                             char **commentptr, const char **errorstr)
 {
@@ -1967,7 +1967,7 @@ static int key_type_s_internal(BinarySource *src)
         return SSH_KEYTYPE_SSH1_PUBLIC;
 
     BinarySource_REWIND(src);
-    if (find_pubkey_alg_len(get_nonchars(src, " \n")) != NULL && // WINSCP test fix
+    if (find_pubkey_alg_len(get_nonchars(src, " \n")) != NULL && // FORK_BUILD test fix
         get_chars(src, " ").len == 1 &&
         get_chars(src, "0123456789ABCDEFGHIJKLMNOPQRSTUV"
                   "WXYZabcdefghijklmnopqrstuvwxyz+/=").len > 0 &&

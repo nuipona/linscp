@@ -1,6 +1,6 @@
 ﻿using System.Runtime.InteropServices;
 
-namespace WinSCP
+namespace LinuxSCP
 {
     [ComVisible(true)]
     [Guid("A1334E32-4EDF-4B51-A069-DA3FF1B19A5A")]

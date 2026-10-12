@@ -37,32 +37,32 @@ static unsigned long next_noise_collection;
 
 void random_add_noise(NoiseSourceId source, const void *noise, int length)
 {
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     if (!random_active)
         return;
 
     prng_add_entropy(global_prng, source, make_ptrlen(noise, length));
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 static void random_timer(void *ctx, unsigned long now)
 {
-    unreachable_internal(); // WINSCP
-    WINSCP_PUTTY_SECTION_ENTER;
+    unreachable_internal(); // FORK_BUILD
+    FORK_PUTTY_SECTION_ENTER;
     if (random_active > 0 && now == next_noise_collection) {
         noise_regular();
         next_noise_collection =
             schedule_timer(NOISE_REGULAR_INTERVAL, random_timer,
                            &random_timer_ctx);
     }
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 static void random_seed_callback(void *noise, int length)
 {
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     put_data(global_prng, noise, length);
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 static void random_create(const ssh_hashalg *hashalg)
@@ -100,38 +100,38 @@ void random_save_seed(void)
 
 void random_ref(void)
 {
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     if (!random_active++) {
         enable_dit(); /* just in case main() forgot */
         random_create(&ssh_sha256);
     }
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 void random_setup_custom(const ssh_hashalg *hash)
 {
     unreachable_internal(); // used by PuTTYgen only
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     random_active++;
     random_create(hash);
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 void random_reseed(ptrlen seed)
 {
     unreachable_internal(); // used by PuTTYgen only
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     prng_seed_begin(global_prng);
     put_datapl(global_prng, seed);
     prng_seed_finish(global_prng);
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
-// Never called directly in WINSCP
+// Never called directly in FORK_BUILD
 void random_clear(void)
 {
     if (global_prng) {
-        #ifndef WINSCP
+        #ifndef FORK_BUILD
         // We control this on our own in PuttyFinalize()
         random_save_seed();
         #endif
@@ -144,29 +144,29 @@ void random_clear(void)
 
 void random_unref(void)
 {
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     assert(random_active > 0);
     if (--random_active == 0)
         random_clear();
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 void random_read(void *buf, size_t size)
 {
-    WINSCP_PUTTY_SECTION_ENTER;
+    FORK_PUTTY_SECTION_ENTER;
     assert(random_active > 0);
     prng_read(global_prng, buf, size);
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 void random_get_savedata(void **data, int *len)
 {
-    WINSCP_PUTTY_SECTION_ENTER; // though called from our finalizer, when the app is single threaded only
+    FORK_PUTTY_SECTION_ENTER; // though called from our finalizer, when the app is single threaded only
     void *buf = snewn(global_prng->savesize, char);
     random_read(buf, global_prng->savesize);
     *len = global_prng->savesize;
     *data = buf;
-    WINSCP_PUTTY_SECTION_LEAVE;
+    FORK_PUTTY_SECTION_LEAVE;
 }
 
 size_t random_seed_bits(void)

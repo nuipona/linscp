@@ -98,11 +98,11 @@ static void sk_proxy_close (Socket *s)
 {
     ProxySocket *ps = container_of(s, ProxySocket, sock);
 
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     if (ps->sub_socket != NULL)
     #endif
     sk_close(ps->sub_socket);
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     if (ps->proxy_addr != NULL)
     #endif
     sk_addr_free(ps->proxy_addr);
@@ -238,7 +238,7 @@ static void proxy_negotiate(ProxySocket *ps)
                                 ps->proxy_privport, ps->proxy_oobinline,
                                 ps->proxy_nodelay, ps->proxy_keepalive,
                                 &ps->plugimpl,
-                                #ifdef WINSCP
+                                #ifdef FORK_BUILD
                                 conf_get_int(ps->conf, CONF_connect_timeout), conf_get_int(ps->conf, CONF_sndbuf),
                                 conf_get_str(ps->conf, CONF_srcaddr)
                                 #endif
@@ -436,7 +436,7 @@ static SocketEndpointInfo *sk_proxy_endpoint_info(Socket *s, bool peer)
     if (peer)
         return NULL;
 
-    #ifdef WINSCP
+    #ifdef FORK_BUILD
     // if proxy is connected synchronously, we get here from sk_new even before ps->sub_socket is assigned
     if (ps->sub_socket == NULL) return NULL;
     #endif
@@ -568,7 +568,7 @@ Socket *new_connection(SockAddr *addr, const char *hostname,
 
         ps->sub_socket = NULL;
 
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         ps->proxy_addr = NULL;
         ps->pn = NULL;
         #endif
@@ -665,7 +665,7 @@ Socket *new_connection(SockAddr *addr, const char *hostname,
                                 ps->proxy_privport, ps->proxy_oobinline,
                                 ps->proxy_nodelay, ps->proxy_keepalive,
                                 &ps->plugimpl,
-                                #ifdef WINSCP
+                                #ifdef FORK_BUILD
                                 conf_get_int(conf, CONF_connect_timeout), conf_get_int(conf, CONF_sndbuf),
                                 conf_get_str(conf, CONF_srcaddr)
                                 #endif
@@ -682,7 +682,7 @@ Socket *new_connection(SockAddr *addr, const char *hostname,
 
     /* no proxy, so just return the direct socket */
     return sk_new(addr, port, privport, oobinline, nodelay, keepalive, plug,
-        #ifdef WINSCP
+        #ifdef FORK_BUILD
         conf_get_int(conf, CONF_connect_timeout), conf_get_int(conf, CONF_sndbuf),
         conf_get_str(conf, CONF_srcaddr)
         #endif
@@ -699,7 +699,7 @@ Socket *new_listener(const char *srcaddr, int port, Plug *plug,
     return sk_newlistener(srcaddr, port, plug, local_host_only, addressfamily);
 }
 
-#ifdef WINSCP
+#ifdef FORK_BUILD
 ProxySocket * get_proxy_plug_socket(Plug * p)
 {
     return container_of(p, ProxySocket, plugimpl);
