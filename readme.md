@@ -21,11 +21,21 @@ no third-party runtime libraries to install.
 
     sudo apt install build-essential dpkg-dev
 
+On Windows: Windows 10 (1803) or later with CMake and Visual Studio
+2022 or MinGW-w64. The resulting `linuxscp.exe` needs only the in-box
+`curl.exe` at run time (plus Python 3 for the GUI). See
+[`docs/windows.md`](docs/windows.md).
+
 ## Building
 
     make -C source/linux            # -> source/linux/build/linuxscp
     make -C source/linux check      # builds and runs the unit tests
     make -C source/linux clean
+
+On Windows (or via CMake on any platform):
+
+    windows\build.cmd               :: -> build-windows\Release\linuxscp.exe
+    cmake -S . -B build && cmake --build build   # Linux/CMake alternative
 
 To build a Debian package:
 

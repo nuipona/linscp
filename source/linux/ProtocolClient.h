@@ -41,6 +41,9 @@ public:
     static int Move(const SessionOptions & options, const std::string & fromPath,
         const std::string & toPath, std::string & error);
 
+    static int SetPermissions(const SessionOptions & options,
+        const std::string & remotePath, int permissions, std::string & error);
+
     static void FreeNames(LscpNames * names);
 };
 

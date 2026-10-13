@@ -1,0 +1,79 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux-make:
+    name: Linux (Makefile, supported build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run unit tests
+        run: make -C source/linux clean all check
+      - name: Smoke test
+        run: |
+          source/linux/build/linuxscp -version
+          source/linux/build/linuxscp -batch -command="echo ok; exit"
+
+  linux-cmake:
+    name: Linux (CMake)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        run: |
+          cmake -S . -B build
+          cmake --build build -j
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  windows-msvc:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure and build
+        run: |
+          cmake -S . -B build-windows -A x64
+          cmake --build build-windows --config Release
+      - name: Unit tests
+        run: ctest --test-dir build-windows -C Release --output-on-failure
+      - name: Smoke test console client
+        shell: cmd
+        run: |
+          build-windows\Release\linuxscp.exe -version
+          build-windows\Release\linuxscp.exe -batch -command="echo ok; exit"
+      - name: Smoke test GUI server
+        shell: pwsh
+        run: |
+          python -m py_compile source/gui/linuxscp_gui.py
+          $p = Start-Process python -ArgumentList "source/gui/linuxscp_gui.py","--port=18081" -PassThru -NoNewWindow
+          try {
+            Start-Sleep -Seconds 3
+            $status = Invoke-RestMethod -Uri "http://localhost:18081/api/status"
+            if (-not $status.binary) { throw "GUI did not report a core binary" }
+            $list = Invoke-RestMethod -Uri "http://localhost:18081/api/local/list?path=C:\"
+            if (-not $list.success) { throw "GUI local listing failed" }
+          } finally {
+            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          }
+
+  windows-mingw-cross:
+    name: Windows (MinGW cross-compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install MinGW-w64
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-mingw-w64-x86-64
+      - name: Configure and build
+        run: |
+          cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=windows/toolchain-mingw64.cmake
+          cmake --build build-win -j
+      - name: Check artifacts
+        run: |
+          test -f build-win/linuxscp.exe
+          test -f build-win/linuxscp-unittest.exe

@@ -12,12 +12,14 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <string>
 #include <vector>
-#include <unistd.h>
+#include <filesystem>
 
 #include "PathUtil.h"
 #include "LocalFs.h"
+#include "Platform.h"
 #include "Session.h"
 #include "Script.h"
 
@@ -64,6 +66,58 @@ void ReportFailure(const char * file, int line, const std::string & what)
 
 using namespace linuxscp;
 
+void SetEnvVar(const char * name, const char * value)
+{
+#if defined(_WIN32)
+    _putenv_s(name, value != NULL ? value : "");
+#else
+    if (value != NULL)
+    {
+        setenv(name, value, 1);
+    }
+    else
+    {
+        unsetenv(name);
+    }
+#endif
+}
+
+std::string MakeTempDirectory()
+{
+    std::error_code ec;
+    std::filesystem::path base = std::filesystem::temp_directory_path(ec);
+    if (ec)
+    {
+        return std::string();
+    }
+    for (int attempt = 0; attempt < 100; attempt++)
+    {
+        std::filesystem::path candidate = base /
+            ("linuxscp-unittest-" + std::to_string(attempt) + "-" +
+             std::to_string(static_cast<unsigned long>(time(NULL))));
+        if (std::filesystem::create_directory(candidate, ec))
+        {
+#if defined(_WIN32)
+            return candidate.u8string();
+#else
+            return candidate.string();
+#endif
+        }
+        ec.clear();
+    }
+    return std::string();
+}
+
+bool RemoveDirectoryQuiet(const std::string & path)
+{
+    std::error_code ec;
+#if defined(_WIN32)
+    return std::filesystem::remove(std::filesystem::u8path(path), ec) && !ec;
+#else
+    return std::filesystem::remove(std::filesystem::path(path), ec) && !ec;
+#endif
+}
+
 std::string Words(const std::vector<std::string> & words)
 {
     std::string result;
@@ -83,7 +137,16 @@ void TestSplitCommandLine()
         "[get][two words.txt][dest]");
     CHECK_EQ(Words(SplitCommandLine("get \"two words.txt\" dest")),
         "[get][two words.txt][dest]");
+#if defined(_WIN32)
+    /* A backslash is a path separator on Windows, never an escape:
+     * C:\dir\file.txt must survive word splitting untouched. */
+    CHECK_EQ(Words(SplitCommandLine("put C:\\dir\\file.txt .")),
+        "[put][C:\\dir\\file.txt][.]");
+    CHECK_EQ(Words(SplitCommandLine("get 'two words.txt' dest")),
+        "[get][two words.txt][dest]");
+#else
     CHECK_EQ(Words(SplitCommandLine("get a\\ b.txt")), "[get][a b.txt]");
+#endif
     /* An unterminated quote still yields the word read so far. */
     CHECK_EQ(Words(SplitCommandLine("get 'unterminated")), "[get][unterminated]");
     /* An empty quoted argument is a word of its own. */
@@ -138,30 +201,23 @@ void TestRemotePaths()
 
 void TestLocalPaths()
 {
-    const char * home = getenv("HOME");
-    if (home != NULL && home[0] != '\0')
+    std::string homeDir = HomeDirectory();
+    if (!homeDir.empty())
     {
-        const std::string homeDir(home);
         CHECK_EQ(ExpandTilde("~"), homeDir);
-        CHECK_EQ(ExpandTilde("~/docs"), homeDir + "/docs");
+        CHECK_EQ(ExpandTilde("~/docs"), JoinLocalPath(homeDir, "docs"));
         /* '~user' is deliberately not supported. */
         CHECK_EQ(ExpandTilde("~user"), "~user");
     }
-    CHECK_EQ(ExpandTilde("/tmp"), "/tmp");
     CHECK_EQ(ExpandTilde(""), "");
+#if !defined(_WIN32)
+    CHECK_EQ(ExpandTilde("/tmp"), "/tmp");
     const char * oldHomeValue = getenv("HOME");
     const bool hadHome = oldHomeValue != NULL;
     const std::string oldHome = hadHome ? oldHomeValue : "";
-    setenv("HOME", "/", 1);
+    SetEnvVar("HOME", "/");
     CHECK_EQ(ExpandTilde("~/docs"), "/docs");
-    if (hadHome)
-    {
-        setenv("HOME", oldHome.c_str(), 1);
-    }
-    else
-    {
-        unsetenv("HOME");
-    }
+    SetEnvVar("HOME", hadHome ? oldHome.c_str() : NULL);
 
     CHECK_EQ(LocalDirName("/tmp/file.txt"), "/tmp");
     CHECK_EQ(LocalDirName("file.txt"), ".");
@@ -173,10 +229,50 @@ void TestLocalPaths()
     CHECK_EQ(ResolveLocalPath("/home/user", "sub"), "/home/user/sub");
     CHECK_EQ(ResolveLocalPath("/home/user", "/etc"), "/etc");
     CHECK_EQ(ResolveLocalPath("/home/user", "."), "/home/user");
-    if (home != NULL && home[0] != '\0')
+    if (!homeDir.empty())
     {
-        CHECK_EQ(ResolveLocalPath("/tmp", "~/docs"), std::string(home) + "/docs");
+        CHECK_EQ(ResolveLocalPath("/tmp", "~/docs"), JoinLocalPath(homeDir, "docs"));
     }
+    CHECK_FALSE(IsLocalAbsolutePath("tmp/file"));
+    CHECK_TRUE(IsLocalAbsolutePath("/tmp"));
+#else
+    /* Drive-letter, rooted and UNC paths are absolute; drive-relative
+     * and plain relative paths are not. */
+    CHECK_TRUE(IsLocalAbsolutePath("C:\\dir\\file.txt"));
+    CHECK_TRUE(IsLocalAbsolutePath("C:/dir/file.txt"));
+    CHECK_TRUE(IsLocalAbsolutePath("\\\\server\\share\\file.txt"));
+    CHECK_TRUE(IsLocalAbsolutePath("\\dir\\file.txt"));
+    CHECK_FALSE(IsLocalAbsolutePath("C:file.txt"));
+    CHECK_FALSE(IsLocalAbsolutePath("dir\\file.txt"));
+
+    CHECK_EQ(LocalDirName("C:\\tmp\\file.txt"), "C:\\tmp");
+    CHECK_EQ(LocalDirName("C:\\file.txt"), "C:\\");
+    CHECK_EQ(LocalDirName("C:/tmp/file.txt"), "C:/tmp");
+    CHECK_EQ(LocalDirName("file.txt"), ".");
+    CHECK_EQ(LocalFileName("C:\\tmp\\file.txt"), "file.txt");
+    CHECK_EQ(LocalFileName("C:\\tmp\\"), "tmp");
+    CHECK_EQ(JoinLocalPath("C:\\tmp", "a.txt"), "C:\\tmp\\a.txt");
+    CHECK_EQ(JoinLocalPath("C:\\tmp\\", "a.txt"), "C:\\tmp\\a.txt");
+    CHECK_EQ(JoinLocalPath("C:\\tmp", "D:\\other.txt"), "D:\\other.txt");
+    CHECK_EQ(JoinLocalPath("C:\\tmp", "\\rooted.txt"), "C:\\rooted.txt");
+
+    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "sub"), "C:\\home\\user\\sub");
+    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "..\\other"), "C:\\home\\other");
+    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "D:\\etc"), "D:\\etc");
+    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "."), "C:\\home\\user");
+    /* Forward slashes are accepted and normalised. */
+    CHECK_EQ(ResolveLocalPath("C:/home/user", "sub"), "C:\\home\\user\\sub");
+
+    /* '~' follows %USERPROFILE% on Windows. */
+    const char * oldProfile = getenv("USERPROFILE");
+    const bool hadProfile = oldProfile != NULL;
+    const std::string savedProfile = hadProfile ? oldProfile : "";
+    SetEnvVar("USERPROFILE", "C:\\Users\\test");
+    CHECK_EQ(ExpandTilde("~"), "C:\\Users\\test");
+    CHECK_EQ(ExpandTilde("~\\docs"), "C:\\Users\\test\\docs");
+    CHECK_EQ(ExpandTilde("~/docs"), "C:\\Users\\test\\docs");
+    SetEnvVar("USERPROFILE", hadProfile ? savedProfile.c_str() : NULL);
+#endif
 }
 
 void TestMasks()
@@ -202,6 +298,46 @@ void TestMasks()
     CHECK_FALSE(MatchesMask("file.txt", "file.txtx"));
     CHECK_FALSE(MatchesMask("", "a"));
     CHECK_TRUE(MatchesMask("", ""));
+}
+
+void TestMaskCase()
+{
+    CHECK_TRUE(MatchesMaskInsensitive("*.TXT", "a.txt"));
+    CHECK_TRUE(MatchesMaskInsensitive("*.txt", "A.TxT"));
+    CHECK_FALSE(MatchesMaskInsensitive("*.txt", "a.tar"));
+    CHECK_FALSE(MatchesMask("*.TXT", "a.txt"));
+}
+
+void TestPlatformServices()
+{
+    /* Process capture returns the exit code and both streams. */
+    std::string out;
+    std::string err;
+#if defined(_WIN32)
+    std::string cmd = FindExecutableOnPath("cmd");
+    CHECK_TRUE(!cmd.empty());
+    if (!cmd.empty())
+    {
+        std::vector<std::string> args;
+        args.push_back(cmd);
+        args.push_back("/c");
+        args.push_back("echo hello-windows");
+        CHECK_TRUE(RunCapture(args, out, err) == 0);
+        CHECK_TRUE(out.find("hello-windows") != std::string::npos);
+    }
+#else
+    std::vector<std::string> args;
+    args.push_back("echo");
+    args.push_back("hello-posix");
+    CHECK_TRUE(RunCapture(args, out, err) == 0);
+    CHECK_TRUE(out.find("hello-posix") != std::string::npos);
+#endif
+    /* A missing program is a start failure, not a crash. */
+    std::vector<std::string> missing;
+    missing.push_back("linuxscp-no-such-program-xyz");
+    CHECK_TRUE(RunCapture(missing, out, err) == -1 || !err.empty() || out.empty());
+
+    CHECK_TRUE(!HomeDirectory().empty() || !ConfigDirectory().empty());
 }
 
 void TestFormatting()
@@ -346,14 +482,12 @@ void TestParseSiteUrl()
 
 void TestLocalFs()
 {
-    char dirTemplate[] = "/tmp/linuxscp-unittest.XXXXXX";
-    char * createdDir = mkdtemp(dirTemplate);
-    CHECK_TRUE(createdDir != NULL);
-    if (createdDir == NULL)
+    const std::string dir = MakeTempDirectory();
+    CHECK_TRUE(!dir.empty());
+    if (dir.empty())
     {
         return;
     }
-    const std::string dir(createdDir);
     std::string error;
 
     CHECK_TRUE(CreateLocalDirectory(dir, error));
@@ -407,7 +541,7 @@ void TestLocalFs()
     CHECK_TRUE(names.size() == 1);
     if (!names.empty())
     {
-        CHECK_EQ(names[0], dir + "/one.txt");
+        CHECK_EQ(names[0], JoinLocalPath(dir, "one.txt"));
     }
     names.clear();
     CHECK_TRUE(ExpandLocalWildcard(dir + "/*", names, error));
@@ -433,7 +567,7 @@ void TestLocalFs()
     CHECK_TRUE(RemoveLocalFile(dir + "/one.txt", error));
     CHECK_TRUE(RemoveLocalFile(dir + "/two.log", error));
     CHECK_EQ(error, "");
-    CHECK_TRUE(rmdir((dir + "/sub").c_str()) == 0);
+    CHECK_TRUE(RemoveDirectoryQuiet(dir + "/sub"));
 
     /* Recursive directory creation handles multiple missing parent directories. */
     CHECK_TRUE(CreateLocalDirectoryRecursive(dir + "/deep/nested/path", error));
@@ -441,11 +575,11 @@ void TestLocalFs()
     LocalFileInfo deepInfo = StatLocal(dir + "/deep/nested/path");
     CHECK_TRUE(deepInfo.exists);
     CHECK_TRUE(deepInfo.isDir);
-    CHECK_TRUE(rmdir((dir + "/deep/nested/path").c_str()) == 0);
-    CHECK_TRUE(rmdir((dir + "/deep/nested").c_str()) == 0);
-    CHECK_TRUE(rmdir((dir + "/deep").c_str()) == 0);
+    CHECK_TRUE(RemoveDirectoryQuiet(dir + "/deep/nested/path"));
+    CHECK_TRUE(RemoveDirectoryQuiet(dir + "/deep/nested"));
+    CHECK_TRUE(RemoveDirectoryQuiet(dir + "/deep"));
 
-    CHECK_TRUE(rmdir(dir.c_str()) == 0);
+    CHECK_TRUE(RemoveDirectoryQuiet(dir));
 }
 
 void TestScriptCommands()
@@ -493,6 +627,8 @@ int main()
     TestRemotePaths();
     TestLocalPaths();
     TestMasks();
+    TestMaskCase();
+    TestPlatformServices();
     TestFormatting();
     TestParseSiteUrl();
     TestLocalFs();

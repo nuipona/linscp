@@ -7,3 +7,9 @@ build-stamp
 debian/files
 debian/substvars
 debian/linuxscp/
+
+# CMake build output
+build/
+build-*/
+
+__pycache__/

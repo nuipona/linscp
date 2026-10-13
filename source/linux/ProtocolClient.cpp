@@ -1,5 +1,7 @@
 #include "ProtocolClient.h"
+#include "LocalFs.h"
 #include "PathUtil.h"
+#include "Platform.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -8,12 +10,6 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <errno.h>
 
 namespace linuxscp {
 
@@ -38,90 +34,108 @@ bool StartsWith(const std::string & text, const char * prefix)
     return text.size() >= len && text.compare(0, len, prefix) == 0;
 }
 
-int RunCommand(const std::vector<std::string> & args, std::string & outStr, std::string & errStr)
+char * DupString(const std::string & text)
 {
-    outStr.clear();
-    errStr.clear();
-
-    int outPipe[2];
-    int errPipe[2];
-    if (pipe(outPipe) != 0)
+    char * copy = static_cast<char *>(malloc(text.size() + 1));
+    if (copy != NULL)
     {
-        errStr = "Failed to create stdout pipe: " + std::string(strerror(errno));
-        return -1;
+        memcpy(copy, text.data(), text.size());
+        copy[text.size()] = '\0';
     }
-    if (pipe(errPipe) != 0)
+    return copy;
+}
+
+/* curl is the transfer engine for every non-PuTTY protocol. On Windows
+ * it is the curl.exe that ships with the system (Windows 10 1803+);
+  * FindExecutableOnPath applies PATHEXT there and PATH elsewhere. */
+const std::string & CurlExecutable()
+{
+    static const std::string executable = [] {
+        std::string found = FindExecutableOnPath("curl");
+        return found.empty() ? std::string("curl") : found;
+    }();
+    return executable;
+}
+
+int RunCurl(const std::vector<std::string> & args, std::string & outStr,
+    std::string & errStr)
+{
+    int rc = RunCapture(args, outStr, errStr);
+    if (rc == -1 && errStr.empty())
     {
-        close(outPipe[0]);
-        close(outPipe[1]);
-        errStr = "Failed to create stderr pipe: " + std::string(strerror(errno));
-        return -1;
+        errStr = "Failed to run curl. Install curl (on Windows 10/11 it "
+            "ships as curl.exe) and make sure it is on PATH.";
     }
-
-    pid_t pid = fork();
-    if (pid < 0)
+    else if (rc == 127 && FindExecutableOnPath("curl").empty())
     {
-        close(outPipe[0]); close(outPipe[1]);
-        close(errPipe[0]); close(errPipe[1]);
-        errStr = "Failed to fork: " + std::string(strerror(errno));
-        return -1;
+        errStr = "curl was not found on PATH. Install curl (on Windows "
+            "10/11 it ships as curl.exe) to use this protocol.";
     }
+    return rc;
+}
 
-    if (pid == 0)
+/* Splits an 'ls -l'-style line into exactly 9 fields (the 9th keeps any
+ * spaces of the file name). Returns false for bare-name listings. */
+bool SplitLongListing(const std::string & line, std::vector<std::string> & fields)
+{
+    fields.clear();
+    std::istringstream stream(line);
+    std::string field;
+    while (fields.size() < 8 && (stream >> field))
     {
-        // Child process
-        close(outPipe[0]);
-        close(errPipe[0]);
-        dup2(outPipe[1], STDOUT_FILENO);
-        dup2(errPipe[1], STDERR_FILENO);
-        close(outPipe[1]);
-        close(errPipe[1]);
+        fields.push_back(field);
+    }
+    if (fields.size() < 8)
+    {
+        return false;
+    }
+    std::string rest;
+    std::getline(stream, rest);
+    size_t first = rest.find_first_not_of(" \t");
+    if (first == std::string::npos)
+    {
+        return false;
+    }
+    fields.push_back(rest.substr(first));
+    return true;
+}
 
-        std::vector<char *> argv;
-        argv.reserve(args.size() + 1);
-        for (size_t i = 0; i < args.size(); i++)
+bool LooksLikePermissions(const std::string & text)
+{
+    if (text.size() != 10)
+    {
+        return false;
+    }
+    const char types[] = "-dlbcps";
+    if (strchr(types, text[0]) == NULL)
+    {
+        return false;
+    }
+    for (size_t i = 1; i < 10; i++)
+    {
+        if (strchr("rwxstST-", text[i]) == NULL)
         {
-            argv.push_back(const_cast<char *>(args[i].c_str()));
+            return false;
         }
-        argv.push_back(NULL);
-
-        execvp(argv[0], argv.data());
-        _exit(127);
     }
+    return true;
+}
 
-    // Parent process
-    close(outPipe[1]);
-    close(errPipe[1]);
-
-    // Read stdout and stderr until EOF
-    char buffer[4096];
-    ssize_t bytesRead;
-    while ((bytesRead = read(outPipe[0], buffer, sizeof(buffer))) > 0)
+unsigned long PermissionsFromString(const std::string & text)
+{
+    unsigned long mode = text[0] == 'd' ? 0040000UL : 0100000UL;
+    static const unsigned long bits[9] = {
+        0400, 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001
+    };
+    for (size_t i = 0; i < 9 && i + 1 < text.size(); i++)
     {
-        outStr.append(buffer, bytesRead);
-    }
-    close(outPipe[0]);
-
-    while ((bytesRead = read(errPipe[0], buffer, sizeof(buffer))) > 0)
-    {
-        errStr.append(buffer, bytesRead);
-    }
-    close(errPipe[0]);
-
-    int status = 0;
-    while (waitpid(pid, &status, 0) < 0)
-    {
-        if (errno != EINTR)
+        char c = text[i + 1];
+        if (c == 'r' || c == 'w' || c == 'x' || c == 's' || c == 't')
         {
-            break;
+            mode |= bits[i];
         }
     }
-
-    if (WIFEXITED(status))
-    {
-        return WEXITSTATUS(status);
-    }
-    return -1;
+    return mode;
 }
 
 std::string BuildUrl(const SessionOptions & options, const std::string & remotePath)
@@ -160,9 +174,14 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
     return url;
 }
 
+bool IsSshCurlProtocol(const std::string & proto)
+{
+    return proto == "sftp" || proto == "scp";
+}
+
 void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string> & args)
 {
-    args.push_back("curl");
+    args.push_back(CurlExecutable());
     args.push_back("-s");
     args.push_back("-S");
 
@@ -181,6 +200,39 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     {
         args.push_back("--insecure");
     }
+    else if (!options.hostKey.empty() && IsSshCurlProtocol(ToLower(options.protocol)))
+    {
+        /* curl pins SSH host keys by MD5 fingerprint (--hostpubmd5).
+         * A SHA256 pin cannot be expressed for curl; host verification
+         * then falls back to the OpenSSH known_hosts file, exactly as
+         * with the system ssh/sftp clients. */
+        std::string md5;
+        for (size_t i = 0; i < options.hostKey.size(); i++)
+        {
+            if (options.hostKey[i] != ':')
+            {
+                md5 += options.hostKey[i];
+            }
+        }
+        bool hex = md5.size() == 32;
+        for (size_t i = 0; hex && i < md5.size(); i++)
+        {
+            char c = md5[i];
+            hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                (c >= 'A' && c <= 'F');
+        }
+        if (hex)
+        {
+            args.push_back("--hostpubmd5");
+            args.push_back(md5);
+        }
+    }
+
+    if (!options.privateKeyFile.empty())
+    {
+        args.push_back("--key");
+        args.push_back(ExpandTilde(options.privateKeyFile));
+    }
 
     if (options.timeoutSecs > 0)
     {
@@ -189,13 +241,26 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     }
 }
 
+std::string OctalPermissions(int permissions)
+{
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%o", static_cast<unsigned int>(permissions));
+    return std::string(buffer);
+}
+
 } // namespace
 
 bool ProtocolClient::IsMultiProtocol(const std::string & proto)
 {
     std::string p = ToLower(proto);
-    return (p == "ftp" || p == "ftps" || p == "http" || p == "https" ||
-            p == "dav" || p == "webdav" || p == "s3" || p == "scp");
+    if (p == "ftp" || p == "ftps" || p == "http" || p == "https" ||
+        p == "dav" || p == "webdav" || p == "s3" || p == "scp")
+    {
+        return true;
+    }
+    /* SFTP is served by the PuTTY engine where that exists, and by
+     * curl everywhere else (Windows). */
+    return p == "sftp" && !kHasNativeSftp;
 }
 
 void ProtocolClient::FreeNames(LscpNames * names)
@@ -245,16 +310,25 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Curl error " + std::to_string(rc) : errStr;
         return false;
     }
 
+    struct Entry
+    {
+        std::string name;
+        std::string longname;
+        bool isDir;
+        unsigned long permissions;
+        unsigned long long size;
+    };
+    std::vector<Entry> entries;
+
     std::istringstream stream(outStr);
     std::string line;
-    std::vector<std::string> lines;
     while (std::getline(stream, line))
     {
         if (!line.empty() && line.back() == '\r')
@@ -265,10 +339,47 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
         {
             continue;
         }
-        lines.push_back(line);
+
+        Entry entry;
+        entry.isDir = false;
+        entry.permissions = 0100644;
+        entry.size = 0;
+        entry.longname = line;
+
+        std::vector<std::string> fields;
+        if (SplitLongListing(line, fields) && LooksLikePermissions(fields[0]))
+        {
+            /* 'ls -l' style output (SFTP and some FTP servers). */
+            entry.name = fields[8];
+            entry.isDir = fields[0][0] == 'd';
+            entry.permissions = PermissionsFromString(fields[0]);
+            try
+            {
+                entry.size = std::stoull(fields[4]);
+            }
+            catch (...)
+            {
+                entry.size = 0;
+            }
+        }
+        else
+        {
+            entry.name = line;
+            if (!entry.name.empty() && entry.name.back() == '/')
+            {
+                entry.name.pop_back();
+                entry.isDir = true;
+                entry.permissions = 0040755;
+            }
+        }
+        if (entry.name.empty() || entry.name == "." || entry.name == "..")
+        {
+            continue;
+        }
+        entries.push_back(entry);
     }
 
-    names->count = static_cast<int>(lines.size());
+    names->count = static_cast<int>(entries.size());
     if (names->count == 0)
     {
         names->names = NULL;
@@ -284,18 +395,11 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
 
     for (int i = 0; i < names->count; i++)
     {
-        std::string name = lines[i];
-        bool isDir = false;
-        if (!name.empty() && name.back() == '/')
-        {
-            name.pop_back();
-            isDir = true;
-        }
-        names->names[i].filename = strdup(name.c_str());
-        names->names[i].longname = strdup(lines[i].c_str());
-        names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS;
-        names->names[i].attrs.permissions = isDir ? 0040755 : 0100644;
-        names->names[i].attrs.size = 0;
+        names->names[i].filename = DupString(entries[i].name);
+        names->names[i].longname = DupString(entries[i].longname);
+        names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
+        names->names[i].attrs.permissions = entries[i].permissions;
+        names->names[i].attrs.size = entries[i].size;
         names->names[i].attrs.mtime = 0;
     }
 
@@ -310,6 +414,54 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
         memset(attrs, 0, sizeof(*attrs));
     }
 
+    std::string proto = ToLower(options.protocol);
+    if (proto == "sftp")
+    {
+        /* curl cannot HEAD an SFTP path; stat by listing the parent. */
+        std::string fileName = RemoteFileName(remotePath);
+        if (fileName.empty())
+        {
+            if (attrs != NULL)
+            {
+                attrs->flags = LSCP_ATTR_PERMISSIONS;
+                attrs->permissions = 0040755;
+            }
+            return LSCP_SFTP_STAT_EXISTS;
+        }
+        std::string parent = RemoteDirName(remotePath);
+        if (parent.empty())
+        {
+            parent = "/";
+        }
+        LscpNames names;
+        names.count = 0;
+        names.names = NULL;
+        if (!List(options, parent, &names, error))
+        {
+            return LSCP_SFTP_STAT_ERROR;
+        }
+        int result = LSCP_SFTP_STAT_MISSING;
+        for (int i = 0; i < names.count; i++)
+        {
+            if (names.names[i].filename != NULL &&
+                fileName == names.names[i].filename)
+            {
+                if (attrs != NULL)
+                {
+                    *attrs = names.names[i].attrs;
+                }
+                result = LSCP_SFTP_STAT_EXISTS;
+                break;
+            }
+        }
+        FreeNames(&names);
+        if (result == LSCP_SFTP_STAT_MISSING)
+        {
+            error = "No such file or directory.";
+        }
+        return result;
+    }
+
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
     args.push_back("-I"); // HEAD request
@@ -317,7 +469,7 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr;
@@ -353,6 +505,8 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
     unsigned long long * size, LscpProgressFn progress, void * progressCtx,
     std::string & error)
 {
+    (void)progress;
+    (void)progressCtx;
     if (size != NULL)
     {
         *size = 0;
@@ -373,17 +527,17 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Download failed with exit code " + std::to_string(rc) : errStr;
         return -1;
     }
 
-    struct stat st;
-    if (stat(localPath.c_str(), &st) == 0 && size != NULL)
+    LocalFileInfo info = StatLocal(localPath);
+    if (info.exists && size != NULL)
     {
-        *size = static_cast<unsigned long long>(st.st_size);
+        *size = info.size;
     }
     return 0;
 }
@@ -393,6 +547,9 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
     unsigned long long * size, LscpProgressFn progress, void * progressCtx,
     std::string & error)
 {
+    (void)permissions;
+    (void)progress;
+    (void)progressCtx;
     if (size != NULL)
     {
         *size = 0;
@@ -413,17 +570,17 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Upload failed with exit code " + std::to_string(rc) : errStr;
         return -1;
     }
 
-    struct stat st;
-    if (stat(localPath.c_str(), &st) == 0 && size != NULL)
+    LocalFileInfo info = StatLocal(localPath);
+    if (info.exists && size != NULL)
     {
-        *size = static_cast<unsigned long long>(st.st_size);
+        *size = info.size;
     }
     return 0;
 }
@@ -441,6 +598,12 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
         args.push_back("DELE " + remotePath);
         args.push_back(BuildUrl(options, "/"));
     }
+    else if (IsSshCurlProtocol(proto))
+    {
+        args.push_back("-Q");
+        args.push_back("rm " + remotePath);
+        args.push_back(BuildUrl(options, "/"));
+    }
     else
     {
         args.push_back("-X");
@@ -450,7 +613,7 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Remove failed with exit code " + std::to_string(rc) : errStr;
@@ -472,6 +635,12 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
         args.push_back("RMD " + remotePath);
         args.push_back(BuildUrl(options, "/"));
     }
+    else if (IsSshCurlProtocol(proto))
+    {
+        args.push_back("-Q");
+        args.push_back("rmdir " + remotePath);
+        args.push_back(BuildUrl(options, "/"));
+    }
     else
     {
         args.push_back("-X");
@@ -481,7 +650,7 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Remove directory failed with exit code " + std::to_string(rc) : errStr;
@@ -503,6 +672,12 @@ int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & 
         args.push_back("MKD " + remotePath);
         args.push_back(BuildUrl(options, "/"));
     }
+    else if (IsSshCurlProtocol(proto))
+    {
+        args.push_back("-Q");
+        args.push_back("mkdir " + remotePath);
+        args.push_back(BuildUrl(options, "/"));
+    }
     else
     {
         args.push_back("-X");
@@ -512,7 +687,7 @@ int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & 
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Create directory failed with exit code " + std::to_string(rc) : errStr;
@@ -536,6 +711,12 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
         args.push_back("RNTO " + toPath);
         args.push_back(BuildUrl(options, "/"));
     }
+    else if (IsSshCurlProtocol(proto))
+    {
+        args.push_back("-Q");
+        args.push_back("rename " + fromPath + " " + toPath);
+        args.push_back(BuildUrl(options, "/"));
+    }
     else
     {
         args.push_back("-X");
@@ -547,10 +728,47 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCommand(args, outStr, errStr);
+    int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr.empty() ? "Move failed with exit code " + std::to_string(rc) : errStr;
+        return -1;
+    }
+    return 0;
+}
+
+int ProtocolClient::SetPermissions(const SessionOptions & options,
+    const std::string & remotePath, int permissions, std::string & error)
+{
+    std::vector<std::string> args;
+    BuildCommonCurlArgs(options, args);
+
+    std::string proto = ToLower(options.protocol);
+    if (proto == "ftp" || proto == "ftps")
+    {
+        args.push_back("-Q");
+        args.push_back("SITE CHMOD " + OctalPermissions(permissions) + " " + remotePath);
+        args.push_back(BuildUrl(options, "/"));
+    }
+    else if (proto == "sftp")
+    {
+        args.push_back("-Q");
+        args.push_back("chmod " + OctalPermissions(permissions) + " " + remotePath);
+        args.push_back(BuildUrl(options, "/"));
+    }
+    else
+    {
+        error = "chmod is not supported by the " + options.protocol + " protocol.";
+        return -1;
+    }
+
+    std::string outStr;
+    std::string errStr;
+    int rc = RunCurl(args, outStr, errStr);
+    if (rc != 0)
+    {
+        error = errStr.empty() ? "Change permissions failed with exit code " +
+            std::to_string(rc) : errStr;
         return -1;
     }
     return 0;

@@ -5,14 +5,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <sys/time.h>
-#include <unistd.h>
 
 #include <algorithm>
 
 #include "Console.h"
 #include "LocalFs.h"
 #include "PathUtil.h"
+#include "Platform.h"
 #include "Texts.h"
 
 namespace linuxscp {
@@ -122,7 +121,7 @@ bool Script::RemoteListDir(const std::string & path, LscpNames *& names, std::st
 {
     error.clear();
     names = NULL;
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         names = lscp_sftp_list_dir(path.c_str());
         if (names == NULL)
@@ -149,7 +148,7 @@ void Script::RemoteFreeNames(LscpNames * names)
     {
         return;
     }
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         lscp_sftp_free_names(names);
     }
@@ -163,7 +162,7 @@ void Script::RemoteFreeNames(LscpNames * names)
 int Script::RemoteStat(const std::string & path, LscpAttrs * attrs, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int st = lscp_sftp_stat(path.c_str(), attrs);
         if (st != LSCP_SFTP_STAT_EXISTS)
@@ -180,7 +179,7 @@ int Script::RemoteGet(const std::string & remote, const std::string & local,
     LscpProgressFn progress, void * ctx, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int res = lscp_sftp_get_resume(remote.c_str(), local.c_str(), resumeOffset, size,
             progress, ctx);
@@ -199,7 +198,7 @@ int Script::RemotePut(const std::string & local, const std::string & remote,
     LscpProgressFn progress, void * ctx, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int res = lscp_sftp_put_resume(local.c_str(), remote.c_str(), permissions,
             resumeOffset, size, progress, ctx);
@@ -216,7 +215,7 @@ int Script::RemotePut(const std::string & local, const std::string & remote,
 int Script::RemoteRemove(const std::string & path, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int res = lscp_sftp_remove(path.c_str());
         if (res != 0)
@@ -231,7 +230,7 @@ int Script::RemoteRemove(const std::string & path, std::string & error)
 int Script::RemoteRemoveDir(const std::string & path, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int res = lscp_sftp_rmdir(path.c_str());
         if (res != 0)
@@ -246,7 +245,7 @@ int Script::RemoteRemoveDir(const std::string & path, std::string & error)
 int Script::RemoteMakeDir(const std::string & path, int permissions, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int res = lscp_sftp_mkdir(path.c_str(), permissions);
         if (res != 0)
@@ -261,7 +260,7 @@ int Script::RemoteMakeDir(const std::string & path, int permissions, std::string
 int Script::RemoteRename(const std::string & from, const std::string & to, std::string & error)
 {
     error.clear();
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         int res = lscp_sftp_rename(from.c_str(), to.c_str());
         if (res != 0)
@@ -271,6 +270,23 @@ int Script::RemoteRename(const std::string & from, const std::string & to, std::
         return res;
     }
     return ProtocolClient::Move(mSession.Options(), from, to, error);
+}
+
+int Script::RemoteSetPermissions(const std::string & path, int permissions,
+    std::string & error)
+{
+    error.clear();
+    if (UseNativeSftp(mSession.Options().protocol))
+    {
+        int res = lscp_sftp_set_permissions(path.c_str(), permissions);
+        if (res != 0)
+        {
+            error = lscp_sftp_error();
+        }
+        return res;
+    }
+    return ProtocolClient::SetPermissions(mSession.Options(), path, permissions,
+        error);
 }
 
 bool Script::OpenSite(const std::vector<std::string> & args)
@@ -339,11 +355,7 @@ bool Script::OpenSite(const std::vector<std::string> & args)
     }
     if (options.userName.empty())
     {
-        const char * user = getenv("USER");
-        if (user != NULL)
-        {
-            options.userName = user;
-        }
+        options.userName = CurrentUserName();
     }
 
     Console::Instance().Status("Connecting to " + options.hostName + "...");
@@ -354,7 +366,7 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         return false;
     }
 
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         if (lscp_sftp_init() != 0)
         {
@@ -412,7 +424,7 @@ bool Script::ChangeRemoteDirectory(const std::vector<std::string> & args)
         return false;
     }
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
-    if (mSession.Options().protocol == "sftp")
+    if (UseNativeSftp(mSession.Options().protocol))
     {
         char * canonical = lscp_sftp_realpath(path.c_str());
         if (canonical == NULL)
@@ -750,11 +762,8 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             Console::Instance().Status(Texts::FileTransferred(childLocal, size));
             if (flags.preserveTime && (names->names[i].attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
             {
-                struct timeval tv[2] = {
-                    { static_cast<time_t>(names->names[i].attrs.atime), 0 },
-                    { static_cast<time_t>(names->names[i].attrs.mtime), 0 }
-                };
-                utimes(childLocal.c_str(), tv);
+                SetFileTimes(childLocal, names->names[i].attrs.atime,
+                    names->names[i].attrs.mtime);
             }
             if (flags.deleteSource)
             {
@@ -802,7 +811,8 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
             }
             if (flags.deleteSource)
             {
-                rmdir(childLocal.c_str());
+                std::string removeError;
+                RemoveLocalDirectory(childLocal, removeError);
             }
         }
         else if (info.isRegular)
@@ -1071,11 +1081,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             Console::Instance().Status(Texts::FileTransferred(localPath, size));
             if (flags.preserveTime && (sourceAttrs.flags & LSCP_ATTR_ACMODTIME) != 0)
             {
-                struct timeval tv[2] = {
-                    { static_cast<time_t>(sourceAttrs.atime), 0 },
-                    { static_cast<time_t>(sourceAttrs.mtime), 0 }
-                };
-                utimes(localPath.c_str(), tv);
+                SetFileTimes(localPath, sourceAttrs.atime, sourceAttrs.mtime);
             }
             if (flags.deleteSource)
             {
@@ -1230,7 +1236,8 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                     any = true;
                     if (flags.deleteSource)
                     {
-                        rmdir(sources[n].c_str());
+                        std::string removeError;
+                        RemoveLocalDirectory(sources[n], removeError);
                     }
                 }
                 continue;
@@ -1591,10 +1598,11 @@ bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
         }
         for (size_t n = 0; n < paths.size(); n++)
         {
-            if (lscp_sftp_set_permissions(paths[n].c_str(), (int)permissions) != 0)
+            std::string permError;
+            if (RemoteSetPermissions(paths[n], (int)permissions, permError) != 0)
             {
                 Console::Instance().Error(Texts::RemoteError("change the permissions of",
-                    paths[n], lscp_sftp_error()));
+                    paths[n], permError));
                 mErrors++;
                 ok = false;
             }
@@ -1896,7 +1904,7 @@ int Script::RunFile(const std::string & path)
     bool closeFile = false;
     if (path != "-")
     {
-        file = fopen(path.c_str(), "r");
+        file = fopen(path.c_str(), "rb");
         if (file == NULL)
         {
             Console::Instance().Error("Cannot open the script file '" + path + "': " +

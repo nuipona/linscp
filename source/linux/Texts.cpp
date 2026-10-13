@@ -1,9 +1,13 @@
 #include "Texts.h"
 
+#include "Platform.h"
+
 #include <cstdio>
 
+#if !defined(_WIN32)
 /* from source/putty/utils/version.c (puttyexp.h) */
 extern "C" const char * get_putty_version(void);
+#endif
 
 namespace linuxscp {
 namespace Texts {
@@ -23,9 +27,13 @@ std::string Join(const std::string & left, const std::string & right)
 std::string VersionLine()
 {
     std::string result = std::string(ProductName) + " " + ProductVersion;
+#if defined(_WIN32)
+    result += " (Windows, curl transfer backend)";
+#else
     result += " (PuTTY core ";
     result += get_putty_version();
     result += ")";
+#endif
     return result;
 }
 

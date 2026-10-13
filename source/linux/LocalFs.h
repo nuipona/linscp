@@ -41,6 +41,8 @@ bool ExpandLocalWildcard(const std::string & path, std::vector<std::string> & na
 bool CreateLocalDirectory(const std::string & path, std::string & error);
 bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error);
 bool RemoveLocalFile(const std::string & path, std::string & error);
+/* Removes an empty local directory. */
+bool RemoveLocalDirectory(const std::string & path, std::string & error);
 
 std::string GetLocalDirectory(std::string & error);
 bool SetLocalDirectory(const std::string & path, std::string & error);

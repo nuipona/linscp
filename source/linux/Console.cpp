@@ -1,9 +1,8 @@
 #include "Console.h"
 
-#include <cerrno>
-#include <termios.h>
-#include <unistd.h>
+#include "Platform.h"
 
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -32,7 +31,7 @@ Console::~Console()
 
 bool Console::IsInteractive() const
 {
-    return !mBatchMode && (isatty(STDIN_FILENO) != 0);
+    return !mBatchMode && StdInIsTerminal();
 }
 
 void Console::Write(const std::string & text)
@@ -76,10 +75,12 @@ void Console::LogEvent(const std::string & text)
         char stamp[64];
         time_t now = time(NULL);
         struct tm tmResult;
-        localtime_r(&now, &tmResult);
-        strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmResult);
-        fprintf(mLog, ". %s Event: %s\n", stamp, text.c_str());
-        fflush(mLog);
+        if (LocalTime(now, tmResult))
+        {
+            strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmResult);
+            fprintf(mLog, ". %s Event: %s\n", stamp, text.c_str());
+            fflush(mLog);
+        }
     }
 }
 
@@ -114,37 +115,29 @@ bool Console::ReadLine(const std::string & prompt, std::string & line)
 bool Console::ReadPassword(const std::string & prompt, std::string & password)
 {
     password.clear();
-    struct termios oldTermios;
-    bool echoOff = false;
-    if (isatty(STDIN_FILENO) && (tcgetattr(STDIN_FILENO, &oldTermios) == 0))
-    {
-        struct termios newTermios = oldTermios;
-        newTermios.c_lflag &= ~static_cast<tcflag_t>(ECHO);
-        if (tcsetattr(STDIN_FILENO, TCSANOW, &newTermios) == 0)
-        {
-            echoOff = true;
-        }
-    }
-
     Write(prompt);
     bool result = false;
-    int c;
-    while ((c = fgetc(stdin)) != EOF)
+    bool echoWasOff = false;
     {
-        if (c == '\n')
+        EchoOff echoOff;
+        echoWasOff = echoOff.Active();
+        int c;
+        while ((c = fgetc(stdin)) != EOF)
         {
-            result = true;
-            break;
+            if (c == '\n')
+            {
+                result = true;
+                break;
+            }
+            if (c != '\r')
+            {
+                password += static_cast<char>(c);
+            }
         }
-        if (c != '\r')
-        {
-            password += static_cast<char>(c);
-        }
-    }
-
-    if (echoOff)
+    } /* EchoOff restores the console mode here. */
+    if (echoWasOff)
     {
-        tcsetattr(STDIN_FILENO, TCSANOW, &oldTermios);
+        /* Print the newline that the user's Enter would have echoed. */
         fputc('\n', stdout);
         fflush(stdout);
     }
@@ -175,7 +168,9 @@ bool Console::Confirm(const std::string & prompt, bool defaultYes)
 bool Console::SetLogFile(const std::string & path, std::string & error)
 {
     CloseLogFile();
-    mLog = fopen(path.c_str(), "a");
+    /* Binary append: the log also records raw traffic (LogTraffic),
+     * which text mode would corrupt on Windows. */
+    mLog = fopen(path.c_str(), "ab");
     if (mLog == NULL)
     {
         error = std::string(strerror(errno));
@@ -184,10 +179,12 @@ bool Console::SetLogFile(const std::string & path, std::string & error)
     char stamp[64];
     time_t now = time(NULL);
     struct tm tmResult;
-    localtime_r(&now, &tmResult);
-    strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmResult);
-    fprintf(mLog, "= session opened %s =\n", stamp);
-    fflush(mLog);
+    if (LocalTime(now, tmResult))
+    {
+        strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", &tmResult);
+        fprintf(mLog, "= session opened %s =\n", stamp);
+        fflush(mLog);
+    }
     return true;
 }
 
@@ -217,7 +214,7 @@ void Console::TransferStart(const std::string & fileName, uint64_t totalSize)
 {
     mTransferSize = totalSize;
     mLastPermille = 0;
-    if (mBatchMode || !isatty(STDOUT_FILENO))
+    if (mBatchMode || !StdOutIsTerminal())
     {
         return;
     }
@@ -236,7 +233,7 @@ void Console::TransferStart(const std::string & fileName, uint64_t totalSize)
 
 void Console::TransferProgress(uint64_t transferred)
 {
-    if (mBatchMode || !isatty(STDOUT_FILENO) || mTransferSize == 0)
+    if (mBatchMode || !StdOutIsTerminal() || mTransferSize == 0)
     {
         return;
     }
@@ -260,7 +257,7 @@ void Console::TransferProgress(uint64_t transferred)
 
 void Console::TransferEnd(bool success)
 {
-    if (mBatchMode || !isatty(STDOUT_FILENO) || mTransferSize == 0)
+    if (mBatchMode || !StdOutIsTerminal() || mTransferSize == 0)
     {
         return;
     }

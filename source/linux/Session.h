@@ -13,7 +13,20 @@
 #include <string>
 #include <vector>
 
+#include "Platform.h"
+
 namespace linuxscp {
+
+/* True when 'protocol' is served by the native PuTTY SFTP engine.
+ * Only SFTP qualifies, and only where that engine exists (POSIX);
+ * on Windows SFTP is served by ProtocolClient (curl) instead and
+ * this returns false for every protocol. All protocol dispatch in
+ * Script goes through this helper, never through a bare comparison
+ * against "sftp". */
+inline bool UseNativeSftp(const std::string & protocol)
+{
+    return kHasNativeSftp && protocol == "sftp";
+}
 
 struct SessionOptions
 {
