@@ -39,7 +39,21 @@ jobs:
           cmake -S . -B build-windows -A x64
           cmake --build build-windows --config Release
       - name: Unit tests
-        run: ctest --test-dir build-windows -C Release --output-on-failure
+        shell: pwsh
+        run: |
+          $output = & ctest --test-dir build-windows -C Release --output-on-failure 2>&1 | Out-String
+          Write-Host $output
+          if ($LASTEXITCODE -ne 0) {
+            # Repeat the failing checks as annotations: they stay readable in
+            # the API (check-run annotations) even when the full job log is
+            # out of reach.
+            $lines = $output -split "`r?`n" | Where-Object { $_ -match "expected|checks failed|no such|cannot|error" }
+            if (-not $lines) { $lines = $output -split "`r?`n" | Select-Object -Last 12 }
+            foreach ($line in ($lines | Select-Object -First 10)) {
+              Write-Host "::error::$line"
+            }
+            exit 1
+          }
       - name: Smoke test console client
         shell: cmd
         run: |
