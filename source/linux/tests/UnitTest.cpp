@@ -340,6 +340,73 @@ void TestPlatformServices()
     CHECK_TRUE(!HomeDirectory().empty() || !ConfigDirectory().empty());
 }
 
+void TestDateParsing()
+{
+    /*
+     * The listing date is read in local time. Pin the zone so that the
+     * expected values do not depend on where the tests run.
+     */
+#if defined(_WIN32)
+    _putenv_s("TZ", "UTC");
+    _tzset();
+#else
+    setenv("TZ", "UTC", 1);
+    tzset();
+#endif
+
+    /* curl prints Last-Modified in GMT. */
+    CHECK_EQ(std::to_string(ParseHttpDate("Tue, 13 Oct 2026 05:21:00 GMT")),
+        "1791868860");
+    CHECK_EQ(std::to_string(ParseHttpDate("Sun, 03 Mar 2019 12:00:00 GMT")),
+        "1551614400");
+    CHECK_EQ(std::to_string(ParseHttpDate("")), "0");
+    CHECK_EQ(std::to_string(ParseHttpDate("not a date")), "0");
+
+    /* An 'ls -l' date column: a year for older entries, a clock time
+     * otherwise. */
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "3", "2019")), "1551571200");
+    CHECK_EQ(std::to_string(ParseListingDate("Oct", "13", "2026")),
+        "1791849600");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "3", "25:00")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "3", "12:60")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Xyz", "3", "2019")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "32", "2019")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "", "2019")), "0");
+    const unsigned long thisYear = ParseListingDate("Jan", "1", "00:00");
+    CHECK_TRUE(thisYear >= 1767225600UL);
+}
+
+/* The 'terminal' command hands the connection details to the system ssh
+ * client; the argument list must not grow options that ssh does not
+ * take, and a PuTTY key file must not be passed as -i. */
+void TestTerminalCommandLine()
+{
+    const std::vector<std::string> plain = BuildSshArguments("user", "host", 22, "");
+    CHECK_EQ(std::to_string(plain.size()), "2");
+    CHECK_EQ(plain[0], "-t");
+    CHECK_EQ(plain[1], "user@host");
+
+    const std::vector<std::string> full = BuildSshArguments("user", "host", 2222,
+        "/home/user/.ssh/id_ed25519");
+    CHECK_EQ(std::to_string(full.size()), "6");
+    CHECK_EQ(full[0], "-i");
+    CHECK_EQ(full[1], "/home/user/.ssh/id_ed25519");
+    CHECK_EQ(full[2], "-p");
+    CHECK_EQ(full[3], "2222");
+    CHECK_EQ(full[4], "-t");
+    CHECK_EQ(full[5], "user@host");
+
+    /* No user name: the client asks for one itself. */
+    const std::vector<std::string> anonymous = BuildSshArguments("", "host", 22, "");
+    CHECK_EQ(anonymous[1], "host");
+
+    /* A PuTTY key file cannot be read by the ssh client. */
+    const std::vector<std::string> ppk = BuildSshArguments("user", "host", 22,
+        "C:/keys/private.PPK");
+    CHECK_EQ(std::to_string(ppk.size()), "2");
+    CHECK_EQ(ppk[0], "-t");
+}
+
 void TestFormatting()
 {
     CHECK_EQ(FormatSize(0), "0");
@@ -494,14 +561,16 @@ void TestLocalFs()
     CHECK_TRUE(error.empty());
     CHECK_TRUE(CreateLocalDirectory(dir + "/sub", error));
 
-    FILE * file = fopen((dir + "/one.txt").c_str(), "w");
+    /* Binary mode: the size check below is about six bytes, and a text
+     * stream would turn the newline into CRLF on Windows. */
+    FILE * file = fopen((dir + "/one.txt").c_str(), "wb");
     CHECK_TRUE(file != NULL);
     if (file != NULL)
     {
         fputs("hello\n", file);
         fclose(file);
     }
-    file = fopen((dir + "/two.log").c_str(), "w");
+    file = fopen((dir + "/two.log").c_str(), "wb");
     CHECK_TRUE(file != NULL);
     if (file != NULL)
     {
@@ -630,6 +699,8 @@ int main()
     TestMaskCase();
     TestPlatformServices();
     TestFormatting();
+    TestDateParsing();
+    TestTerminalCommandLine();
     TestParseSiteUrl();
     TestLocalFs();
     TestSessionRegistry();

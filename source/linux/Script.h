@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "LocalFs.h"
 #include "Session.h"
 #include "SftpClient.h"
 
@@ -17,14 +18,20 @@ namespace linuxscp {
 
 struct TransferFlags
 {
+    /* 'get -delete' / 'put -delete': remove the source after a transfer. */
     bool deleteSource;
+    /* 'synchronize -delete': remove target entries that the source does
+     * not have. It never removes the source, where the user's data
+     * lives. */
+    bool deleteObsolete;
     bool newerOnly;
     bool preserveTime;
     bool recursive;
     bool resume;
 
-    TransferFlags() : deleteSource(false), newerOnly(false),
-        preserveTime(false), recursive(true), resume(false) {}
+    TransferFlags() : deleteSource(false), deleteObsolete(false),
+        newerOnly(false), preserveTime(false), recursive(true),
+        resume(false) {}
 };
 
 class Script
@@ -68,6 +75,7 @@ private:
     bool ChangeRemotePermissions(const std::vector<std::string> & args);
     bool StatRemote(const std::vector<std::string> & args);
     bool SetOption(const std::vector<std::string> & args);
+    void OpenTerminal(const std::vector<std::string> & args);
     void PrintHelp();
     void PrintStatus();
 
@@ -80,6 +88,14 @@ private:
     bool CreateRemoteDirectoryRecursive(const std::string & path,
         std::string & error);
 
+    /* Removes one entry, a directory tree included. Used by 'synchronize
+     * -delete' for the entries the other side does not have. */
+    bool RemoveLocalItemRecursive(const std::string & path);
+    bool RemoveRemoteItemRecursive(const std::string & path);
+    /* Asks before removing one obsolete entry; true when it may go. */
+    bool ConfirmObsolete(const std::string & side, const std::string & path,
+        bool isDirectory);
+
     bool RequireConnection();
     /* Expands a remote argument (possibly a mask) into full paths. */
     bool ExpandRemote(const std::string & pattern, std::vector<std::string> & paths,
@@ -91,11 +107,12 @@ private:
     void RemoteFreeNames(LscpNames * names);
     int RemoteStat(const std::string & path, LscpAttrs * attrs, std::string & error);
     int RemoteGet(const std::string & remote, const std::string & local,
-        unsigned long long resumeOffset, unsigned long long * size,
+        unsigned long long resumeOffset, bool preserveTime, unsigned long long * size,
         LscpProgressFn progress, void * ctx, std::string & error);
     int RemotePut(const std::string & local, const std::string & remote,
-        int permissions, unsigned long long resumeOffset, unsigned long long * size,
-        LscpProgressFn progress, void * ctx, std::string & error);
+        int permissions, unsigned long long resumeOffset, bool preserveTime,
+        unsigned long long * size, LscpProgressFn progress, void * ctx,
+        std::string & error);
     int RemoteRemove(const std::string & path, std::string & error);
     int RemoteRemoveDir(const std::string & path, std::string & error);
     int RemoteMakeDir(const std::string & path, int permissions, std::string & error);

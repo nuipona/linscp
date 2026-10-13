@@ -342,6 +342,18 @@ int lscp_sftp_set_permissions(const char * path, int permissions)
     return simple_request("Changing the permissions of", path, fxp_setstat_recv);
 }
 
+int lscp_sftp_set_times(const char * path, unsigned long atime,
+    unsigned long mtime)
+{
+    clear_error();
+    struct fxp_attrs attrs = no_attrs;
+    attrs.flags |= SSH_FILEXFER_ATTR_ACMODTIME;
+    attrs.atime = atime;
+    attrs.mtime = mtime;
+    sftp_register(fxp_setstat_send(path, attrs));
+    return simple_request("Setting the times of", path, fxp_setstat_recv);
+}
+
 static unsigned long long local_file_size(FILE * file)
 {
     struct stat st;

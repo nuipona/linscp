@@ -46,9 +46,13 @@ after the client has been able to ask; in
 mode the connection fails instead.
 .TP
 .BI \-privatekey= file
-Private key to authenticate with. The PuTTY core expects a PuTTY
+Private key to authenticate with. Both PuTTY
 .B .ppk
-file; OpenSSH and PEM keys are rejected. Use an ssh-agent instead for those.
+files and OpenSSH/ssh.com keys (including the OpenSSH new format used by
+.IR id_rsa " and " id_ed25519 )
+are accepted; a key in a foreign format is imported for the connection. An
+encrypted key asks for its passphrase interactively and cannot be used in
+batch mode: load such a key into an ssh-agent instead.
 .TP
 .BI \-username= name
 User name to authenticate with.
@@ -201,6 +205,20 @@ Change the permissions of a remote file, given in octal.
 .TP
 .BI stat " file"
 Print the attributes of a remote file.
+.TP
+.B terminal
+Open an interactive shell on the connected server in a terminal window,
+using the system
+.B ssh
+client. The terminal program is taken from the
+.B LINUXSCP_TERMINAL
+variable (for example
+.BR "xterm -e"
+or
+.BR foot ),
+otherwise the first common desktop terminal that is installed. SSH
+.RB ( sftp:// )
+sessions only.
 .TP
 .BI option " name value"
 Configure session options:

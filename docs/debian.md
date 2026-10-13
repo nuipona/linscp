@@ -87,7 +87,7 @@ linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 | `-script=<file>` | read commands from a file, one per line |
 | `-command="<cmd1>;<cmd2>"` | run the given commands (`;` separated) |
 | `-hostkey=<fingerprint>` | pin the host key; `*` accepts any for this connection only |
-| `-privatekey=<file>` | private key for public key authentication |
+| `-privatekey=<file>` | private key for public key authentication (`.ppk` or OpenSSH format) |
 | `-username=<name>` | user name |
 | `-password=<password>` | password (also read from `LINUXSCP_PASSWORD`) |
 | `-port=<number>` | port number |
@@ -106,7 +106,7 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 
 `open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lcd`, `lpwd`, `get`,
 `put`, `synchronize`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`,
-`option`, `help`, `exit`.
+`terminal`, `option`, `help`, `exit`.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
 transfers every match. The exit status is non-zero if any command failed. When a
@@ -133,6 +133,18 @@ put `option confirm off` in a trusted script to disable those checks.
 `option resume on|off` controls automatic transfer resumption across batch
 sessions, `option batch on|off|abort` configures script batch mode, and `echo`
 prints messages for script output logging.
+
+`terminal` opens an interactive shell on the connected server, like the
+"Open Terminal" button of WinSCP: the client starts the system `ssh` client
+in a terminal window of the desktop that runs it. The terminal program is
+taken from `LINUXSCP_TERMINAL` (`<program> [args]`, for example `xterm -e` or
+`foot`), otherwise the first of `x-terminal-emulator`, `gnome-terminal`,
+`konsole`, `xfce4-terminal`, `mate-terminal`, `lxterminal`, `terminator`,
+`alacritty`, `kitty`, `foot`, `wezterm`, `urxvt` and `xterm` that is
+installed. It is available for SSH (`sftp://`) sessions only. The same
+feature is on the "Terminal" button of the graphical client, which asks the
+backend to run this command. On Windows the client opens PuTTY, Windows
+Terminal or `ssh.exe` instead.
 
 `call` and `show` are rejected on purpose: the connection runs the SFTP
 subsystem only, so there is no remote shell to execute a command in.
@@ -165,9 +177,13 @@ LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
 
 * **ssh-agent** (recommended): with `SSH_AUTH_SOCK` set, the keys in the agent
   are offered automatically.
-* **Private key file**: `-privatekey=` expects a PuTTY `.ppk` file. The PuTTY
-  core in this tree rejects OpenSSH and PEM private keys outright ("Unable to
-  use key file"), so convert them first, or load them into the agent instead.
+* **Private key file**: `-privatekey=` accepts a PuTTY `.ppk` file as well as
+  OpenSSH (`id_rsa`, `id_ed25519`, old PEM) and ssh.com private keys. A key in
+  a foreign format is imported by the PuTTY core and used as a temporary
+  `.ppk` for the connection, which is removed when the session closes. An
+  encrypted key asks for its passphrase interactively; in `-batch` mode an
+  encrypted key fails with "run interactively to enter its passphrase", so
+  load such keys into the agent instead.
 * **Password**: `-password=` or `LINUXSCP_PASSWORD`. In interactive mode the
   client asks; in `-batch` mode it fails rather than prompting.
 

@@ -576,7 +576,11 @@ std::string ResolveLocalPath(const std::string & cwd, const std::string & path)
     {
         if (root.empty())
         {
+            /* A path relative to the current directory: keep the parts of
+             * the path itself, then prepend the parts of the directory. */
+            const std::vector<std::string> relativeParts = parts;
             SplitLocalRoot(cwd, root, parts);
+            parts.insert(parts.end(), relativeParts.begin(), relativeParts.end());
         }
         else
         {

@@ -1,10 +1,12 @@
 #include "Platform.h"
 
 #include <cerrno>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <functional>
 
 #if defined(_WIN32)
@@ -16,6 +18,7 @@
 #include <shellapi.h>
 #include <sys/utime.h>
 #else
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/time.h>
 #include <sys/types.h>
@@ -656,4 +659,510 @@ bool LaunchGuiApplication(std::string & error)
 #endif
 }
 
+/*
+ * The date columns of the protocol backends: curl's 'Last-Modified'
+ * header and the date column of an 'ls -l' listing. Both live here so
+ * that the unit tests can reach them without the PuTTY core.
+ */
+
+static int MonthFromName(const std::string & name)
+{
+    static const char * const months[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    for (int i = 0; i < 12; i++)
+    {
+        if (name == months[i])
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+unsigned long ParseHttpDate(const std::string & text)
+{
+    /* 'Tue, 13 Oct 2026 05:21:00 GMT', as curl prints Last-Modified. */
+    const char * start = strchr(text.c_str(), ',');
+    start = start != NULL ? start + 1 : text.c_str();
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    char monthName[16] = {0};
+    if (sscanf(start, " %d %15s %d %d:%d:%d", &day, monthName, &year, &hour,
+            &minute, &second) != 6)
+    {
+        return 0;
+    }
+    const int month = MonthFromName(monthName);
+    if (month < 0 || day <= 0 || day > 31)
+    {
+        return 0;
+    }
+    struct tm value = {};
+    value.tm_year = year - 1900;
+    value.tm_mon = month;
+    value.tm_mday = day;
+    value.tm_hour = hour;
+    value.tm_min = minute;
+    value.tm_sec = second;
+    /* The header is in GMT. */
+#if defined(_WIN32)
+    const std::time_t stamp = _mkgmtime(&value);
+#else
+    const std::time_t stamp = timegm(&value);
+#endif
+    return stamp > 0 ? static_cast<unsigned long>(stamp) : 0;
+}
+
+unsigned long ParseListingDate(const std::string & monthName,
+    const std::string & dayText, const std::string & timeOrYear)
+{
+    /*
+     * 'Oct 13 05:21' for an entry from the last six months, 'Oct 13  2026'
+     * for an older one. The listing uses the server's local time, which is
+     * the same clock the client displays timestamps in.
+     */
+    const int month = MonthFromName(monthName);
+    int day = 0;
+    if (month < 0 || dayText.empty())
+    {
+        return 0;
+    }
+    try
+    {
+        day = std::stoi(dayText);
+    }
+    catch (...)
+    {
+        return 0;
+    }
+    if (day <= 0 || day > 31)
+    {
+        return 0;
+    }
+
+    const bool hasClockTime = timeOrYear.find(':') != std::string::npos;
+    int hour = 0;
+    int minute = 0;
+    int year = 0;
+    if (hasClockTime)
+    {
+        const std::string::size_type colon = timeOrYear.find(':');
+        try
+        {
+            hour = std::stoi(timeOrYear.substr(0, colon));
+            minute = std::stoi(timeOrYear.substr(colon + 1));
+        }
+        catch (...)
+        {
+            return 0;
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59)
+        {
+            return 0;
+        }
+        std::time_t now = std::time(NULL);
+        struct tm nowParts;
+        if (!LocalTime(now, nowParts))
+        {
+            return 0;
+        }
+        year = nowParts.tm_year + 1900;
+    }
+    else
+    {
+        try
+        {
+            year = std::stoi(timeOrYear);
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+    if (year < 1970 || year > 9999)
+    {
+        return 0;
+    }
+
+    struct tm value = {};
+    value.tm_year = year - 1900;
+    value.tm_mon = month;
+    value.tm_mday = day;
+    value.tm_hour = hour;
+    value.tm_min = minute;
+    value.tm_sec = 0;
+    value.tm_isdst = -1;
+#if defined(_WIN32)
+    std::time_t stamp = _mktime64(&value);
+#else
+    std::time_t stamp = std::mktime(&value);
+#endif
+    if (hasClockTime)
+    {
+        /* No year in the listing: a date more than a day ahead of the
+         * clock must belong to the previous year. */
+        const std::time_t limit = std::time(NULL) + 24 * 60 * 60;
+        if (stamp > limit)
+        {
+            value.tm_year--;
+#if defined(_WIN32)
+            stamp = _mktime64(&value);
+#else
+            stamp = std::mktime(&value);
+#endif
+        }
+    }
+    return stamp > 0 ? static_cast<unsigned long>(stamp) : 0;
+}
+
+
+/* ----------------------------------------------------------------------
+ * An interactive terminal on the connected server
+ *
+ * WinSCP's "Open Terminal" opens the desktop's terminal program on the
+ * server that the session is using. The console client cannot make its
+ * own terminal window, so it hands the same job to the system ssh client
+ * (or, on Windows, to PuTTY or Windows Terminal) in a terminal emulator.
+ */
+
+std::vector<std::string> BuildSshArguments(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile)
+{
+    std::vector<std::string> args;
+    /* The system ssh client reads OpenSSH key files but cannot read the
+     * PuTTY .ppk files that this client's own SSH core uses; a .ppk is
+     * therefore left to the agent (the terminal then asks for a password
+     * when there is no usable agent key). */
+    std::string keyExtension = privateKeyFile.size() >= 4 ?
+        privateKeyFile.substr(privateKeyFile.size() - 4) : std::string();
+    for (size_t i = 0; i < keyExtension.size(); i++)
+    {
+        keyExtension[i] = static_cast<char>(tolower(static_cast<unsigned char>(keyExtension[i])));
+    }
+    if (!privateKeyFile.empty() && keyExtension != ".ppk")
+    {
+        args.push_back("-i");
+        args.push_back(privateKeyFile);
+    }
+    if (portNumber > 0 && portNumber != 22)
+    {
+        args.push_back("-p");
+        args.push_back(std::to_string(portNumber));
+    }
+    /* A terminal is wanted even though the client's own stdin is not one
+     * (in the GUI the client runs without a console). */
+    args.push_back("-t");
+    args.push_back(userName.empty() ? hostName : userName + "@" + hostName);
+    return args;
+}
+
+#if defined(_WIN32)
+
+namespace {
+
+/* PuTTY only accepts its own key files, so an OpenSSH key file must not
+ * be handed to it through -i. */
+bool LooksLikePpkFile(const std::string & path)
+{
+    FILE * file = fopen(path.c_str(), "rb");
+    if (file == NULL)
+    {
+        return false;
+    }
+    char signature[21] = {0};
+    const size_t got = fread(signature, 1, 20, file);
+    fclose(file);
+    return got == 20 && strncmp(signature, "PuTTY-User-Key-File-", 20) == 0;
+}
+
+std::string QuoteWindowsArgument(const std::string & text)
+{
+    std::string quoted = "\"";
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        if (text[i] == '"')
+        {
+            quoted += '"';
+        }
+        quoted += text[i];
+    }
+    quoted += '"';
+    return quoted;
+}
+
+bool ShellExecuteProgram(const std::string & program,
+    const std::string & parameters, std::string & error)
+{
+    HINSTANCE result = ShellExecuteA(NULL, "open", program.c_str(),
+        parameters.c_str(), NULL, SW_SHOWNORMAL);
+    if (reinterpret_cast<INT_PTR>(result) <= 32)
+    {
+        error = "Failed to start '" + program + "' (Windows error " +
+            std::to_string(static_cast<long>(reinterpret_cast<INT_PTR>(result))) + ").";
+        return false;
+    }
+    return true;
+}
+
+} // namespace
+
+bool LaunchTerminalForServer(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile, std::string & error)
+{
+    error.clear();
+    const std::string target = userName.empty() ? hostName :
+        userName + "@" + hostName;
+
+    /* PuTTY first, like WinSCP: it is what a user with PuTTY installed
+     * expects the button to open. */
+    const std::string putty = FindExecutableOnPath("putty");
+    if (!putty.empty())
+    {
+        std::string parameters = "-ssh " + QuoteWindowsArgument(target);
+        if (portNumber > 0 && portNumber != 22)
+        {
+            parameters += " -P " + std::to_string(portNumber);
+        }
+        if (!privateKeyFile.empty() && LooksLikePpkFile(privateKeyFile))
+        {
+            parameters += " -i " + QuoteWindowsArgument(privateKeyFile);
+        }
+        return ShellExecuteProgram(putty, parameters, error);
+    }
+
+    const std::vector<std::string> sshArgs = BuildSshArguments(userName,
+        hostName, portNumber, privateKeyFile);
+    std::string sshCommand;
+    for (size_t i = 0; i < sshArgs.size(); i++)
+    {
+        if (i > 0)
+        {
+            sshCommand += " ";
+        }
+        sshCommand += QuoteWindowsArgument(sshArgs[i]);
+    }
+
+    const std::string windowsTerminal = FindExecutableOnPath("wt");
+    if (!windowsTerminal.empty())
+    {
+        return ShellExecuteProgram(windowsTerminal, "ssh " + sshCommand, error);
+    }
+
+    const std::string ssh = FindExecutableOnPath("ssh");
+    if (!ssh.empty())
+    {
+        return ShellExecuteProgram("cmd.exe", "/k " + sshCommand, error);
+    }
+
+    error = "No terminal program was found: install PuTTY, Windows Terminal or "
+        "the OpenSSH client (ssh.exe), or run 'ssh " +
+        (userName.empty() ? hostName : userName + "@" + hostName) +
+        "' in a terminal of your own.";
+    return false;
+}
+
+#else /* POSIX */
+
+namespace {
+
+struct TerminalProgram
+{
+    const char * name;
+    const char * leadingArgs[3];
+};
+
+/*
+ * The terminal emulators of the common desktops, with the option that
+ * makes them run a command instead of a shell. Some of them take the
+ * command after '--', some after '-e' or '-x', and kitty/foot take it
+ * directly.
+ */
+const TerminalProgram kTerminalPrograms[] = {
+    {"x-terminal-emulator", {"-e", NULL}},
+    {"gnome-terminal", {"--", NULL}},
+    {"konsole", {"-e", NULL}},
+    {"xfce4-terminal", {"-x", NULL}},
+    {"mate-terminal", {"-x", NULL}},
+    {"lxterminal", {"-e", NULL}},
+    {"terminator", {"-x", NULL}},
+    {"alacritty", {"-e", NULL}},
+    {"kitty", {NULL}},
+    {"foot", {NULL}},
+    {"wezterm", {"start", "--", NULL}},
+    {"urxvt", {"-e", NULL}},
+    {"xterm", {"-e", NULL}},
+};
+
+std::vector<std::string> SplitWhitespace(const std::string & text)
+{
+    std::vector<std::string> words;
+    std::string word;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        if (text[i] == ' ' || text[i] == '\t')
+        {
+            if (!word.empty())
+            {
+                words.push_back(word);
+                word.clear();
+            }
+            continue;
+        }
+        word += text[i];
+    }
+    if (!word.empty())
+    {
+        words.push_back(word);
+    }
+    return words;
+}
+
+std::string SshHint(const std::string & userName, const std::string & hostName,
+    int portNumber)
+{
+    std::string hint = " Run 'ssh";
+    if (portNumber > 0 && portNumber != 22)
+    {
+        hint += " -p " + std::to_string(portNumber);
+    }
+    hint += " " + (userName.empty() ? hostName : userName + "@" + hostName);
+    hint += "' in a terminal of your own instead.";
+    return hint;
+}
+
+} // namespace
+
+bool LaunchTerminalForServer(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile, std::string & error)
+{
+    error.clear();
+
+    std::string program;
+    std::vector<std::string> leading;
+    const std::string overrideProgram = EnvironmentVariable("LINUXSCP_TERMINAL");
+    if (!overrideProgram.empty())
+    {
+        /* '<program> [args]', e.g. 'xterm -e' or 'foot'. */
+        const std::vector<std::string> words = SplitWhitespace(overrideProgram);
+        program = words[0];
+        leading.assign(words.begin() + 1, words.end());
+    }
+    else
+    {
+        if (EnvironmentVariable("DISPLAY").empty() &&
+            EnvironmentVariable("WAYLAND_DISPLAY").empty())
+        {
+            error = "No graphical session was found (DISPLAY and WAYLAND_DISPLAY "
+                "are not set), so no terminal window can be opened.";
+            error += SshHint(userName, hostName, portNumber);
+            return false;
+        }
+        for (size_t i = 0; i < sizeof(kTerminalPrograms) / sizeof(kTerminalPrograms[0]); i++)
+        {
+            const std::string found = FindExecutableOnPath(kTerminalPrograms[i].name);
+            if (found.empty())
+            {
+                continue;
+            }
+            program = found;
+            for (int n = 0; n < 3 && kTerminalPrograms[i].leadingArgs[n] != NULL; n++)
+            {
+                leading.push_back(kTerminalPrograms[i].leadingArgs[n]);
+            }
+            break;
+        }
+        if (program.empty())
+        {
+            error = "None of the common desktop terminals is installed; set "
+                "LINUXSCP_TERMINAL to the terminal program to use.";
+            error += SshHint(userName, hostName, portNumber);
+            return false;
+        }
+    }
+
+    std::string ssh = FindExecutableOnPath("ssh");
+    if (ssh.empty())
+    {
+        error = "The ssh client is not installed, so no terminal can be opened.";
+        return false;
+    }
+
+    std::vector<std::string> command;
+    command.push_back(program);
+    command.insert(command.end(), leading.begin(), leading.end());
+    command.push_back(ssh);
+    const std::vector<std::string> sshArgs = BuildSshArguments(userName,
+        hostName, portNumber, privateKeyFile);
+    command.insert(command.end(), sshArgs.begin(), sshArgs.end());
+
+    /*
+     * Start the terminal without waiting for it (it outlives this
+     * process), but report a failed exec: the write end of the pipe is
+     * closed by the exec, and a child that cannot exec writes the reason
+     * into it instead.
+     */
+    int statusPipe[2];
+    if (pipe(statusPipe) != 0)
+    {
+        error = std::string("Failed to create the exec status pipe: ") + strerror(errno);
+        return false;
+    }
+    const pid_t pid = fork();
+    if (pid < 0)
+    {
+        close(statusPipe[0]);
+        close(statusPipe[1]);
+        error = std::string("Failed to fork: ") + strerror(errno);
+        return false;
+    }
+    if (pid == 0)
+    {
+        /* Intermediate child: exit at once so the terminal is not a child
+         * of this process (nobody would wait for it). */
+        close(statusPipe[0]);
+        const pid_t grandchild = fork();
+        if (grandchild != 0)
+        {
+            _exit(grandchild < 0 ? 1 : 0);
+        }
+        (void)fcntl(statusPipe[1], F_SETFD, FD_CLOEXEC);
+        std::vector<char *> argv;
+        argv.reserve(command.size() + 1);
+        for (size_t i = 0; i < command.size(); i++)
+        {
+            argv.push_back(const_cast<char *>(command[i].c_str()));
+        }
+        argv.push_back(NULL);
+        execvp(argv[0], argv.data());
+        const int saved = errno;
+        (void)!write(statusPipe[1], &saved, sizeof(saved));
+        _exit(127);
+    }
+
+    close(statusPipe[1]);
+    int childStatus = 0;
+    while (waitpid(pid, &childStatus, 0) < 0 && errno == EINTR)
+    {
+    }
+    int execError = 0;
+    const ssize_t got = read(statusPipe[0], &execError, sizeof(execError));
+    close(statusPipe[0]);
+    if (got == static_cast<ssize_t>(sizeof(execError)) && execError != 0)
+    {
+        error = "Failed to start '" + program + "': " + strerror(execError) + ".";
+        error += SshHint(userName, hostName, portNumber);
+        return false;
+    }
+    return true;
+}
+
+#endif /* _WIN32 */
 } // namespace linuxscp

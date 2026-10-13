@@ -125,7 +125,13 @@ def run_linuxscp(command_script, session=None):
         url += f":{port}"
     url += "/"
 
-    full_commands = f"open -hostkey={hostkey} {url} ; {command_script} ; exit"
+    # The GUI asks its own questions (the web client confirms before it
+    # deletes or overwrites anything), so the core must not stop at its
+    # interactive 'are you sure' guard: every operation here is
+    # non-interactive and would otherwise come back as 'Cannot confirm
+    # this action without a terminal'.
+    full_commands = (f"open -hostkey={hostkey} {url} ; option confirm off ; "
+                     f"{command_script} ; exit")
     
     cmd = [
         bin_path,
@@ -385,6 +391,23 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             STATE["connected"] = False
             add_log("Disconnected from session", "info")
             self.send_json({"success": True})
+            return
+
+        if path == "/api/session/terminal":
+            # WinSCP's "Open Terminal": a shell on the connected server,
+            # in a terminal window of the desktop that runs this backend.
+            if not STATE["connected"]:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            add_log("Opening a terminal on the server", "info")
+            code, stdout, stderr = run_linuxscp("terminal")
+            if code == 0:
+                add_log("Terminal opened", "success")
+                self.send_json({"success": True, "output": stdout})
+            else:
+                message = stderr.strip() or stdout.strip() or "Cannot open a terminal"
+                add_log(message, "error")
+                self.send_json({"success": False, "error": message}, status=400)
             return
 
         if path == "/api/local/mkdir":

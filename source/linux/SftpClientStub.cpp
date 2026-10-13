@@ -91,6 +91,15 @@ int lscp_sftp_set_permissions(const char * path, int permissions)
     return -1;
 }
 
+int lscp_sftp_set_times(const char * path, unsigned long atime,
+    unsigned long mtime)
+{
+    (void)path;
+    (void)atime;
+    (void)mtime;
+    return -1;
+}
+
 int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx)
 {

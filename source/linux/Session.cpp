@@ -239,7 +239,20 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
         return SPR_OK;
     }
 
-    if (have_ssh_host_key(seat, host, port, keytype))
+    /*
+     * Consult the host key cache. The core hands every connection to the
+     * Seat, so this comparison is what makes a cached key trusted: a key
+     * that matches the stored one is accepted without a prompt, a key
+     * that differs from a stored one is refused, and only a host with no
+     * cached key at all is a new host.
+     */
+    const int cacheState = linuxscp_check_cached_host_key(host, port, keytype, keystr);
+    if (cacheState > 0)
+    {
+        Console::Instance().LogEvent(Texts::HostKeyCached(host, port));
+        return SPR_OK;
+    }
+    if (cacheState < 0)
     {
         console.Error(Texts::HostKeyMismatch(host, port, keytype, fingerprint));
         return make_spr_sw_abort_static("The host key does not match the cached one");
@@ -934,7 +947,15 @@ bool Session::Open(const SessionOptions & options, std::string & error)
     }
     if (!mOptions.privateKeyFile.empty())
     {
-        const std::string keyFile = ExpandTilde(mOptions.privateKeyFile);
+        std::string keyError;
+        const std::string keyFile = PreparePrivateKeyFile(
+            ExpandTilde(mOptions.privateKeyFile), keyError);
+        if (keyFile.empty())
+        {
+            error = keyError;
+            Close();
+            return false;
+        }
         Filename * fileName = filename_from_str(keyFile.c_str());
         conf_set_filename(conf, CONF_keyfile, fileName);
         filename_free(fileName);
@@ -1025,6 +1046,9 @@ void Session::Close()
         delete static_cast<ScpLogPolicy *>(mLogPolicy);
         mLogPolicy = NULL;
     }
+    /* A key file imported from the OpenSSH format is only needed while
+     * the session is open. */
+    DiscardImportedPrivateKeyFile();
 #endif
     mReceived.clear();
     mReceivedStart = 0;

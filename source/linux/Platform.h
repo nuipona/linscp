@@ -83,6 +83,18 @@ std::string CurrentUserName();
 bool SetFileTimes(const std::string & path, unsigned long atime,
     unsigned long mtime);
 
+/* Parses an HTTP 'Last-Modified' header value ('Tue, 13 Oct 2026
+ * 05:21:00 GMT') into seconds since the epoch. Returns 0 when the text
+ * cannot be read. */
+unsigned long ParseHttpDate(const std::string & text);
+
+/* Parses the date column of an 'ls -l' entry, which is either a clock
+ * time for a recent file ('Oct 13 05:21') or a year for an older one
+ * ('Oct 13  2026'), into seconds since the epoch. Returns 0 when the
+ * text cannot be read. */
+unsigned long ParseListingDate(const std::string & monthName,
+    const std::string & dayText, const std::string & timeOrYear);
+
 /* Runs args[0] with args[1..] without a shell, capturing everything the
  * child writes to stdout and stderr (read concurrently, so a child can
  * fill both pipes without deadlocking). Returns the child's exit code,
@@ -103,6 +115,22 @@ std::string ExecutableDirectory();
  * the current process and only returns on failure; on Windows it
  * starts the GUI detached and returns true. */
 bool LaunchGuiApplication(std::string & error);
+
+/* Arguments of the system 'ssh' command client that open an interactive
+ * session on the given server, without the program name. Exposed for the
+ * unit tests and for the message shown when no terminal can be started. */
+std::vector<std::string> BuildSshArguments(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile);
+
+/* Opens an interactive terminal on the given server: the system ssh in a
+ * desktop terminal emulator on POSIX (the terminal from LINUXSCP_TERMINAL,
+ * otherwise the first of the common ones that is installed), or PuTTY,
+ * Windows Terminal or the OpenSSH client on Windows. Returns false with
+ * 'error' set when nothing could be started. */
+bool LaunchTerminalForServer(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile, std::string & error);
 
 } // namespace linuxscp
 

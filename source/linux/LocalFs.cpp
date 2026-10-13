@@ -80,6 +80,7 @@ LocalFileInfo StatLocal(const std::string & path)
     result.error = 0;
     result.exists = true;
     result.size = static_cast<uint64_t>(st.st_size);
+    result.atime = static_cast<unsigned long>(st.st_atime);
     result.mtime = static_cast<unsigned long>(st.st_mtime);
     result.permissions = static_cast<unsigned long>(st.st_mode);
     return result;
