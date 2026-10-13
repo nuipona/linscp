@@ -1,4 +1,4 @@
-.TH LINUXSCP 1 "2026-10-12" "LinuxSCP 1.0" "LinuxSCP"
+.TH LINUXSCP 1 "2026-10-13" "LinuxSCP 1.0" "LinuxSCP"
 .SH NAME
 linuxscp \- secure file transfer client for the command line
 .SH SYNOPSIS
@@ -142,6 +142,9 @@ prints names only;
 is accepted and does nothing, as entries starting with a dot are always
 listed.
 .TP
+.BI lls " [directory[/mask]]"
+List local names, optionally matching a simple wildcard mask.
+.TP
 .BI lcd " directory"
 Change the local directory.
 .TP
@@ -174,7 +177,7 @@ When omitted,
 .I remote
 defaults to the current remote directory.
 .TP
-.BI synchronize " [local|remote|both] [" localdir " [" remotedir ]]"
+.BI synchronize " local|remote|both [" localdir " [" remotedir ]]"
 Synchronize directories in the specified direction.
 .B remote
 pushes newer local files to the remote server,
@@ -224,14 +227,15 @@ sessions only.
 Configure session options:
 .BR option\ confirm\ on|off
 controls overwrite and delete confirmations.
-.BR option\ batch\ on|off|abort
-controls non-interactive batch mode.
+.BR option\ batch\ on|off|abort|continue
+controls batch mode. Scripts default to aborting after an error.
+On and abort stop subsequent commands; off and continue proceed, but errors
+still cause a nonzero process exit status.
 .BR option\ resume\ on|off
 controls automatic transfer resumption.
-.BR option\ reconnect\ <secs>
-and
-.BR option\ transfer\ binary|ascii
-are also recognized for WinSCP script compatibility.
+.BR option\ transfer\ binary
+is supported. Reconnect settings, ASCII/automatic transfers, file-mask
+switches and other unimplemented compatibility options fail explicitly.
 .TP
 .B help
 List the commands.
@@ -288,11 +292,15 @@ linuxscp \-batch \-script=sync.txt
 .fi
 .RE
 .SH LIMITATIONS
-The Debian client is an SFTP command-line client. While recursive directory
-transfers, directory synchronization, and script compatibility options are
-supported, it does not yet implement the SCP protocol, FTP, FTPS, WebDAV,
-Amazon S3, local-to-local transfers, resuming interrupted transfers or a
-graphical interface.
+LinuxSCP does not implement full WinSCP feature parity. Native POSIX SFTP,
+basic recursive transfers/resume, synchronization and a browser-based GUI
+exist. Other protocols use curl and depend on its build capabilities.
+WebDAV listing is incomplete; authenticated S3 signing/listing is absent.
+File masks, ASCII conversion, retries/reconnect, advanced synchronization,
+persistent multi-session management, the remote editor and the .NET API
+are not implemented. Bidirectional synchronization is sequential copying,
+not a conflict-safe planner; both with \-delete is rejected.
+See docs/upstream-parity.md for the pinned baseline and completion plan.
 .SH SEE ALSO
 .BR sftp (1),
 .BR ssh (1),

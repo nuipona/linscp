@@ -9,11 +9,12 @@ Rules-Requires-Root: no
 Package: linuxscp
 Architecture: any
 Depends: ${shlibs:Depends}, python3
-Description: graphical and console file transfer client (SFTP, FTP, WebDAV, S3)
+Description: graphical and console file transfer client
  LinuxSCP is the native Linux port of WinSCP, providing both an interactive
  command-line interface and a dual-pane Norton Commander graphical client
  (linuxscp-gui).
  .
- Supports SFTP, SCP, FTP, FTPS, WebDAV, and Amazon S3 with interrupted
- transfer resume, recursive directory synchronization, public-key
- authentication, and full batch script compatibility.
+ Provides native SFTP, curl-backed transfers, basic transfer resume and
+ recursive synchronization, public-key authentication, and a subset of
+ WinSCP scripting. Protocol support depends on the backend; WebDAV and
+ Amazon S3 support are incomplete. Full WinSCP feature parity is not provided.

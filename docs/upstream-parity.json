@@ -1,0 +1,250 @@
+{
+  "upstream": {
+    "repository": "winscp/winscp",
+    "commit": "69edabbe2dc2c62661a7d3fc7e2396b5f42d504d",
+    "audited_on": "2026-10-13",
+    "command_sources": [
+      "source/core/Script.cpp",
+      "source/core/Script.h"
+    ]
+  },
+  "commands": {
+    "!": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "ascii": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "binary": {
+      "status": "partial",
+      "notes": "Implemented binary transfer mode; no argument arity validation."
+    },
+    "bye": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "call": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "cd": {
+      "status": "partial",
+      "notes": "Directory argument required; no implicit home directory."
+    },
+    "checksum": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "chmod": {
+      "status": "partial",
+      "notes": "Octal permissions; no full upstream permission syntax or recursion."
+    },
+    "close": {
+      "status": "partial",
+      "notes": "Single connection only; no indexed session close."
+    },
+    "copyid": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "cp": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "dir": {
+      "status": "partial",
+      "notes": "Directory listing; no upstream file-mask path behavior across all backends."
+    },
+    "echo": {
+      "status": "partial",
+      "notes": "Plain token output; no full upstream switch/parameter/environment expansion semantics."
+    },
+    "exit": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "get": {
+      "status": "partial",
+      "notes": "Binary recursive transfers and offset resume; no WinSCP file masks, ASCII/automatic mode, speed limit, transfer presets, or full resume policy."
+    },
+    "help": {
+      "status": "partial",
+      "notes": "General help only; no per-command help or abbreviation resolution."
+    },
+    "keepuptodate": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "lcd": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "lls": {
+      "status": "partial",
+      "notes": "Local directories and simple wildcard masks; names-only output, not upstream formatting."
+    },
+    "ln": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "lpwd": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "ls": {
+      "status": "partial",
+      "notes": "Directory listing; no upstream file-mask path behavior across all backends."
+    },
+    "man": {
+      "status": "partial",
+      "notes": "General help only; no per-command help or abbreviation resolution."
+    },
+    "mget": {
+      "status": "partial",
+      "notes": "Binary recursive transfers and offset resume; no WinSCP file masks, ASCII/automatic mode, speed limit, transfer presets, or full resume policy."
+    },
+    "mkdir": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "mput": {
+      "status": "partial",
+      "notes": "Binary recursive transfers and offset resume; same transfer option gaps as get."
+    },
+    "mv": {
+      "status": "partial",
+      "notes": "One source and one destination only."
+    },
+    "open": {
+      "status": "partial",
+      "notes": "URL sessions only; no stored sites, raw settings, SSH tunnels or session selection."
+    },
+    "option": {
+      "status": "partial",
+      "notes": "Confirm, batch and resume supported; binary only. Reconnect, echo, failonnomatch, include/exclude and other upstream options are not implemented. Batch abort stops subsequent commands, not necessarily remaining files within a command."
+    },
+    "put": {
+      "status": "partial",
+      "notes": "Binary recursive transfers and offset resume; same transfer option gaps as get."
+    },
+    "pwd": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "recv": {
+      "status": "partial",
+      "notes": "Binary recursive transfers and offset resume; no WinSCP file masks, ASCII/automatic mode, speed limit, transfer presets, or full resume policy."
+    },
+    "rename": {
+      "status": "partial",
+      "notes": "One source and one destination only."
+    },
+    "rm": {
+      "status": "partial",
+      "notes": "File removal; no recursive directory deletion or upstream switches."
+    },
+    "rmdir": {
+      "status": "partial",
+      "notes": "One empty directory only, not multiple arguments."
+    },
+    "send": {
+      "status": "partial",
+      "notes": "Binary recursive transfers and offset resume; same transfer option gaps as get."
+    },
+    "session": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "stat": {
+      "status": "partial",
+      "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+    },
+    "symlink": {
+      "status": "missing",
+      "notes": "Not implemented (some spellings are recognized only to report an error)."
+    },
+    "synchronize": {
+      "status": "partial",
+      "notes": "Recursive timestamp-based copy; lacks criteria, mirror, preview, filters and conflict handling. Both is sequential copying, not an upstream synchronization planner."
+    }
+  },
+  "features": [
+    {
+      "name": "SFTP",
+      "status": "partial",
+      "notes": "Native PuTTY transport on POSIX; Windows uses curl. Extension negotiation, links, remote copy/checksum, full metadata and backend equivalence remain unverified."
+    },
+    {
+      "name": "SCP",
+      "status": "partial",
+      "notes": "Delegated to curl, whose SCP support depends on its build; no WinSCP shell-based directory and command engine."
+    },
+    {
+      "name": "FTP/FTPS",
+      "status": "partial",
+      "notes": "curl transport and listing parser; no full upstream MLSD, TLS configuration, active/passive and server compatibility validation."
+    },
+    {
+      "name": "WebDAV",
+      "status": "partial",
+      "notes": "Generic HTTP listing parsing, not DAV PROPFIND XML; incomplete directory/property semantics."
+    },
+    {
+      "name": "Amazon S3",
+      "status": "missing",
+      "notes": "s3 URLs currently become HTTPS; no AWS SigV4 signing, credentials/region configuration or S3 bucket/object listing implementation."
+    },
+    {
+      "name": "Transfers",
+      "status": "partial",
+      "notes": "Basic binary recursion/resume; missing masks, text conversion, bandwidth limits, reconnect/retry, robust atomic transfer and full metadata policies."
+    },
+    {
+      "name": "Synchronization",
+      "status": "partial",
+      "notes": "Sequential recursive copying; missing plan/preview, criteria, mirror, watch mode, exclusions and conflict-safe bidirectional synchronization."
+    },
+    {
+      "name": "Sessions/configuration",
+      "status": "missing",
+      "notes": "No persistent site manager, multiple core sessions, session import/export or full configuration model."
+    },
+    {
+      "name": "Security/authentication",
+      "status": "partial",
+      "notes": "POSIX passwords, keys, agent and host-key checks exist. GSSAPI is disabled; SSH tunnels, proxy UI/settings and curl pin equivalence need work. GUI defaults to wildcard host key."
+    },
+    {
+      "name": "GUI",
+      "status": "partial",
+      "notes": "Browser Commander layout and background jobs exist; no full Commander/Explorer equivalence, tabs/site manager, advanced queue controls or reconnecting persistent sessions."
+    },
+    {
+      "name": "Editing/search",
+      "status": "missing",
+      "notes": "No integrated remote editor, save/upload monitoring, full remote search or custom command system."
+    },
+    {
+      "name": "Automation",
+      "status": "partial",
+      "notes": "Subset console scripting; no WinSCP .NET assembly/PowerShell API or structured XML action log and full parameter expansion."
+    },
+    {
+      "name": "Desktop integration",
+      "status": "partial",
+      "notes": "Debian launcher/icons and terminal launch exist; no full upstream drag/drop, shell integration or extension system."
+    },
+    {
+      "name": "Localization/accessibility",
+      "status": "missing",
+      "notes": "No equivalent upstream translation catalog and desktop accessibility verification."
+    },
+    {
+      "name": "Packaging/platforms",
+      "status": "partial",
+      "notes": "Make/CMake and Debian/Windows builds exist; Windows curl may lack SSH protocols. Native builds do not establish functional parity."
+    }
+  ]
+}

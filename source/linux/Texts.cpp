@@ -68,9 +68,10 @@ std::string Usage()
 "  ls [-al1] [DIR]   list remote files\n"
 "  lcd DIR           change the local directory\n"
 "  lpwd              print the local directory\n"
+"  lls [DIR[/MASK]]  list local file names\n"
 "  get [opts] REMOTE [LOCAL]  download file(s) or directories (-r, -delete, -neweronly, -resume)\n"
 "  put [opts] LOCAL [REMOTE]  upload file(s) or directories (-r, -delete, -neweronly, -resume)\n"
-"  synchronize [local|remote|both] [LOCAL [REMOTE]]  synchronize directories\n"
+"  synchronize local|remote|both [LOCAL [REMOTE]]  synchronize directories\n"
 "  rm FILE           remove remote file(s)\n"
 "  rmdir DIR         remove a remote directory\n"
 "  mkdir DIR         create a remote directory\n"
@@ -79,8 +80,9 @@ std::string Usage()
 "  stat FILE         print remote file attributes\n"
 "  terminal          open an interactive shell on the server\n"
 "  echo [MESSAGE]    display text message\n"
-"  option confirm|batch|resume|reconnect|transfer VALUE  configure session options\n"
-"  help              list the commands\n"
+"  option confirm|batch|resume|transfer VALUE  configure session options\n"
+"  binary            select binary transfers (ASCII is unsupported)\n"
+"  help              list the commands (alias: man)\n"
 "  exit              end the session\n";
 }
 

@@ -104,7 +104,7 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 
 ### Commands
 
-`open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lcd`, `lpwd`, `get`,
+`open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lls`, `lcd`, `lpwd`, `get`,
 `put`, `synchronize`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`,
 `terminal`, `option`, `help`, `exit`.
 
@@ -123,7 +123,7 @@ and `put` support WinSCP switches:
 When the destination is omitted, `get` defaults to the local working directory
 and `put` defaults to the remote working directory.
 
-`synchronize [local|remote|both] [localdir [remotedir]]` compares directory
+`synchronize local|remote|both [localdir [remotedir]]` compares directory
 trees and synchronizes newer and missing files in the specified direction.
 
 Overwrite and delete confirmations are enabled by default. Interactive runs
@@ -131,7 +131,10 @@ ask before replacing or removing data. In `-batch` or other non-interactive
 runs, an operation that needs confirmation fails without reading from stdin;
 put `option confirm off` in a trusted script to disable those checks.
 `option resume on|off` controls automatic transfer resumption across batch
-sessions, `option batch on|off|abort` configures script batch mode, and `echo`
+sessions. Scripts default to aborting after an error;
+`option batch on|off|abort|continue` configures script batch mode. `on`/`abort`
+stop subsequent commands, while `off`/`continue` proceed but preserve a nonzero
+exit status. `echo`
 prints messages for script output logging.
 
 `terminal` opens an interactive shell on the connected server, like the
@@ -159,8 +162,10 @@ open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
 ```
 
 In addition to `sftp://`, `ssh://` and `scp://`, LinuxSCP supports standard
-file-transfer URLs across `ftp://`, `ftps://`, `dav://` / `webdav://` (WebDAV),
-and `s3://` (Amazon S3), as well as bare `host[:port]`. The password is
+URL schemes `ftp://`, `ftps://`, `dav://` / `webdav://`, and `s3://`,
+as well as bare `host[:port]`. These curl-backed paths do not establish full
+protocol support: WebDAV listing is incomplete and authenticated S3 is not
+implemented. See [the parity audit](upstream-parity.md). The password is
 optional here; prefer `-password=` or `LINUXSCP_PASSWORD` so that it does not
 end up in the script file.
 
@@ -172,6 +177,16 @@ LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
 * Background transfer queue with live progress metrics and transfer speeds.
 * Real-time console log and embedded interactive command-line terminal.
 * Full integration with desktop environments via `/usr/share/applications/linuxscp.desktop`.
+
+### Compatibility limits
+
+`man`, `recv`/`mget`, and `send`/`mput` alias existing commands. `lls` lists
+local directory entries or a simple wildcard mask, in names-only format.
+Only binary transfers are implemented: `binary`, `option transfer binary`
+and `-transfer=binary` work; ASCII/automatic, `-filemask`, reconnect and other
+unimplemented switches fail explicitly before a transfer. `synchronize both
+-delete` is rejected. This prevents ignored filters or settings from silently
+changing what a script transfers/deletes.
 
 ### Authentication
 
@@ -198,7 +213,7 @@ targets, and does not add the key to the persistent cache. With no
 ## What is verified
 
 `make -C source/linux clean all check` builds the client and runs the unit
-tests in `source/linux/tests/UnitTest.cpp` (234 checks), covering command-line
+tests in `source/linux/tests/UnitTest.cpp` (the total is printed by the test runner), covering command-line
 and command-sequence splitting, path handling, file masks, output formatting,
 strict site URL parsing, and local filesystem access. The Debian binary package
 also builds with `dpkg-buildpackage -b -us -uc`; its contents and extracted
@@ -276,10 +291,13 @@ ssh-agent -k
 `-log=<file>` records the session, and `-verbose` prints the connection
 layer's events to standard output as they happen.
 
-## Verified Capabilities
+## Current capabilities and limitations
 
-LinuxSCP provides comprehensive parity for Linux environments:
-* Multi-protocol support (SFTP, SCP, FTP, FTPS, WebDAV, Amazon S3).
+LinuxSCP does not provide full WinSCP parity. See
+[the pinned upstream audit](upstream-parity.md) for remaining work. Current
+implementation includes:
+* Native POSIX SFTP and curl-backed transfers (protocol/build dependent;
+  WebDAV and S3 are incomplete).
 * Resuming interrupted file transfers (`-resume`, `option resume on|off`).
 * Recursive directory downloads, uploads, and synchronization (`synchronize`).
 * Dual-pane graphical Commander desktop interface (`linuxscp-gui`).

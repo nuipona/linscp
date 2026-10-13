@@ -124,6 +124,8 @@ bool ParseOctalPermissions(const std::string & text, unsigned long & permissions
 } // namespace
 
 Script::Script() :
+    mBatchMode(Console::Instance().IsBatchMode() ? BatchMode::Abort : BatchMode::Off),
+    mBatchConfigured(false),
     mConfirm(true),
     mResume(false),
     mExit(false),
@@ -1124,8 +1126,73 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
     return success;
 }
 
+bool Script::ValidateTransferSwitches(const std::string & command,
+    const std::vector<std::string> & args)
+{
+    for (const std::string & arg : args)
+    {
+        if (!arg.empty() && arg[0] == '-' && arg != "-delete" &&
+            arg != "-neweronly" && arg != "-preservetime" &&
+            arg != "-nopreservetime" && arg != "-r" && arg != "-resume" &&
+            arg != "-transfer=binary")
+        {
+            Console::Instance().Error(Texts::WrongArguments(command,
+                "Unsupported switch '" + arg + "'; it will not be ignored. "
+                "Prefix a filename beginning with '-' with './'."));
+            mErrors++;
+            return false;
+        }
+    }
+    return true;
+}
+
+bool Script::ListLocal(const std::vector<std::string> & args)
+{
+    if (args.size() > 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("lls", "Syntax: lls [<directory>[/<mask>]]"));
+        mErrors++;
+        return false;
+    }
+    std::string error;
+    std::string path = args.empty() ? GetLocalDirectory(error) : ExpandTilde(args[0]);
+    std::vector<std::string> paths;
+    if (StatLocal(path).isDir)
+    {
+        std::vector<std::string> names;
+        if (!ListLocalDirectory(path, names, error))
+        {
+            Console::Instance().Error(Texts::CannotReadDirectory(path, error));
+            mErrors++;
+            return false;
+        }
+        for (const std::string & name : names)
+        {
+            paths.push_back(JoinLocalPath(path, name));
+        }
+    }
+    else if (!ExpandLocalWildcard(path, paths, error) ||
+        (!HasWildcard(path) && paths.empty()))
+    {
+        Console::Instance().Error(Texts::LocalError("list", path,
+            error.empty() ? "No such file or directory." : error));
+        mErrors++;
+        return false;
+    }
+    std::sort(paths.begin(), paths.end());
+    for (const std::string & entry : paths)
+    {
+        Console::Instance().WriteLine(LocalFileName(entry));
+    }
+    return true;
+}
+
 bool Script::GetFiles(const std::vector<std::string> & args)
 {
+    if (!ValidateTransferSwitches("get", args))
+    {
+        return false;
+    }
     if (!RequireConnection())
     {
         return false;
@@ -1156,13 +1223,13 @@ bool Script::GetFiles(const std::vector<std::string> & args)
         {
             flags.recursive = true;
         }
-        else if (StartsWith(a, "-resume") || a == "-resume")
+        else if (a == "-resume")
         {
             flags.resume = true;
         }
-        else if (StartsWith(a, "-filemask=") || StartsWith(a, "-transfer="))
+        else if (a == "-transfer=binary")
         {
-            /* Accepted WinSCP switch compatibility */
+            /* All currently implemented transports transfer binary data. */
         }
         else
         {
@@ -1354,6 +1421,10 @@ bool Script::GetFiles(const std::vector<std::string> & args)
 
 bool Script::PutFiles(const std::vector<std::string> & args)
 {
+    if (!ValidateTransferSwitches("put", args))
+    {
+        return false;
+    }
     if (!RequireConnection())
     {
         return false;
@@ -1384,13 +1455,13 @@ bool Script::PutFiles(const std::vector<std::string> & args)
         {
             flags.recursive = true;
         }
-        else if (StartsWith(a, "-resume") || a == "-resume")
+        else if (a == "-resume")
         {
             flags.resume = true;
         }
-        else if (StartsWith(a, "-filemask=") || StartsWith(a, "-transfer="))
+        else if (a == "-transfer=binary")
         {
-            /* Accepted WinSCP switch compatibility */
+            /* All currently implemented transports transfer binary data. */
         }
         else
         {
@@ -1581,11 +1652,6 @@ bool Script::PutFiles(const std::vector<std::string> & args)
 
 bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
 {
-    if (!RequireConnection())
-    {
-        return false;
-    }
-
     std::string mode = "local";
     TransferFlags flags;
     flags.newerOnly = true;
@@ -1606,10 +1672,32 @@ bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
         {
             mode = ToLower(a);
         }
+        else if (!a.empty() && a[0] == '-')
+        {
+            Console::Instance().Error(Texts::WrongArguments("synchronize",
+                "Unsupported switch '" + a + "'; it will not be ignored."));
+            mErrors++;
+            return false;
+        }
         else
         {
             dirs.push_back(a);
         }
+    }
+
+    if (args.empty() || (ToLower(args[0]) != "local" &&
+        ToLower(args[0]) != "remote" && ToLower(args[0]) != "both") ||
+        dirs.size() > 2 || (mode == "both" && flags.deleteObsolete))
+    {
+        Console::Instance().Error(Texts::WrongArguments("synchronize",
+            "Syntax: synchronize local|remote|both [LOCAL [REMOTE]] [-delete]. "
+            "-delete is not allowed with both."));
+        mErrors++;
+        return false;
+    }
+    if (!RequireConnection())
+    {
+        return false;
     }
 
     std::string error;
@@ -1640,7 +1728,7 @@ bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
         ok = DownloadDirectoryRecursive(remoteDir, localDir, flags, bytes) && ok;
     }
 
-    Console::Instance().Status("Synchronization completed.");
+    Console::Instance().Status(ok ? "Synchronization completed." : "Synchronization failed.");
     return ok;
 }
 
@@ -1980,7 +2068,7 @@ bool Script::SetOption(const std::vector<std::string> & args)
     if (args.empty())
     {
         Console::Instance().Error(Texts::WrongArguments("option",
-            "Syntax: option <name> <value> (supported: confirm, batch, resume, reconnect, transfer)"));
+            "Syntax: option <name> <value> (supported: confirm, batch, resume, transfer=binary)"));
         mErrors++;
         return false;
     }
@@ -1994,7 +2082,10 @@ bool Script::SetOption(const std::vector<std::string> & args)
         }
         if (name == "batch")
         {
-            Console::Instance().Status(std::string("batch = ") + (Console::Instance().IsBatchMode() ? "on" : "off"));
+            const char * value = mBatchMode == BatchMode::Abort ? "abort" :
+                mBatchMode == BatchMode::Continue ? "continue" :
+                mBatchMode == BatchMode::On ? "on" : "off";
+            Console::Instance().Status(std::string("batch = ") + value);
             return true;
         }
         if (name == "resume")
@@ -2006,7 +2097,7 @@ bool Script::SetOption(const std::vector<std::string> & args)
     if (args.size() != 2)
     {
         Console::Instance().Error(Texts::WrongArguments("option",
-            "Syntax: option <name> <value> (supported: confirm, batch, resume, reconnect, transfer)"));
+            "Syntax: option <name> <value> (supported: confirm, batch, resume, transfer=binary)"));
         mErrors++;
         return false;
     }
@@ -2051,32 +2142,36 @@ bool Script::SetOption(const std::vector<std::string> & args)
     }
     if (name == "batch")
     {
-        if (value == "on" || value == "abort")
+        if (value == "on")
         {
-            Console::Instance().SetBatchMode(true);
+            mBatchMode = BatchMode::On;
+        }
+        else if (value == "abort")
+        {
+            mBatchMode = BatchMode::Abort;
+        }
+        else if (value == "continue")
+        {
+            mBatchMode = BatchMode::Continue;
         }
         else if (value == "off")
         {
-            Console::Instance().SetBatchMode(false);
+            mBatchMode = BatchMode::Off;
         }
         else
         {
             Console::Instance().Error(Texts::WrongArguments("option",
-                "The value of 'batch' must be 'on', 'off' or 'abort'."));
+                "The value of 'batch' must be 'on', 'off', 'abort' or 'continue'."));
             mErrors++;
             return false;
         }
+        mBatchConfigured = true;
+        Console::Instance().SetBatchMode(mBatchMode != BatchMode::Off);
         return true;
     }
-    if (name == "reconnect")
+    if (name == "transfer" && value == "binary")
     {
-        Console::Instance().Status("Option 'reconnect' set to " + args[1]);
-        return true;
-    }
-    if (name == "transfer")
-    {
-        Console::Instance().Status("Option 'transfer' set to " + args[1]);
-        return true;
+        return true; // The implemented transfer mode is binary.
     }
     Console::Instance().Error(Texts::WrongArguments("option",
         "The option '" + args[0] + "' is not supported by this build."));
@@ -2090,6 +2185,21 @@ void Script::PrintHelp()
 }
 
 bool Script::ExecuteLine(const std::string & line)
+{
+    if (mExit)
+    {
+        return false;
+    }
+    const int before = mErrors;
+    const bool keepRunning = ExecuteCommand(line);
+    if (mErrors != before && (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On))
+    {
+        mExit = true;
+    }
+    return keepRunning && !mExit;
+}
+
+bool Script::ExecuteCommand(const std::string & line)
 {
     std::string trimmed = line;
     size_t start = trimmed.find_first_not_of(" \t\r\n");
@@ -2112,7 +2222,7 @@ bool Script::ExecuteLine(const std::string & line)
         mExit = true;
         return false;
     }
-    if (command == "help" || command == "?")
+    if (command == "help" || command == "?" || command == "man")
     {
         PrintHelp();
         return true;
@@ -2161,17 +2271,27 @@ bool Script::ExecuteLine(const std::string & line)
         ChangeLocalDirectory(args);
         return true;
     }
+    if (command == "lls")
+    {
+        ListLocal(args);
+        return true;
+    }
+    if (command == "binary" || command == "ascii")
+    {
+        SetOption({"transfer", command});
+        return true;
+    }
     if (command == "lpwd")
     {
         PrintLocalDirectory();
         return true;
     }
-    if (command == "get")
+    if (command == "get" || command == "recv" || command == "mget")
     {
         GetFiles(args);
         return true;
     }
-    if (command == "put")
+    if (command == "put" || command == "send" || command == "mput")
     {
         PutFiles(args);
         return true;
@@ -2221,7 +2341,7 @@ bool Script::ExecuteLine(const std::string & line)
         OpenTerminal(args);
         return true;
     }
-    if (command == "call" || command == "show")
+    if (command == "call" || command == "show" || command == "!")
     {
         Console::Instance().Error(Texts::WrongArguments(command,
             "The connection runs the SFTP subsystem, so remote shell commands "
@@ -2237,6 +2357,12 @@ bool Script::ExecuteLine(const std::string & line)
 
 int Script::RunFile(const std::string & path)
 {
+    if (!mBatchConfigured)
+    {
+        mBatchMode = BatchMode::Abort;
+        Console::Instance().SetBatchMode(true);
+    }
+
     FILE * file = stdin;
     bool closeFile = false;
     if (path != "-")
@@ -2293,6 +2419,12 @@ int Script::RunFile(const std::string & path)
 
 int Script::RunCommand(const std::string & line)
 {
+    if (!mBatchConfigured)
+    {
+        mBatchMode = BatchMode::Abort;
+        Console::Instance().SetBatchMode(true);
+    }
+
     /* '-command=' may carry several commands separated by ';'. */
     std::vector<std::string> commands = SplitCommands(line);
     for (size_t i = 0; i < commands.size(); i++)
