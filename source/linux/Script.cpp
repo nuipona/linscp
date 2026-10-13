@@ -129,7 +129,9 @@ Script::Script() :
     mConfirm(true),
     mResume(false),
     mExit(false),
-    mErrors(0)
+    mErrors(0),
+    mLastCommandFailed(false),
+    mEditMaxSize(EditOptions::kDefaultMaxSize)
 {
 }
 
@@ -333,6 +335,26 @@ int Script::RemoteRename(const std::string & from, const std::string & to, std::
     return ProtocolClient::Move(mSession.Options(), from, to, error);
 }
 
+/* The three remote operations the editor needs. They are thin wrappers
+ * so that Editor.cpp never has to know about the session. */
+int Script::StatForEdit(const std::string & path, LscpAttrs & attrs, std::string & error)
+{
+    return RemoteStat(path, &attrs, error);
+}
+
+int Script::DownloadForEdit(const std::string & remote, const std::string & local,
+    bool preserveTime, std::string & error)
+{
+    return RemoteGet(remote, local, 0, preserveTime, NULL, ProgressCallback, NULL, error);
+}
+
+int Script::UploadForEdit(const std::string & local, const std::string & remote,
+    bool preserveTime, std::string & error)
+{
+    return RemotePut(local, remote, -1, 0, preserveTime, NULL, ProgressCallback,
+        NULL, error);
+}
+
 int Script::RemoteSetPermissions(const std::string & path, int permissions,
     std::string & error)
 {
@@ -405,6 +427,13 @@ bool Script::OpenSite(const std::vector<std::string> & args)
             "Syntax: open sftp://[user[:password]@]host[:port]/[path]"));
         mErrors++;
         return false;
+    }
+
+    /* A stored session name is not a URL: 'open web1' connects to the
+     * session that was saved under that name. */
+    if (url.find("://") == std::string::npos && mSessions.Find(url) != NULL)
+    {
+        return OpenStoredSite(mSessions.Find(url)->name);
     }
 
     std::string error;
@@ -1650,33 +1679,260 @@ bool Script::PutFiles(const std::vector<std::string> & args)
     return any;
 }
 
-bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
+/* ------------------------------------------------------------------ *
+ * Synchronization                                                     *
+ * ------------------------------------------------------------------ */
+
+namespace {
+
+/* The local side of a synchronization. */
+class LocalSyncFileSystem : public SyncFileSystem
 {
-    std::string mode = "local";
-    TransferFlags flags;
-    flags.newerOnly = true;
-    flags.recursive = true;
-    std::vector<std::string> dirs;
+public:
+    virtual bool ListDirectory(const std::string & path,
+        std::vector<SyncEntry> & entries, std::string & error)
+    {
+        std::vector<std::string> names;
+        if (!ListLocalDirectory(path, names, error))
+        {
+            return false;
+        }
+        for (size_t i = 0; i < names.size(); i++)
+        {
+            const LocalFileInfo info = StatLocal(JoinLocalPath(path, names[i]));
+            SyncEntry entry;
+            entry.name = names[i];
+            entry.isDirectory = info.isDir;
+            entry.size = info.size;
+            entry.mtime = info.mtime;
+            entry.permissions = static_cast<unsigned long>(info.permissions);
+            entries.push_back(entry);
+        }
+        return true;
+    }
+
+    virtual const char * Label() const { return "local"; }
+};
+
+/* The remote side: whatever protocol this session speaks. */
+class RemoteSyncFileSystem : public SyncFileSystem
+{
+public:
+    explicit RemoteSyncFileSystem(Script & script) : mScript(script) {}
+
+    virtual bool ListDirectory(const std::string & path,
+        std::vector<SyncEntry> & entries, std::string & error)
+    {
+        return mScript.ListRemoteEntries(path, entries, error);
+    }
+
+    virtual const char * Label() const { return "remote"; }
+
+private:
+    Script & mScript;
+};
+
+std::string DescribeTime(unsigned long value)
+{
+    if (value == 0)
+    {
+        return "unknown";
+    }
+    std::tm parts;
+    if (!LocalTime(static_cast<std::time_t>(value), parts))
+    {
+        return "unknown";
+    }
+    char buffer[32];
+    strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M", &parts);
+    return std::string(buffer);
+}
+
+/* True for a directory that is the root of a file system: deleting
+ * "obsolete" entries there is far more likely to be a mistake than a
+ * synchronization, so 'synchronize -delete' refuses it. */
+bool IsFileSystemRoot(const std::string & path)
+{
+    std::string trimmed = path;
+    while (trimmed.size() > 1 &&
+        (trimmed[trimmed.size() - 1] == '/' || trimmed[trimmed.size() - 1] == '\\'))
+    {
+        trimmed.erase(trimmed.size() - 1);
+    }
+#if defined(_WIN32)
+    if (trimmed.size() == 2 && trimmed[1] == ':')
+    {
+        return true; /* C: */
+    }
+#endif
+    if (trimmed.empty())
+    {
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
+bool Script::ListRemoteEntries(const std::string & path,
+    std::vector<SyncEntry> & entries, std::string & error)
+{
+    LscpNames * names = NULL;
+    if (!RemoteListDir(path, names, error))
+    {
+        return false;
+    }
+    for (int i = 0; i < names->count; i++)
+    {
+        const char * raw = names->names[i].filename;
+        if (raw == NULL)
+        {
+            continue;
+        }
+        const std::string name(raw);
+        if (name == "." || name == "..")
+        {
+            continue;
+        }
+        SyncEntry entry;
+        entry.name = name;
+        const LscpAttrs & attrs = names->names[i].attrs;
+        if ((attrs.flags & LSCP_ATTR_PERMISSIONS) != 0)
+        {
+            entry.isDirectory = (attrs.permissions & 0040000) != 0;
+            entry.permissions = attrs.permissions;
+        }
+        if ((attrs.flags & LSCP_ATTR_SIZE) != 0)
+        {
+            entry.size = attrs.size;
+        }
+        if ((attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
+        {
+            entry.mtime = attrs.mtime;
+        }
+        /* A backend that does not report the permissions of a listing
+         * (curl) still has to be able to tell a directory from a file. */
+        if ((attrs.flags & LSCP_ATTR_PERMISSIONS) == 0)
+        {
+            LscpAttrs child = {};
+            std::string statError;
+            if (RemoteStat(JoinRemotePath(path, name), &child, statError) ==
+                LSCP_SFTP_STAT_EXISTS)
+            {
+                entry.isDirectory = (child.flags & LSCP_ATTR_PERMISSIONS) != 0 &&
+                    (child.permissions & 0040000) != 0;
+                if ((child.flags & LSCP_ATTR_PERMISSIONS) != 0)
+                {
+                    entry.permissions = child.permissions;
+                }
+                if ((child.flags & LSCP_ATTR_SIZE) != 0)
+                {
+                    entry.size = child.size;
+                }
+                if ((child.flags & LSCP_ATTR_ACMODTIME) != 0)
+                {
+                    entry.mtime = child.mtime;
+                }
+            }
+        }
+        entries.push_back(entry);
+    }
+    RemoteFreeNames(names);
+    return true;
+}
+
+bool Script::ParseSyncArguments(const std::vector<std::string> & args,
+    const std::string & command, SyncOptions & options,
+    std::vector<std::string> & dirs, bool & preview, int & interval,
+    int & count, std::string & error)
+{
+    error.clear();
+    preview = false;
+    interval = 10;
+    count = 0;
+    bool modeGiven = false;
 
     for (size_t i = 0; i < args.size(); i++)
     {
         const std::string & a = args[i];
-        if (a == "-delete")
+        const std::string lower = ToLower(a);
+        if (i == 0 && (lower == "local" || lower == "remote" || lower == "both"))
         {
-            /* WinSCP semantics: delete the target entries the other side
-             * does not have. The source is never removed by a
-             * synchronization. */
-            flags.deleteObsolete = true;
+            options.mode = lower == "local" ? SyncMode::Local :
+                lower == "remote" ? SyncMode::Remote : SyncMode::Both;
+            modeGiven = true;
         }
-        else if (i == 0 && (ToLower(a) == "local" || ToLower(a) == "remote" || ToLower(a) == "both"))
+        else if (lower == "-delete")
         {
-            mode = ToLower(a);
+            options.deleteObsolete = true;
+        }
+        else if (lower == "-preview" || lower == "-dryrun")
+        {
+            preview = true;
+        }
+        else if (lower == "-nonrecursive" || lower == "-nor")
+        {
+            options.recursive = false;
+        }
+        else if (StartsWith(lower, "-criteria="))
+        {
+            const std::string value = lower.substr(strlen("-criteria="));
+            if (value == "time")
+            {
+                options.criteria = SyncCriteria::Time;
+            }
+            else if (value == "size")
+            {
+                options.criteria = SyncCriteria::Size;
+            }
+            else if (value == "either")
+            {
+                options.criteria = SyncCriteria::Either;
+            }
+            else if (value == "none")
+            {
+                options.criteria = SyncCriteria::None;
+            }
+            else
+            {
+                error = "Unsupported criteria '" + value +
+                    "' (use time, size, either or none).";
+                return false;
+            }
+        }
+        else if (StartsWith(lower, "-filemask="))
+        {
+            const std::string value = a.substr(strlen("-filemask="));
+            std::string maskError;
+            if (!options.mask.Parse(value, maskError))
+            {
+                error = maskError;
+                return false;
+            }
+        }
+        else if (StartsWith(lower, "-interval="))
+        {
+            const int value = atoi(a.substr(strlen("-interval=")).c_str());
+            if (value < 1 || value > 86400)
+            {
+                error = "The interval must be between 1 and 86400 seconds.";
+                return false;
+            }
+            interval = value;
+        }
+        else if (StartsWith(lower, "-count="))
+        {
+            const int value = atoi(a.substr(strlen("-count=")).c_str());
+            if (value < 1 || value > 1000000)
+            {
+                error = "The count must be a positive number of passes.";
+                return false;
+            }
+            count = value;
         }
         else if (!a.empty() && a[0] == '-')
         {
-            Console::Instance().Error(Texts::WrongArguments("synchronize",
-                "Unsupported switch '" + a + "'; it will not be ignored."));
-            mErrors++;
+            error = "Unsupported switch '" + a + "'; it will not be ignored.";
             return false;
         }
         else
@@ -1685,13 +1941,287 @@ bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
         }
     }
 
-    if (args.empty() || (ToLower(args[0]) != "local" &&
-        ToLower(args[0]) != "remote" && ToLower(args[0]) != "both") ||
-        dirs.size() > 2 || (mode == "both" && flags.deleteObsolete))
+    if (args.empty() || !modeGiven || dirs.size() > 2)
     {
-        Console::Instance().Error(Texts::WrongArguments("synchronize",
-            "Syntax: synchronize local|remote|both [LOCAL [REMOTE]] [-delete]. "
-            "-delete is not allowed with both."));
+        error = "Syntax: " + command +
+            " local|remote|both [LOCAL [REMOTE]] [-delete] [-preview] "
+            "[-nonrecursive] [-criteria=time|size|either|none] [-filemask=MASK]"
+            " [-interval=SECS] [-count=N].";
+        return false;
+    }
+    return true;
+}
+
+bool Script::BuildSynchronizationPlan(SyncOptions & options,
+    const std::string & localDir, const std::string & remoteDir, SyncPlan & plan,
+    SyncState * state, std::string & error)
+{
+    options.state = state;
+    LocalSyncFileSystem localFs;
+    RemoteSyncFileSystem remoteFs(*this);
+    return PlanSynchronization(localFs, remoteFs, localDir, remoteDir,
+        options, plan, error);
+}
+
+void Script::PrintSynchronizationPlan(const SyncPlan & plan) const
+{
+    Console & console = Console::Instance();
+    console.Write(std::string("SYNCPLAN local=") + plan.localRoot +
+        "\tremote=" + plan.remoteRoot +
+        "\tmode=" + SyncModeName(plan.mode) +
+        "\tcriteria=" + SyncCriteriaName(plan.criteria) +
+        "\tmask=" + plan.mask.Describe() + "\n");
+    for (size_t i = 0; i < plan.items.size(); i++)
+    {
+        const SyncItem & item = plan.items[i];
+        if (item.action == SyncAction::None)
+        {
+            continue;
+        }
+        std::string detail = item.reason;
+        if (item.localTime != 0 || item.remoteTime != 0)
+        {
+            detail += " (local " + DescribeTime(item.localTime) +
+                ", remote " + DescribeTime(item.remoteTime) + ")";
+        }
+        console.Write(std::string(SyncActionName(item.action)) + "\t" + item.path +
+            "\t" + detail + "\n");
+    }
+    char summary[256];
+    snprintf(summary, sizeof(summary),
+        "SYNCSUMMARY download=%d upload=%d delete-local=%d delete-remote=%d "
+        "conflict=%d unchanged=%d bytes=%llu\n",
+        plan.Count(SyncAction::Download), plan.Count(SyncAction::Upload),
+        plan.Count(SyncAction::DeleteLocal), plan.Count(SyncAction::DeleteRemote),
+        plan.Count(SyncAction::Conflict), plan.Count(SyncAction::None),
+        plan.Bytes(SyncAction::Download) + plan.Bytes(SyncAction::Upload));
+    console.Write(std::string(summary));
+}
+
+void Script::RecordSyncState(SyncState * state, const std::string & relative,
+    const std::string & localPath, const std::string & remotePath)
+{
+    if (state == NULL)
+    {
+        return;
+    }
+    SyncStateEntry entry;
+    const LocalFileInfo info = StatLocal(localPath);
+    if (!info.exists)
+    {
+        return;
+    }
+    entry.localTime = info.mtime;
+    entry.size = info.size;
+    LscpAttrs attrs = {};
+    std::string error;
+    if (RemoteStat(remotePath, &attrs, error) == LSCP_SFTP_STAT_EXISTS)
+    {
+        if ((attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
+        {
+            entry.remoteTime = attrs.mtime;
+        }
+        if ((attrs.flags & LSCP_ATTR_SIZE) != 0)
+        {
+            entry.size = attrs.size;
+        }
+    }
+    state->Update(relative, entry);
+}
+
+bool Script::ExecuteSynchronizationPlan(SyncPlan & plan, const SyncOptions & options,
+    bool allowDelete, unsigned long long & bytesTransferred)
+{
+    Console & console = Console::Instance();
+    bool success = true;
+    bool deleteAllowed = allowDelete && options.deleteObsolete;
+
+    if (deleteAllowed && plan.HasConflicts())
+    {
+        console.Error("The plan has " +
+            std::to_string(plan.Count(SyncAction::Conflict)) +
+            " conflict(s); nothing was deleted. Resolve the conflicts (or "
+            "synchronize without -delete) and run the synchronization again.");
+        deleteAllowed = false;
+        mErrors++;
+        success = false;
+    }
+
+    for (size_t i = 0; i < plan.items.size(); i++)
+    {
+        const SyncItem & item = plan.items[i];
+        const std::string localPath =
+            LocalPathForRelative(plan.localRoot, item.path);
+        const std::string remotePath =
+            RemotePathForRelative(plan.remoteRoot, item.path);
+        std::string error;
+
+        switch (item.action)
+        {
+            case SyncAction::None:
+                RecordSyncState(options.state, item.path, localPath, remotePath);
+                break;
+
+            case SyncAction::Conflict:
+                console.Error("Conflict: '" + item.path + "' " + item.reason +
+                    ", so it was left unchanged.");
+                mErrors++;
+                success = false;
+                break;
+
+            case SyncAction::Upload:
+                if (item.isDirectory)
+                {
+                    if (!CreateRemoteDirectoryRecursive(remotePath, error))
+                    {
+                        console.Error(Texts::RemoteError("create directory",
+                            remotePath, error));
+                        mErrors++;
+                        success = false;
+                    }
+                    else
+                    {
+                        console.Status("Created remote directory '" + remotePath + "'.");
+                    }
+                    break;
+                }
+                if (!CreateRemoteDirectoryRecursive(RemoteDirName(remotePath), error))
+                {
+                    console.Error(Texts::RemoteError("create directory",
+                        RemoteDirName(remotePath), error));
+                    mErrors++;
+                    success = false;
+                    break;
+                }
+                {
+                    console.TransferStart(item.path, item.localSize);
+                    unsigned long long size = 0;
+                    const int result = RemotePut(localPath, remotePath, -1, 0, true,
+                        &size, ProgressCallback, NULL, error);
+                    console.TransferEnd(result == 0);
+                    if (result != 0)
+                    {
+                        console.Error(Texts::TransferFailed(remotePath, error));
+                        mErrors++;
+                        success = false;
+                        break;
+                    }
+                    bytesTransferred += size;
+                    console.Status("Uploaded " + Texts::FileTransferred(remotePath, size));
+                    RecordSyncState(options.state, item.path, localPath, remotePath);
+                }
+                break;
+
+            case SyncAction::Download:
+                if (item.isDirectory)
+                {
+                    if (!CreateLocalDirectoryRecursive(localPath, error))
+                    {
+                        console.Error(Texts::LocalError("create directory",
+                            localPath, error));
+                        mErrors++;
+                        success = false;
+                    }
+                    else
+                    {
+                        console.Status("Created local directory '" + localPath + "'.");
+                    }
+                    break;
+                }
+                if (!CreateLocalDirectoryRecursive(LocalDirName(localPath), error))
+                {
+                    console.Error(Texts::LocalError("create directory",
+                        LocalDirName(localPath), error));
+                    mErrors++;
+                    success = false;
+                    break;
+                }
+                {
+                    console.TransferStart(item.path, item.remoteSize);
+                    unsigned long long size = 0;
+                    const int result = RemoteGet(remotePath, localPath, 0, true,
+                        &size, ProgressCallback, NULL, error);
+                    console.TransferEnd(result == 0);
+                    if (result != 0)
+                    {
+                        console.Error(Texts::TransferFailed(remotePath, error));
+                        mErrors++;
+                        success = false;
+                        break;
+                    }
+                    bytesTransferred += size;
+                    console.Status("Downloaded " + Texts::FileTransferred(localPath, size));
+                    RecordSyncState(options.state, item.path, localPath, remotePath);
+                }
+                break;
+
+            case SyncAction::DeleteLocal:
+                if (!deleteAllowed)
+                {
+                    if (options.deleteObsolete)
+                    {
+                        console.Status("Kept '" + localPath + "'.");
+                    }
+                    break;
+                }
+                if (!ConfirmObsolete("local", localPath, item.isDirectory))
+                {
+                    success = false;
+                    break;
+                }
+                if (!RemoveLocalItemRecursive(localPath))
+                {
+                    success = false;
+                    break;
+                }
+                if (options.state != NULL)
+                {
+                    options.state->Remove(item.path);
+                }
+                break;
+
+            case SyncAction::DeleteRemote:
+                if (!deleteAllowed)
+                {
+                    if (options.deleteObsolete)
+                    {
+                        console.Status("Kept '" + remotePath + "'.");
+                    }
+                    break;
+                }
+                if (!ConfirmObsolete("remote", remotePath, item.isDirectory))
+                {
+                    success = false;
+                    break;
+                }
+                if (!RemoveRemoteItemRecursive(remotePath))
+                {
+                    success = false;
+                    break;
+                }
+                if (options.state != NULL)
+                {
+                    options.state->Remove(item.path);
+                }
+                break;
+        }
+    }
+    return success;
+}
+
+bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    SyncOptions options;
+    std::vector<std::string> dirs;
+    bool preview = false;
+    int interval = 10;
+    int count = 0;
+    std::string parseError;
+    if (!ParseSyncArguments(args, "synchronize", options, dirs, preview,
+        interval, count, parseError))
+    {
+        console.Error(Texts::WrongArguments("synchronize", parseError));
         mErrors++;
         return false;
     }
@@ -1702,11 +2232,11 @@ bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
 
     std::string error;
     std::string localDir = dirs.size() > 0 ? ExpandTilde(dirs[0]) : GetLocalDirectory(error);
-    std::string remoteDir = dirs.size() > 1 ? ResolveRemotePath(mRemoteDirectory, dirs[1]) : mRemoteDirectory;
-
+    std::string remoteDir = dirs.size() > 1 ?
+        ResolveRemotePath(mRemoteDirectory, dirs[1]) : mRemoteDirectory;
     if (localDir.empty())
     {
-        Console::Instance().Error("Cannot determine local directory: " + error);
+        console.Error("Cannot determine local directory: " + error);
         mErrors++;
         return false;
     }
@@ -1715,21 +2245,710 @@ bool Script::SynchronizeDirectories(const std::vector<std::string> & args)
         remoteDir = "/";
     }
 
-    Console::Instance().Status("Synchronizing (" + mode + ") '" + localDir + "' and '" + remoteDir + "'...");
+    /* The memory of the previous pass: what makes 'both' able to tell a
+     * conflict from a change, and a deletion from a new file. */
+    SyncState state;
+    const std::string stateKey = SyncState::MakeKey(
+        mSession.IsOpen() ? mSession.Options().hostName : std::string(),
+        localDir, remoteDir);
+    const std::string statePath = SyncState::DefaultPath(stateKey);
+    std::string stateError;
+    if (!state.Load(statePath, stateError))
+    {
+        console.Error(stateError);
+        mErrors++;
+        return false;
+    }
+    const bool firstPass = state.Empty();
+
+    SyncPlan plan;
+    if (!BuildSynchronizationPlan(options, localDir, remoteDir, plan, &state, error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+
+    if (preview)
+    {
+        PrintSynchronizationPlan(plan);
+        return true;
+    }
+
+    if (options.deleteObsolete &&
+        (IsFileSystemRoot(localDir) || IsFileSystemRoot(remoteDir)))
+    {
+        console.Error("Refusing to delete obsolete entries directly in the root "
+            "directory '" +
+            (IsFileSystemRoot(localDir) ? localDir : remoteDir) +
+            "'. Synchronize a subdirectory instead.");
+        mErrors++;
+        return false;
+    }
+    if (options.mode == SyncMode::Both && options.deleteObsolete && firstPass)
+    {
+        /* Without a previous pass there is no way to tell a file that was
+         * deleted on one side from a file that was created on the other,
+         * so this pass only transfers and records what it saw. */
+        console.Status("No previous synchronization of these directories is on "
+            "record: this pass transfers files but deletes nothing. Run it "
+            "again to let deletions follow.");
+    }
+
+    console.Status("Synchronizing (" + std::string(SyncModeName(options.mode)) +
+        ") '" + localDir + "' and '" + remoteDir + "'...");
 
     unsigned long long bytes = 0;
-    bool ok = true;
-    if (mode == "remote" || mode == "both")
+    bool ok = ExecuteSynchronizationPlan(plan, options, true, bytes);
+
+    if (!statePath.empty())
     {
-        ok = UploadDirectoryRecursive(localDir, remoteDir, flags, bytes) && ok;
+        std::string saveError;
+        if (!state.Save(statePath, saveError))
+        {
+            console.Error(saveError);
+            mErrors++;
+            ok = false;
+        }
     }
-    if (mode == "local" || mode == "both")
+    console.Status(ok ? "Synchronization completed." : "Synchronization failed.");
+    return ok;
+}
+
+bool Script::KeepUpToDate(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    SyncOptions options;
+    std::vector<std::string> dirs;
+    bool preview = false;
+    int interval = 10;
+    int count = 0;
+    std::string parseError;
+    if (!ParseSyncArguments(args, "keepuptodate", options, dirs, preview,
+        interval, count, parseError))
     {
-        ok = DownloadDirectoryRecursive(remoteDir, localDir, flags, bytes) && ok;
+        console.Error(Texts::WrongArguments("keepuptodate", parseError));
+        mErrors++;
+        return false;
+    }
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    if (count == 0 && !console.IsInteractive())
+    {
+        console.Error(Texts::WrongArguments("keepuptodate",
+            "It would run until it is interrupted; give -count=<passes> to run "
+            "a fixed number of passes."));
+        mErrors++;
+        return false;
     }
 
-    Console::Instance().Status(ok ? "Synchronization completed." : "Synchronization failed.");
+    std::string error;
+    std::string localDir = dirs.size() > 0 ? ExpandTilde(dirs[0]) : GetLocalDirectory(error);
+    std::string remoteDir = dirs.size() > 1 ?
+        ResolveRemotePath(mRemoteDirectory, dirs[1]) : mRemoteDirectory;
+    if (localDir.empty())
+    {
+        console.Error("Cannot determine local directory: " + error);
+        mErrors++;
+        return false;
+    }
+    if (remoteDir.empty())
+    {
+        remoteDir = "/";
+    }
+    if (options.deleteObsolete &&
+        (IsFileSystemRoot(localDir) || IsFileSystemRoot(remoteDir)))
+    {
+        console.Error("Refusing to delete obsolete entries directly in the root "
+            "directory; synchronize a subdirectory instead.");
+        mErrors++;
+        return false;
+    }
+
+    SyncState state;
+    const std::string statePath = SyncState::DefaultPath(SyncState::MakeKey(
+        mSession.IsOpen() ? mSession.Options().hostName : std::string(),
+        localDir, remoteDir));
+    std::string stateError;
+    if (!state.Load(statePath, stateError))
+    {
+        console.Error(stateError);
+        mErrors++;
+        return false;
+    }
+
+    InstallInterruptHandler();
+    console.Status("Watching '" + localDir + "' and '" + remoteDir + "' every " +
+        std::to_string(interval) + " seconds. Press Ctrl-C to stop.");
+
+    bool ok = true;
+    for (int pass = 1; count == 0 || pass <= count; pass++)
+    {
+        if (Interrupted())
+        {
+            console.Status("Stopped watching.");
+            break;
+        }
+        if (!mSession.IsOpen() || !mSession.IsAlive())
+        {
+            console.Error(Texts::NotConnected());
+            mErrors++;
+            ok = false;
+            break;
+        }
+
+        SyncPlan plan;
+        if (!BuildSynchronizationPlan(options, localDir, remoteDir, plan, &state, error))
+        {
+            console.Error(error);
+            mErrors++;
+            ok = false;
+        }
+        else if (preview)
+        {
+            PrintSynchronizationPlan(plan);
+        }
+        else if (plan.Count(SyncAction::Upload) == 0 &&
+            plan.Count(SyncAction::Download) == 0 &&
+            plan.Count(SyncAction::DeleteLocal) == 0 &&
+            plan.Count(SyncAction::DeleteRemote) == 0 &&
+            plan.Count(SyncAction::Conflict) == 0)
+        {
+            console.Status("Pass " + std::to_string(pass) +
+                ": nothing to do (every file is up to date).");
+        }
+        else
+        {
+            unsigned long long bytes = 0;
+            if (!ExecuteSynchronizationPlan(plan, options, true, bytes))
+            {
+                ok = false;
+            }
+            if (!statePath.empty())
+            {
+                std::string saveError;
+                if (!state.Save(statePath, saveError))
+                {
+                    console.Error(saveError);
+                    mErrors++;
+                    ok = false;
+                }
+            }
+        }
+
+        if (count != 0 && pass == count)
+        {
+            break;
+        }
+        if (Interrupted())
+        {
+            console.Status("Stopped watching.");
+            break;
+        }
+        /* Sleep in small steps so that Ctrl-C ends the wait. */
+        for (int waited = 0; waited < interval * 4; waited++)
+        {
+            if (Interrupted())
+            {
+                break;
+            }
+            SleepMilliseconds(250);
+        }
+    }
     return ok;
+}
+
+/* ------------------------------------------------------------------ *
+ * Remote editing                                                      *
+ * ------------------------------------------------------------------ */
+
+namespace {
+
+/* The open connection seen through the interface Editor needs. */
+class ScriptFileAccess : public RemoteFileAccess
+{
+public:
+    explicit ScriptFileAccess(Script & script) : mScript(script) {}
+
+    virtual int Stat(const std::string & path, LscpAttrs & attrs, std::string & error)
+    {
+        return mScript.StatForEdit(path, attrs, error);
+    }
+
+    virtual int Download(const std::string & remote, const std::string & local,
+        bool preserveTime, std::string & error)
+    {
+        return mScript.DownloadForEdit(remote, local, preserveTime, error);
+    }
+
+    virtual int Upload(const std::string & local, const std::string & remote,
+        bool preserveTime, std::string & error)
+    {
+        return mScript.UploadForEdit(local, remote, preserveTime, error);
+    }
+
+private:
+    Script & mScript;
+};
+
+} // namespace
+
+bool Script::EditRemoteFile(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    if (!RequireConnection())
+    {
+        return false;
+    }
+
+    EditOptions options;
+    options.editor = mEditor;
+    options.maxSize = mEditMaxSize;
+    std::vector<std::string> paths;
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        const std::string & a = args[i];
+        const std::string lower = ToLower(a);
+        if (lower == "-force")
+        {
+            options.force = true;
+        }
+        else if (lower == "-keep" || lower == "-keeptemp")
+        {
+            options.keepTempFile = true;
+        }
+        else if (lower == "-binary")
+        {
+            options.allowBinary = true;
+        }
+        else if (StartsWith(lower, "-editor="))
+        {
+            options.editor = a.substr(strlen("-editor="));
+        }
+        else if (!a.empty() && a[0] == '-')
+        {
+            console.Error(Texts::WrongArguments("edit",
+                "Unsupported switch '" + a + "'; it will not be ignored."));
+            mErrors++;
+            return false;
+        }
+        else
+        {
+            paths.push_back(a);
+        }
+    }
+
+    if (paths.size() != 1)
+    {
+        console.Error(Texts::WrongArguments("edit",
+            "Syntax: edit [-force] [-keep] [-editor=COMMAND] <remotefile>. "
+            "One file at a time."));
+        mErrors++;
+        return false;
+    }
+
+    ScriptFileAccess access(*this);
+    RemoteEditor editor(access, &console);
+    std::string error;
+    if (editor.Edit(ResolveRemotePath(mRemoteDirectory, paths[0]), options,
+        mConfirm, error))
+    {
+        return true;
+    }
+    console.Error(error);
+    mErrors++;
+    return false;
+}
+
+/* ------------------------------------------------------------------ *
+ * Stored sessions (the site manager)                                  *
+ * ------------------------------------------------------------------ */
+
+bool Script::SessionCommand(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    const std::string path = mSessions.Path();
+
+    if (args.size() >= 2 && ToLower(args[0]) == "export")
+    {
+        std::string error;
+        if (args.size() != 2)
+        {
+            console.Error(Texts::WrongArguments("session",
+                "Syntax: session export <file>."));
+            mErrors++;
+            return false;
+        }
+        if (!mSessions.ExportFile(ExpandTilde(args[1]), error))
+        {
+            console.Error(error);
+            mErrors++;
+            return false;
+        }
+        console.Status("Exported " + std::to_string(mSessions.Sessions().size()) +
+            " session(s) to '" + args[1] + "'.");
+        return true;
+    }
+
+    if (args.size() >= 2 && ToLower(args[0]) == "import")
+    {
+        if (args.size() != 2)
+        {
+            console.Error(Texts::WrongArguments("session",
+                "Syntax: session import <file>."));
+            mErrors++;
+            return false;
+        }
+        const bool merge = true;
+        std::string error;
+        const int imported = mSessions.ImportFile(ExpandTilde(args[1]), merge, error);
+        if (imported == 0)
+        {
+            console.Error("No sessions were imported from '" + args[1] + "'; " +
+                (error.empty() ? std::string("the file has none.") : error));
+            mErrors++;
+            return false;
+        }
+        if (!mSessions.Save(error))
+        {
+            console.Error(error);
+            mErrors++;
+            return false;
+        }
+        console.Status("Imported " + std::to_string(imported) +
+            " session(s) from '" + args[1] + "'.");
+        return true;
+    }
+
+    if (args.size() == 1 && ToLower(args[0]) == "list")
+    {
+        return SessionCommand(std::vector<std::string>());
+    }
+
+    if (args.size() == 1)
+    {
+        const StoredSession * stored = mSessions.Find(args[0]);
+        if (stored == NULL)
+        {
+            console.Error("There is no stored session named '" + args[0] + "'.");
+            mErrors++;
+            return false;
+        }
+        return OpenStoredSite(stored->name);
+    }
+
+    if (args.size() > 1)
+    {
+        console.Error(Texts::WrongArguments("session",
+            "Syntax: session [NAME|list|export <file>|import <file>]."));
+        mErrors++;
+        return false;
+    }
+
+    if (mSessions.Empty())
+    {
+        console.WriteLine("There are no stored sessions. Use "
+            "'savesession <name>' to store the current connection.");
+        if (!path.empty())
+        {
+            console.WriteLine("Sessions are stored in " + path);
+        }
+        return true;
+    }
+
+    console.WriteLine("Stored sessions in " + (path.empty() ?
+        std::string("(no configuration directory)") : path) + ":");
+    const std::vector<StoredSession> & sessions = mSessions.Sessions();
+    size_t width = 0;
+    for (size_t i = 0; i < sessions.size(); i++)
+    {
+        width = sessions[i].name.size() > width ? sessions[i].name.size() : width;
+    }
+    for (size_t i = 0; i < sessions.size(); i++)
+    {
+        std::string url = sessions[i].protocol.empty() ?
+            std::string("sftp") : sessions[i].protocol;
+        url += "://";
+        if (!sessions[i].userName.empty())
+        {
+            url += sessions[i].userName + "@";
+        }
+        url += sessions[i].hostName.empty() ? std::string("?") : sessions[i].hostName;
+        if (sessions[i].portNumber > 0 && sessions[i].portNumber != 22)
+        {
+            url += ":" + std::to_string(sessions[i].portNumber);
+        }
+        std::string line = "  " + sessions[i].name;
+        line.append(width - sessions[i].name.size() + 2, ' ');
+        line += url;
+        if (!sessions[i].remoteDirectory.empty())
+        {
+            line += "  -> " + sessions[i].remoteDirectory;
+        }
+        console.WriteLine(line);
+    }
+    return true;
+}
+
+bool Script::OpenStoredSite(const std::string & name)
+{
+    const StoredSession * stored = mSessions.Find(name);
+    if (stored == NULL)
+    {
+        return false;
+    }
+    std::string error;
+    if (mSession.IsOpen())
+    {
+        CloseSite();
+    }
+
+    SessionOptions options = SessionStore::ToSessionOptions(*stored, mDefaults);
+    if (options.userName.empty())
+    {
+        options.userName = CurrentUserName();
+    }
+    Console & console = Console::Instance();
+    console.Status("Connecting to " + options.hostName + " (stored session '" +
+        stored->name + "')...");
+    if (!mSession.Open(options, error))
+    {
+        console.Error(Texts::CannotOpenSession(options.hostName, error));
+        mErrors++;
+        return false;
+    }
+
+    if (UseNativeSftp(mSession.Options().protocol))
+    {
+        if (lscp_sftp_init() != 0)
+        {
+            console.Error(lscp_sftp_error());
+            mSession.Close();
+            mErrors++;
+            return false;
+        }
+        std::string initial = options.initialDirectory.empty() ?
+            std::string(".") : options.initialDirectory;
+        char * canonical = lscp_sftp_realpath(initial.c_str());
+        if (canonical == NULL)
+        {
+            console.Error(lscp_sftp_error());
+            mSession.Close();
+            mErrors++;
+            return false;
+        }
+        mRemoteDirectory = canonical;
+        free(canonical);
+    }
+    else
+    {
+        mRemoteDirectory = options.initialDirectory.empty() ?
+            std::string("/") : options.initialDirectory;
+    }
+
+    if (!stored->localDirectory.empty())
+    {
+        std::string localError;
+        if (!SetLocalDirectory(ExpandTilde(stored->localDirectory), localError))
+        {
+            console.Error(Texts::LocalError("change directory",
+                stored->localDirectory, localError));
+        }
+    }
+
+    mStoredSessionName = stored->name;
+    console.Status("Connected, the remote directory is " + mRemoteDirectory);
+
+    /* Remember when this session was last used; a failure to record it
+     * does not break the connection. */
+    StoredSession updated = *stored;
+    updated.lastUsed = static_cast<unsigned long long>(std::time(NULL));
+    std::string saveError;
+    if (mSessions.AddOrUpdate(updated, saveError))
+    {
+        mSessions.Save(saveError);
+    }
+    return true;
+}
+
+bool Script::SaveStoredSession(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    if (args.empty())
+    {
+        console.Error(Texts::WrongArguments("savesession",
+            "Syntax: savesession <name> [-host=HOST] [-port=N] [-username=NAME] "
+            "[-protocol=SCHEME] [-privatekey=FILE] [-hostkey=KEY] "
+            "[-remotedir=DIR] [-localdir=DIR] [-password] [-password=PWD]."));
+        mErrors++;
+        return false;
+    }
+
+    const std::string name = args[0];
+    if (!SessionStore::IsValidName(name))
+    {
+        console.Error(Texts::WrongArguments("savesession",
+            "The session name '" + name + "' is not valid."));
+        mErrors++;
+        return false;
+    }
+
+    SessionOptions options = mDefaults;
+    bool connected = mSession.IsOpen();
+    if (connected)
+    {
+        options = mSession.Options();
+    }
+    else
+    {
+        options.hostName.clear();
+        options.initialDirectory.clear();
+    }
+
+    std::string localDirectory;
+    std::string remoteDirectory = mRemoteDirectory;
+    bool savePassword = false;
+    std::string explicitPassword;
+    bool passwordGiven = false;
+
+    for (size_t i = 1; i < args.size(); i++)
+    {
+        const std::string & a = args[i];
+        const std::string lower = ToLower(a);
+        if (StartsWith(lower, "-host="))
+        {
+            options.hostName = a.substr(strlen("-host="));
+        }
+        else if (StartsWith(lower, "-port="))
+        {
+            options.portNumber = atoi(a.substr(strlen("-port=")).c_str());
+        }
+        else if (StartsWith(lower, "-username="))
+        {
+            options.userName = a.substr(strlen("-username="));
+        }
+        else if (StartsWith(lower, "-protocol="))
+        {
+            options.protocol = ToLower(a.substr(strlen("-protocol=")));
+        }
+        else if (StartsWith(lower, "-privatekey="))
+        {
+            options.privateKeyFile = ExpandTilde(a.substr(strlen("-privatekey=")));
+        }
+        else if (StartsWith(lower, "-hostkey="))
+        {
+            options.hostKey = a.substr(strlen("-hostkey="));
+        }
+        else if (StartsWith(lower, "-remotedir="))
+        {
+            remoteDirectory = a.substr(strlen("-remotedir="));
+        }
+        else if (StartsWith(lower, "-localdir="))
+        {
+            localDirectory = ExpandTilde(a.substr(strlen("-localdir=")));
+        }
+        else if (lower == "-password")
+        {
+            savePassword = true;
+        }
+        else if (StartsWith(lower, "-password="))
+        {
+            explicitPassword = a.substr(strlen("-password="));
+            passwordGiven = true;
+            savePassword = true;
+        }
+        else
+        {
+            console.Error(Texts::WrongArguments("savesession",
+                "Unknown switch '" + a + "'."));
+            mErrors++;
+            return false;
+        }
+    }
+
+    if (localDirectory.empty() && connected)
+    {
+        std::string error;
+        localDirectory = GetLocalDirectory(error);
+    }
+
+    if (options.hostName.empty())
+    {
+        console.Error(Texts::WrongArguments("savesession",
+            "There is no host to store: connect first, or give -host=HOST."));
+        mErrors++;
+        return false;
+    }
+
+    StoredSession session = SessionStore::FromSessionOptions(name, options,
+        remoteDirectory, localDirectory);
+    if (savePassword)
+    {
+        session.password = passwordGiven ? explicitPassword :
+            (connected ? options.password : std::string());
+        if (session.password.empty())
+        {
+            console.Error(Texts::WrongArguments("savesession",
+                "The password of this connection is not known (it was typed or "
+                "taken from a key or an agent), so it cannot be stored."));
+            mErrors++;
+            return false;
+        }
+    }
+
+    std::string error;
+    if (!mSessions.AddOrUpdate(session, error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    if (!mSessions.Save(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    console.Status("Stored session '" + name + "' for " + session.protocol + "://" +
+        session.userName + "@" + session.hostName +
+        (mSessions.Path().empty() ? std::string() :
+            std::string(" in ") + mSessions.Path()) + ".");
+    if (!session.password.empty())
+    {
+        console.Status("Warning: the password was written to the session file. "
+            "It is readable by this account only; remove it with "
+            "'savesession " + name + "' after connecting with a key or an agent.");
+    }
+    return true;
+}
+
+bool Script::RemoveStoredSessionEntry(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    if (args.size() != 1)
+    {
+        console.Error(Texts::WrongArguments("rmsession",
+            "Syntax: rmsession <name>."));
+        mErrors++;
+        return false;
+    }
+    std::string error;
+    if (!mSessions.Remove(args[0], error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    if (!mSessions.Save(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    console.Status("Removed the stored session '" + args[0] + "'.");
+    return true;
 }
 
 bool Script::RemoveRemote(const std::vector<std::string> & args)
@@ -1989,6 +3208,20 @@ bool Script::StatRemote(const std::vector<std::string> & args)
     Console::Instance().WriteLine("Size:        " + FormatSize(attrs.size));
     Console::Instance().WriteLine("Permissions: " + FormatPermissions(attrs.permissions));
     Console::Instance().WriteLine("Modified:    " + FormatFileTime(attrs.mtime));
+    if ((attrs.flags & LSCP_ATTR_SIZE) != 0)
+    {
+        Console::Instance().WriteLine("SizeBytes:   " + std::to_string(attrs.size));
+    }
+    if ((attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
+    {
+        /* Seconds since the epoch, for a script or the graphical client
+         * that wants to compare timestamps rather than read them. */
+        Console::Instance().WriteLine("ModifiedEpoch: " + std::to_string(attrs.mtime));
+    }
+    if ((attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
+    {
+        Console::Instance().WriteLine("AccessedEpoch: " + std::to_string(attrs.atime));
+    }
     Console::Instance().WriteLine("Owner:       " + std::string(
         attrs.flags & LSCP_ATTR_UIDGID ?
         std::to_string(attrs.uid) + ":" + std::to_string(attrs.gid) : std::string("unknown")));
@@ -2068,7 +3301,7 @@ bool Script::SetOption(const std::vector<std::string> & args)
     if (args.empty())
     {
         Console::Instance().Error(Texts::WrongArguments("option",
-            "Syntax: option <name> <value> (supported: confirm, batch, resume, transfer=binary)"));
+            "Syntax: option <name> <value> (supported: confirm, batch, resume, editor, editmaxsize, transfer=binary)"));
         mErrors++;
         return false;
     }
@@ -2093,11 +3326,22 @@ bool Script::SetOption(const std::vector<std::string> & args)
             Console::Instance().Status(std::string("resume = ") + (mResume ? "on" : "off"));
             return true;
         }
+        if (name == "editor")
+        {
+            Console::Instance().Status(std::string("editor = ") +
+                (mEditor.empty() ? std::string("(from LINUXSCP_EDITOR, VISUAL or EDITOR)") : mEditor));
+            return true;
+        }
+        if (name == "editmaxsize")
+        {
+            Console::Instance().Status("editmaxsize = " + std::to_string(mEditMaxSize));
+            return true;
+        }
     }
     if (args.size() != 2)
     {
         Console::Instance().Error(Texts::WrongArguments("option",
-            "Syntax: option <name> <value> (supported: confirm, batch, resume, transfer=binary)"));
+            "Syntax: option <name> <value> (supported: confirm, batch, resume, editor, editmaxsize, transfer=binary)"));
         mErrors++;
         return false;
     }
@@ -2173,6 +3417,39 @@ bool Script::SetOption(const std::vector<std::string> & args)
     {
         return true; // The implemented transfer mode is binary.
     }
+    if (name == "editor")
+    {
+        mEditor = args[1];
+        return true;
+    }
+    if (name == "editmaxsize")
+    {
+        unsigned long long bytes = 0;
+        for (size_t i = 0; i < args[1].size(); i++)
+        {
+            if (args[1][i] < '0' || args[1][i] > '9')
+            {
+                Console::Instance().Error(Texts::WrongArguments("option",
+                    "The value of 'editmaxsize' must be a number of bytes."));
+                mErrors++;
+                return false;
+            }
+            bytes = bytes * 10ULL + static_cast<unsigned long long>(args[1][i] - '0');
+            if (bytes > (1ULL << 40))
+            {
+                break;
+            }
+        }
+        if (bytes == 0)
+        {
+            Console::Instance().Error(Texts::WrongArguments("option",
+                "The value of 'editmaxsize' must be a positive number of bytes."));
+            mErrors++;
+            return false;
+        }
+        mEditMaxSize = bytes;
+        return true;
+    }
     Console::Instance().Error(Texts::WrongArguments("option",
         "The option '" + args[0] + "' is not supported by this build."));
     mErrors++;
@@ -2192,6 +3469,7 @@ bool Script::ExecuteLine(const std::string & line)
     }
     const int before = mErrors;
     const bool keepRunning = ExecuteCommand(line);
+    mLastCommandFailed = mErrors != before;
     if (mErrors != before && (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On))
     {
         mExit = true;
@@ -2299,6 +3577,31 @@ bool Script::ExecuteCommand(const std::string & line)
     if (command == "synchronize" || command == "sync")
     {
         SynchronizeDirectories(args);
+        return true;
+    }
+    if (command == "keepuptodate")
+    {
+        KeepUpToDate(args);
+        return true;
+    }
+    if (command == "edit")
+    {
+        EditRemoteFile(args);
+        return true;
+    }
+    if (command == "session" || command == "sessions")
+    {
+        SessionCommand(args);
+        return true;
+    }
+    if (command == "savesession")
+    {
+        SaveStoredSession(args);
+        return true;
+    }
+    if (command == "rmsession" || command == "delsession")
+    {
+        RemoveStoredSessionEntry(args);
         return true;
     }
     if (command == "rm" || command == "del")
@@ -2458,6 +3761,47 @@ int Script::RunInteractive(const std::string & initialUrl)
             break;
         }
         ExecuteLine(line);
+    }
+    return mErrors != 0 ? 1 : 0;
+}
+
+int Script::RunServer()
+{
+    /* The graphical client drives one of these per session: it keeps the
+     * connection open between two operations instead of logging in again
+     * for every listing. Errors do not end the server; the outcome of
+     * every command is reported on a marker line. */
+    mBatchMode = BatchMode::Continue;
+    mBatchConfigured = true;
+    Console & console = Console::Instance();
+    console.SetBatchMode(true);
+
+    console.WriteLine("LSCP-SERVER 1 ready");
+
+    std::string line;
+    while (!mExit)
+    {
+        if (!console.ReadLine(std::string(), line))
+        {
+            break;
+        }
+        std::string trimmed = line;
+        while (!trimmed.empty() &&
+            (trimmed[trimmed.size() - 1] == '\r' || trimmed[trimmed.size() - 1] == '\n'))
+        {
+            trimmed.erase(trimmed.size() - 1);
+        }
+        if (trimmed.find_first_not_of(" \t") == std::string::npos ||
+            trimmed[trimmed.find_first_not_of(" \t")] == '#')
+        {
+            continue;
+        }
+        const bool keepRunning = ExecuteLine(trimmed);
+        console.WriteLine(std::string("LSCP-RESULT ") + (mLastCommandFailed ? "1" : "0"));
+        if (!keepRunning)
+        {
+            break;
+        }
     }
     return mErrors != 0 ? 1 : 0;
 }

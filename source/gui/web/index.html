@@ -393,68 +393,174 @@
     .form-row input, .form-row select {
       flex: 1;
     }
+    /* Session tabs */
+    .tabs-bar {
+      display: flex;
+      align-items: stretch;
+      background: linear-gradient(to bottom, #fdfdfd, #e6e6e6);
+      border-bottom: 1px solid #b0b0b0;
+    }
+    .tab-strip { display: flex; flex: 1; overflow-x: auto; }
+    .session-tab {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 10px; font-size: 11px; cursor: pointer;
+      border-right: 1px solid #ccc; border-top: 2px solid transparent;
+      white-space: nowrap;
+    }
+    .session-tab.active {
+      background: white; font-weight: bold; border-top-color: #0078d7;
+    }
+    .session-tab:hover { background: #dbebfc; }
+    .tab-close { color: #888; padding: 0 2px; border-radius: 2px; }
+    .tab-close:hover { background: #d83b01; color: white; }
+    .tab-new {
+      border: none; border-left: 1px solid #ccc; background: #f4f4f4;
+      width: 28px; cursor: pointer; font-size: 14px;
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.on { background: #107c41; }
+    .dot.off { background: #d83b01; }
+
+    /* Notice bar (host key) */
+    .notice-bar {
+      display: flex; align-items: center; gap: 8px;
+      background: #fff8d6; border-bottom: 1px solid #e0c068;
+      padding: 4px 8px; font-size: 11px; color: #6b5100;
+    }
+
+    /* Pane footer */
+    .pane-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 6px; padding: 3px 6px; background: #f4f4f4;
+      border-top: 1px solid #c0c0c0; font-size: 11px; color: #444;
+    }
+    .pane-actions { display: flex; gap: 4px; }
+
+    /* Queue */
+    .queue-controls { display: flex; gap: 4px; align-items: center; padding-right: 6px; }
+    .queue-table th {
+      background: #eee; text-align: left; padding: 4px;
+      border-bottom: 1px solid #ccc; font-size: 11px;
+    }
+    .queue-table td { padding: 3px 4px; border-bottom: 1px solid #f0f0f0; font-size: 11px; }
+    .progress {
+      height: 8px; background: #e8e8e8; border: 1px solid #bbb; border-radius: 2px;
+      overflow: hidden; margin-bottom: 2px;
+    }
+    .progress-bar { height: 100%; background: linear-gradient(to bottom, #6db3f2, #1e6fc4); }
+    .progress-text { font-size: 10px; color: #555; }
+    .status { font-weight: bold; font-size: 10px; }
+    .status-running { color: #0063b1; }
+    .status-completed { color: #107c41; }
+    .status-failed { color: #d83b01; }
+    .status-cancelled, .status-canceled { color: #6b5100; }
+    .status-queued { color: #666; }
+    .btn.tiny { padding: 0 5px; font-size: 10px; }
+
+    /* Site manager */
+    .site-list {
+      width: 190px; border: 1px solid #b0b0b0; background: white;
+      display: flex; flex-direction: column; min-height: 300px;
+    }
+    .site-list-header {
+      background: #e0dfe3; padding: 3px 6px; font-weight: bold; font-size: 11px;
+      border-bottom: 1px solid #b0b0b0;
+    }
+    .site-list-items { flex: 1; overflow: auto; }
+    .site-item { padding: 3px 8px; cursor: pointer; font-size: 11px; }
+    .site-item.selected { background: var(--sel-bg); color: var(--sel-color); }
+    .site-empty { padding: 8px; color: #888; font-size: 11px; }
+    .site-list-footer { display: flex; gap: 4px; padding: 4px; border-top: 1px solid #ddd; }
+    .site-form { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+    .hint { font-size: 10px; color: #666; line-height: 1.4; }
+
+    /* Preview lists (sync, search) */
+    .preview-box {
+      border: 1px solid #b0b0b0; background: white; display: flex; flex-direction: column;
+      max-height: 190px;
+    }
+    .preview-header {
+      background: #e0dfe3; padding: 3px 6px; font-size: 11px; font-weight: bold;
+      border-bottom: 1px solid #b0b0b0;
+    }
+    .preview-list { overflow: auto; font-size: 11px; }
+    .plan-item {
+      display: flex; gap: 6px; padding: 1px 6px; border-bottom: 1px solid #f0f0f0;
+      align-items: baseline;
+    }
+    .plan-item:hover { background: #f2f7fd; }
+    .plan-action { width: 88px; font-weight: bold; flex: none; }
+    .plan-item.download .plan-action { color: #0063b1; }
+    .plan-item.upload .plan-action { color: #107c41; }
+    .plan-item.delete-local .plan-action, .plan-item.delete-remote .plan-action { color: #d83b01; }
+    .plan-item.conflict .plan-action { color: #8a2b06; }
+    .plan-item.unchanged .plan-action { color: #888; }
+    .plan-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .plan-reason { color: #666; font-size: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Editor */
+    .editor-area {
+      flex: 1; width: 100%; resize: none; border: none; outline: none;
+      font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 12px;
+      padding: 6px; line-height: 1.45; background: white;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 12px; right: 12px; max-width: 380px;
+      background: #333; color: white; padding: 8px 12px; border-radius: 4px;
+      font-size: 11px; opacity: 0; pointer-events: none; transition: opacity .2s;
+      z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,.3);
+    }
+    .toast.show { opacity: 1; }
+    .toast.error { background: #d83b01; }
   </style>
 </head>
 <body>
 
   <!-- Menu Bar -->
   <div class="menu-bar">
-    <div class="menu-item" onclick="openLoginModal()">Session</div>
-    <div class="menu-item" onclick="triggerSynchronize()">Commands</div>
-    <div class="menu-item" onclick="refreshBoth()">View</div>
-    <div class="menu-item" onclick="openOptionsModal()">Options</div>
+    <div class="menu-item" onclick="openSiteManager()">Sessions</div>
+    <div class="menu-item" onclick="newTab()">New Tab</div>
+    <div class="menu-item" onclick="actionUpload()">Files</div>
+    <div class="menu-item" onclick="openSynchronize()">Commands</div>
+    <div class="menu-item" onclick="openSearch()">Search</div>
+    <div class="menu-item" onclick="openTerminal()">Terminal</div>
+    <div class="menu-item" onclick="refreshAll()">View</div>
     <div class="menu-item" onclick="showHelp()">Help</div>
+    <div style="flex:1;"></div>
+    <div id="statusBadge" class="badge-disconnected">Disconnected</div>
   </div>
 
-  <!-- Quick Connect Toolbar -->
-  <div class="toolbar">
-    <div class="tool-group">
-      <span class="tool-label">Protocol:</span>
-      <select id="quickProtocol" class="select-field" style="width: 100px;">
-        <option value="sftp">SFTP (SSH)</option>
-        <option value="ftp">FTP</option>
-        <option value="ftps">FTPS</option>
-        <option value="dav">WebDAV</option>
-        <option value="s3">Amazon S3</option>
-        <option value="scp">SCP</option>
-      </select>
-    </div>
-    <div class="tool-group">
-      <span class="tool-label">Host:</span>
-      <input type="text" id="quickHost" class="input-field" value="localhost" style="width: 130px;">
-    </div>
-    <div class="tool-group">
-      <span class="tool-label">Port:</span>
-      <input type="number" id="quickPort" class="input-field" value="22" style="width: 50px;">
-    </div>
-    <div class="tool-group">
-      <span class="tool-label">User:</span>
-      <input type="text" id="quickUser" class="input-field" value="user" style="width: 80px;">
-    </div>
-    <div class="tool-group">
-      <span class="tool-label">Password:</span>
-      <input type="password" id="quickPass" class="input-field" placeholder="(optional)" style="width: 80px;">
-    </div>
-    <button class="btn btn-primary" onclick="quickConnect()">Connect</button>
-    <button class="btn" onclick="disconnectSession()">Disconnect</button>
-    <div id="statusBadge" class="badge-disconnected">Disconnected</div>
+  <!-- Session tabs -->
+  <div class="tabs-bar">
+    <div id="tabStrip" class="tab-strip"></div>
+    <button class="tab-new" title="Open another session" onclick="newTab()">+</button>
+  </div>
+
+  <!-- Host key notice (trust on first use) -->
+  <div id="hostKeyBar" class="notice-bar" style="display:none;">
+    <span id="hostKeyText"></span>
+    <button class="btn" onclick="pinHostKey()">Remember this key</button>
+    <button class="btn" onclick="document.getElementById('hostKeyBar').style.display='none'">Dismiss</button>
   </div>
 
   <!-- Commander Dual Pane Area -->
   <div class="commander-main">
-    
+
     <!-- LEFT PANE: LOCAL -->
-    <div class="pane" id="localPane">
+    <div class="pane" id="localPane" onclick="focusPane('local')">
       <div class="pane-header">
         <div class="pane-title">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="#0066cc"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H2z"/></svg>
           Local
         </div>
         <div class="path-input-group">
-          <input type="text" id="localPathInput" class="path-input">
-          <button class="btn-icon" title="Go" onclick="loadLocalDir(document.getElementById('localPathInput').value)">Go</button>
-          <button class="btn-icon" title="Parent Directory" onclick="localGoUp()">..</button>
-          <button class="btn-icon" title="Refresh" onclick="loadLocalDir(currentLocalPath)">↻</button>
+          <input type="text" id="localPathInput" class="path-input"
+                 onkeydown="if(event.key==='Enter') loadLocal(this.value)">
+          <button class="btn-icon" title="Go" onclick="loadLocal(document.getElementById('localPathInput').value)">Go</button>
+          <button class="btn-icon" title="Parent Directory" onclick="goUp('local')">..</button>
+          <button class="btn-icon" title="Refresh" onclick="loadLocal(state.local.path)">↻</button>
         </div>
       </div>
       <div class="file-table-container">
@@ -467,45 +573,51 @@
               <th style="width: 15%;">Rights</th>
             </tr>
           </thead>
-          <tbody id="localFileList">
-            <!-- Dynamic local items -->
-          </tbody>
+          <tbody id="localFileList"></tbody>
         </table>
+      </div>
+      <div class="pane-footer">
+        <span id="localSummary">No files</span>
+        <span class="pane-actions">
+          <button class="btn" onclick="newFolderPrompt('local')">New folder</button>
+          <button class="btn" onclick="renamePrompt('local')">Rename</button>
+          <button class="btn" onclick="deletePrompt('local')">Delete</button>
+        </span>
       </div>
     </div>
 
     <!-- CENTER ACTION BUTTONS -->
     <div class="commander-actions">
-      <button class="action-btn" title="Upload to Remote (F5)" onclick="uploadSelected()">
-        <span>Upload</span>
-        <span style="font-size: 16px;">➡</span>
+      <button class="action-btn" title="Upload the selected files to the remote pane (F5)" onclick="actionUpload()">
+        <span style="font-size: 16px;">➡</span><span>Upload</span>
       </button>
-      <button class="action-btn" title="Download to Local (F5)" onclick="downloadSelected()">
-        <span style="font-size: 16px;">⬅</span>
-        <span>Download</span>
+      <button class="action-btn" title="Download the selected files into the local pane (F6)" onclick="actionDownload()">
+        <span style="font-size: 16px;">⬅</span><span>Download</span>
       </button>
-      <button class="action-btn" title="Synchronize Directories" onclick="triggerSynchronize()">
-        <span>Sync</span>
-        <span style="font-size: 14px;">⇄</span>
+      <button class="action-btn" title="Synchronize the two directories" onclick="openSynchronize()">
+        <span style="font-size: 14px;">⇄</span><span>Sync</span>
       </button>
-      <button class="action-btn" title="Open a terminal on the server (SSH sessions)" onclick="openTerminal()">
-        <span>Terminal</span>
-        <span style="font-size: 12px; font-family: monospace;">&gt;_</span>
+      <button class="action-btn" title="Edit the selected remote file (F4)" onclick="editSelected()">
+        <span style="font-size: 14px;">✎</span><span>Edit</span>
+      </button>
+      <button class="action-btn" title="Open a terminal on the server" onclick="openTerminal()">
+        <span style="font-size: 12px; font-family: monospace;">&gt;_</span><span>Terminal</span>
       </button>
     </div>
 
     <!-- RIGHT PANE: REMOTE -->
-    <div class="pane" id="remotePane">
+    <div class="pane" id="remotePane" onclick="focusPane('remote')">
       <div class="pane-header">
         <div class="pane-title">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="#107c41"><path d="M4.5 11a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm0 2a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm0-4a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm1-5.5V5h5V3.5a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5z"/><path d="M14 0H2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zM2 1a1 1 0 0 0-1 1v1h14V2a1 1 0 0 0-1-1H2z"/></svg>
           Remote
         </div>
         <div class="path-input-group">
-          <input type="text" id="remotePathInput" class="path-input">
-          <button class="btn-icon" title="Go" onclick="loadRemoteDir(document.getElementById('remotePathInput').value)">Go</button>
-          <button class="btn-icon" title="Parent Directory" onclick="remoteGoUp()">..</button>
-          <button class="btn-icon" title="Refresh" onclick="loadRemoteDir(currentRemotePath)">↻</button>
+          <input type="text" id="remotePathInput" class="path-input"
+                 onkeydown="if(event.key==='Enter') loadRemote(this.value)">
+          <button class="btn-icon" title="Go" onclick="loadRemote(document.getElementById('remotePathInput').value)">Go</button>
+          <button class="btn-icon" title="Parent Directory" onclick="goUp('remote')">..</button>
+          <button class="btn-icon" title="Refresh" onclick="loadRemote(state.remote.path)">↻</button>
         </div>
       </div>
       <div class="file-table-container">
@@ -518,10 +630,17 @@
               <th style="width: 15%;">Rights</th>
             </tr>
           </thead>
-          <tbody id="remoteFileList">
-            <!-- Dynamic remote items -->
-          </tbody>
+          <tbody id="remoteFileList"></tbody>
         </table>
+      </div>
+      <div class="pane-footer">
+        <span id="remoteSummary">Not connected</span>
+        <span class="pane-actions">
+          <button class="btn" onclick="newFolderPrompt('remote')">New folder</button>
+          <button class="btn" onclick="renamePrompt('remote')">Rename</button>
+          <button class="btn" onclick="permissionsPrompt()">Rights</button>
+          <button class="btn" onclick="deletePrompt('remote')">Delete</button>
+        </span>
       </div>
     </div>
 
@@ -533,22 +652,28 @@
       <div class="tab active" id="tabQueueBtn" onclick="switchTab('queue')">Transfer Queue (0)</div>
       <div class="tab" id="tabLogBtn" onclick="switchTab('log')">Command Log</div>
       <div class="tab" id="tabCliBtn" onclick="switchTab('cli')">LinuxSCP CLI Terminal</div>
+      <div style="flex:1;"></div>
+      <div class="queue-controls">
+        <button class="btn" id="pauseBtn" onclick="togglePause()">Pause</button>
+        <button class="btn" onclick="clearFinished()">Clear finished</button>
+        <button class="btn" onclick="cancelAllTasks()">Cancel all</button>
+      </div>
     </div>
-    
+
     <!-- Tab 1: Queue -->
     <div class="tab-content active" id="tabQueue">
-      <table style="width:100%; border-collapse:collapse;">
+      <table style="width:100%; border-collapse:collapse;" class="queue-table">
         <thead>
-          <tr style="background:#eee; text-align:left;">
-            <th style="padding:4px;">Type</th>
-            <th style="padding:4px;">Source</th>
-            <th style="padding:4px;">Destination</th>
-            <th style="padding:4px;">Status</th>
-            <th style="padding:4px;">Started</th>
+          <tr>
+            <th style="width:14%;">Type</th>
+            <th style="width:30%;">Source</th>
+            <th style="width:30%;">Destination</th>
+            <th style="width:16%;">Progress</th>
+            <th style="width:10%;">Status</th>
           </tr>
         </thead>
         <tbody id="queueList">
-          <tr><td colspan="5" style="padding:8px; color:#888;">No active transfers in queue.</td></tr>
+          <tr><td colspan="5" style="padding:8px; color:#888;">No transfers in the queue.</td></tr>
         </tbody>
       </table>
     </div>
@@ -559,8 +684,8 @@
     </div>
 
     <!-- Tab 3: CLI Terminal -->
-    <div class="tab-content" id="tabCli" style="display:flex; flex-direction:column; padding:6px; background:#1e1e1e; color:#eee;">
-      <div id="cliOutput" style="flex:1; overflow:auto; margin-bottom:6px; white-space:pre-wrap; font-family:monospace;">LinuxSCP Interactive Console. Type any command (e.g. 'pwd', 'ls', 'stat', 'echo').</div>
+    <div class="tab-content" id="tabCli" style="display:none; flex-direction:column; padding:6px; background:#1e1e1e; color:#eee;">
+      <div id="cliOutput" style="flex:1; overflow:auto; margin-bottom:6px; white-space:pre-wrap; font-family:monospace;">LinuxSCP console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').</div>
       <div style="display:flex; gap:6px;">
         <span style="color:#00ff00; font-weight:bold;">lscp&gt;</span>
         <input type="text" id="cliInput" style="flex:1; background:#2d2d2d; color:#fff; border:1px solid #444; padding:3px 6px; font-family:monospace;" onkeydown="if(event.key==='Enter') execCliCommand()">
@@ -571,528 +696,1063 @@
 
   <!-- Classic Commander Function Keys Bar -->
   <div class="function-keys">
-    <div class="fn-key" onclick="downloadSelected()"><strong>F5</strong> Copy</div>
-    <div class="fn-key" onclick="renamePrompt()"><strong>F6</strong> Move</div>
-    <div class="fn-key" onclick="newFolderPrompt()"><strong>F7</strong> New Folder</div>
-    <div class="fn-key" onclick="deletePrompt()"><strong>F8</strong> Delete</div>
-    <div class="fn-key" onclick="triggerSynchronize()"><strong>F9</strong> Synchronize</div>
-    <div class="fn-key" onclick="refreshBoth()"><strong>F10</strong> Refresh</div>
+    <div class="fn-key" onclick="actionDownload()"><strong>F4</strong> Edit</div>
+    <div class="fn-key" onclick="actionUpload()"><strong>F5</strong> Upload</div>
+    <div class="fn-key" onclick="actionDownload()"><strong>F6</strong> Download</div>
+    <div class="fn-key" onclick="newFolderPrompt(null)"><strong>F7</strong> New Folder</div>
+    <div class="fn-key" onclick="deletePrompt(null)"><strong>F8</strong> Delete</div>
+    <div class="fn-key" onclick="openSynchronize()"><strong>F9</strong> Synchronize</div>
+    <div class="fn-key" onclick="refreshAll()"><strong>F10</strong> Refresh</div>
   </div>
 
-  <!-- Login Modal -->
-  <div class="modal-overlay" id="loginModal">
-    <div class="modal-box">
+  <div id="toast" class="toast"></div>
+
+  <!-- Site manager / login modal -->
+  <div class="modal-overlay" id="siteModal">
+    <div class="modal-box" style="width:640px;">
       <div class="modal-header">
-        <span>Login / New Connection</span>
-        <span style="cursor:pointer;" onclick="closeModal('loginModal')">✕</span>
+        <span>Site Manager</span>
+        <span style="cursor:pointer;" onclick="closeModal('siteModal')">✕</span>
       </div>
-      <div class="modal-body">
-        <div class="form-row">
-          <label>Protocol:</label>
-          <select id="modalProtocol" class="select-field">
-            <option value="sftp">SFTP (SSH)</option>
-            <option value="ftp">FTP</option>
-            <option value="ftps">FTPS</option>
-            <option value="dav">WebDAV</option>
-            <option value="s3">Amazon S3</option>
-            <option value="scp">SCP</option>
-          </select>
+      <div class="modal-body" style="flex-direction:row; gap:12px; align-items:stretch;">
+        <div class="site-list">
+          <div class="site-list-header">Stored sessions</div>
+          <div id="siteList" class="site-list-items"></div>
+          <div class="site-list-footer">
+            <button class="btn" onclick="newSite()">New site</button>
+            <button class="btn" onclick="deleteSite()">Delete</button>
+          </div>
         </div>
-        <div class="form-row">
-          <label>Host name:</label>
-          <input type="text" id="modalHost" class="input-field" value="localhost">
-        </div>
-        <div class="form-row">
-          <label>Port number:</label>
-          <input type="number" id="modalPort" class="input-field" value="22">
-        </div>
-        <div class="form-row">
-          <label>User name:</label>
-          <input type="text" id="modalUser" class="input-field" value="user">
-        </div>
-        <div class="form-row">
-          <label>Password:</label>
-          <input type="password" id="modalPass" class="input-field">
-        </div>
-        <div class="form-row">
-          <label>Private key:</label>
-          <input type="text" id="modalKey" class="input-field" placeholder="path/to/key.ppk">
-        </div>
-        <div class="form-row">
-          <label>Host key:</label>
-          <input type="text" id="modalHostKey" class="input-field" value="*">
+        <div class="site-form">
+          <div class="form-row"><label>Site name:</label><input type="text" id="siteName" class="input-field" placeholder="Servers/web1"></div>
+          <div class="form-row"><label>Protocol:</label>
+            <select id="siteProtocol" class="select-field">
+              <option value="sftp">SFTP (SSH)</option>
+              <option value="scp">SCP</option>
+              <option value="ftp">FTP</option>
+              <option value="ftps">FTPS</option>
+              <option value="dav">WebDAV</option>
+              <option value="s3">Amazon S3</option>
+            </select>
+          </div>
+          <div class="form-row"><label>Host name:</label><input type="text" id="siteHost" class="input-field" value="localhost"></div>
+          <div class="form-row"><label>Port number:</label><input type="number" id="sitePort" class="input-field" value="22"></div>
+          <div class="form-row"><label>User name:</label><input type="text" id="siteUser" class="input-field" value="user"></div>
+          <div class="form-row"><label>Password:</label><input type="password" id="sitePass" class="input-field" placeholder="(not stored by default)"></div>
+          <div class="form-row"><label>Private key:</label><input type="text" id="siteKey" class="input-field" placeholder="path/to/key"></div>
+          <div class="form-row"><label>Host key:</label><input type="text" id="siteHostKey" class="input-field" value="*"></div>
+          <div class="form-row"><label>Remote dir:</label><input type="text" id="siteRemoteDir" class="input-field" value="/"></div>
+          <div class="form-row"><label>Local dir:</label><input type="text" id="siteLocalDir" class="input-field"></div>
+          <div class="form-row"><label></label>
+            <label style="flex:1; font-weight:normal; width:auto;">
+              <input type="checkbox" id="siteRemember"> Store the password in the session file
+            </label>
+          </div>
+          <div class="hint">
+            '*' accepts any host key for this connection. Connect once, then press
+            "Remember this key" to pin the key that was used.
+          </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button class="btn btn-primary" onclick="modalConnect()">Login</button>
-        <button class="btn" onclick="closeModal('loginModal')">Cancel</button>
+        <button class="btn" onclick="saveSite()">Save</button>
+        <button class="btn btn-primary" onclick="connectFromSiteManager()">Connect</button>
+        <button class="btn" onclick="closeModal('siteModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Synchronization dialog -->
+  <div class="modal-overlay" id="syncModal">
+    <div class="modal-box" style="width:600px;">
+      <div class="modal-header">
+        <span>Synchronize directories</span>
+        <span style="cursor:pointer;" onclick="closeModal('syncModal')">✕</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-row"><label>Direction:</label>
+          <select id="syncMode" class="select-field">
+            <option value="local">Remote &rarr; Local (update the local directory)</option>
+            <option value="remote">Local &rarr; Remote (update the remote directory)</option>
+            <option value="both">Both (the side that changed wins)</option>
+          </select>
+        </div>
+        <div class="form-row"><label>Local:</label><input type="text" id="syncLocal" class="input-field"></div>
+        <div class="form-row"><label>Remote:</label><input type="text" id="syncRemote" class="input-field"></div>
+        <div class="form-row"><label>Compare by:</label>
+          <select id="syncCriteria" class="select-field">
+            <option value="time">Modification time</option>
+            <option value="size">File size</option>
+            <option value="either">Time or size</option>
+            <option value="none">Always copy</option>
+          </select>
+        </div>
+        <div class="form-row"><label>File mask:</label><input type="text" id="syncMask" class="input-field" placeholder="e.g. *.txt|*.bak (empty = every file)"></div>
+        <div class="form-row"><label></label>
+          <label style="flex:1; font-weight:normal; width:auto;"><input type="checkbox" id="syncRecursive" checked> Include subdirectories</label>
+        </div>
+        <div class="form-row"><label></label>
+          <label style="flex:1; font-weight:normal; width:auto;"><input type="checkbox" id="syncDelete"> Delete obsolete files on the target side</label>
+        </div>
+        <div class="preview-box" id="syncPreviewBox" style="display:none;">
+          <div class="preview-header" id="syncSummary"></div>
+          <div class="preview-list" id="syncPreview"></div>
+        </div>
+        <div class="hint" id="syncHint"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="previewSynchronization()">Preview</button>
+        <button class="btn btn-primary" onclick="runSynchronization()">Synchronize</button>
+        <button class="btn" onclick="closeModal('syncModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Remote editor -->
+  <div class="modal-overlay" id="editorModal">
+    <div class="modal-box" style="width:760px; height:80vh;">
+      <div class="modal-header">
+        <span id="editorTitle">Remote editor</span>
+        <span style="cursor:pointer;" onclick="closeEditor()">✕</span>
+      </div>
+      <div class="modal-body" style="flex:1; padding:0; gap:0;">
+        <textarea id="editorText" class="editor-area" spellcheck="false"
+                  oninput="markDirty()"></textarea>
+      </div>
+      <div class="modal-footer">
+        <span id="editorStatus" style="flex:1; font-size:11px; color:#555;"></span>
+        <button class="btn" onclick="reloadEditorFile()">Reload</button>
+        <button class="btn" onclick="saveEditorFileAs()">Save as</button>
+        <button class="btn btn-primary" onclick="saveEditorFile()">Save (Ctrl+S)</button>
+        <button class="btn" onclick="closeEditor()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search -->
+  <div class="modal-overlay" id="searchModal">
+    <div class="modal-box" style="width:620px;">
+      <div class="modal-header">
+        <span>Search the remote directory</span>
+        <span style="cursor:pointer;" onclick="closeModal('searchModal')">✕</span>
+      </div>
+      <div class="modal-body">
+        <div class="form-row"><label>Start in:</label><input type="text" id="searchPath" class="input-field"></div>
+        <div class="form-row"><label>Mask:</label><input type="text" id="searchPattern" class="input-field" value="*"></div>
+        <div class="form-row"><label></label>
+          <label style="flex:1; font-weight:normal; width:auto;"><input type="checkbox" id="searchCase"> Case sensitive</label>
+        </div>
+        <div class="preview-box">
+          <div class="preview-header" id="searchSummary">No search yet.</div>
+          <div class="preview-list" id="searchResults"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="runSearch()">Search</button>
+        <button class="btn" onclick="closeModal('searchModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Help -->
+  <div class="modal-overlay" id="helpModal">
+    <div class="modal-box" style="width:560px;">
+      <div class="modal-header">
+        <span>LinuxSCP Commander</span>
+        <span style="cursor:pointer;" onclick="closeModal('helpModal')">✕</span>
+      </div>
+      <div class="modal-body" style="font-size:11px; line-height:1.6;">
+        <p><b>Sessions</b> opens the site manager: stored sessions are shared with the
+        console client, and each tab keeps its own connection open.</p>
+        <p><b>Transfers</b> run in the queue at the bottom. They can be paused,
+        cancelled and retried; a cancelled transfer does not disturb the session.</p>
+        <p><b>Synchronize</b> compares the two panes and shows the plan before it
+        changes anything. "Both" uses the record of the previous synchronization to
+        tell a change from a conflict.</p>
+        <p><b>Edit</b> (F4) opens a remote file in the built-in editor and uploads it
+        when you save; it refuses to overwrite a file that changed on the server
+        while you were editing it.</p>
+        <p><b>Keys:</b> F4 edit, F5 upload, F6 download, F7 new folder, F8 delete,
+        F9 synchronize, F10 refresh, Ctrl+A select all, Enter open, Backspace up.</p>
+        <p>The CLI tab runs commands in the live session of the current tab.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('helpModal')">Close</button>
       </div>
     </div>
   </div>
 
   <script>
-    let currentLocalPath = "";
-    let currentRemotePath = "/";
-    let selectedLocal = null;
-    let selectedRemote = null;
-    let isConnected = false;
+  /* ------------------------------------------------------------------ *
+   * State                                                              *
+   * ------------------------------------------------------------------ */
+  const state = {
+    tabs: [],
+    activeTab: null,
+    focusPane: 'local',
+    local: { path: '', entries: [], selection: new Set(), lastClicked: null },
+    remote: { path: '/', entries: [], selection: new Set(), lastClicked: null },
+    sessions: [],
+    selectedSite: null,
+    queue: [],
+    paused: false,
+    editor: { path: '', content: '', original: '', baseMtime: 0, dirty: false },
+    syncPlan: null
+  };
 
-    function formatBytes(bytes) {
-      if (bytes === 0) return "0 B";
-      const k = 1024;
-      const sizes = ["B", "KB", "MB", "GB", "TB"];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  function $(id) { return document.getElementById(id); }
+
+  async function api(url, options) {
+    try {
+      const response = await fetch(url, options);
+      const data = await response.json();
+      return data;
+    } catch (error) {
+      toast('Cannot reach the LinuxSCP backend: ' + error, true);
+      return { success: false, error: String(error) };
     }
-
-    async function checkStatus() {
-      try {
-        const res = await fetch("/api/status");
-        const data = await res.json();
-        isConnected = data.connected;
-        currentLocalPath = data.local_dir;
-        currentRemotePath = data.remote_dir;
-
-        const badge = document.getElementById("statusBadge");
-        if (isConnected) {
-          badge.className = "badge-connected";
-          badge.textContent = `Connected (${data.session.protocol}://${data.session.host})`;
-        } else {
-          badge.className = "badge-disconnected";
-          badge.textContent = "Disconnected";
-        }
-
-        document.getElementById("localPathInput").value = currentLocalPath;
-        document.getElementById("remotePathInput").value = currentRemotePath;
-      } catch (err) {
-        console.error(err);
-      }
-    }
-
-    async function loadLocalDir(path) {
-      try {
-        const url = "/api/local/list" + (path ? `?path=${encodeURIComponent(path)}` : "");
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!data.success) {
-          alert("Failed to load local directory: " + data.error);
-          return;
-        }
-        currentLocalPath = data.path;
-        document.getElementById("localPathInput").value = currentLocalPath;
-        renderFileList("localFileList", data.entries, "local");
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    async function loadRemoteDir(path) {
-      if (!isConnected) {
-        document.getElementById("remoteFileList").innerHTML =
-          `<tr><td colspan="4" style="text-align:center; padding:16px; color:#888;">Not connected. Click 'Connect' above.</td></tr>`;
-        return;
-      }
-      try {
-        const url = "/api/remote/list" + (path ? `?path=${encodeURIComponent(path)}` : "");
-        const res = await fetch(url);
-        const data = await res.json();
-        if (!data.success) {
-          alert("Failed to load remote directory: " + data.error);
-          return;
-        }
-        currentRemotePath = data.path;
-        document.getElementById("remotePathInput").value = currentRemotePath;
-        renderFileList("remoteFileList", data.entries, "remote");
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    function renderFileList(containerId, entries, paneType) {
-      const tbody = document.getElementById(containerId);
-      tbody.innerHTML = "";
-
-      // Add '..' parent row
-      const trUp = document.createElement("tr");
-      trUp.innerHTML = `
-        <td style="font-weight:bold;"><span class="file-icon">📁</span>..</td>
-        <td>&lt;DIR&gt;</td>
-        <td>--</td>
-        <td>--</td>
-      `;
-      trUp.ondblclick = () => paneType === "local" ? localGoUp() : remoteGoUp();
-      tbody.appendChild(trUp);
-
-      entries.forEach(entry => {
-        const tr = document.createElement("tr");
-        const icon = entry.is_dir ? "📁" : "📄";
-        const sizeStr = entry.is_dir ? "&lt;DIR&gt;" : formatBytes(entry.size);
-
-        tr.innerHTML = `
-          <td><span class="file-icon">${icon}</span>${entry.name}</td>
-          <td>${sizeStr}</td>
-          <td>${entry.date || ""}</td>
-          <td>${entry.permissions || ""}</td>
-        `;
-
-        tr.onclick = () => {
-          Array.from(tbody.querySelectorAll("tr")).forEach(r => r.classList.remove("selected"));
-          tr.classList.add("selected");
-          if (paneType === "local") selectedLocal = entry;
-          else selectedRemote = entry;
-        };
-
-        tr.ondblclick = () => {
-          if (entry.is_dir) {
-            const next = paneType === "local" ?
-              (currentLocalPath.endsWith("/") ? currentLocalPath + entry.name : currentLocalPath + "/" + entry.name) :
-              (currentRemotePath.endsWith("/") ? currentRemotePath + entry.name : currentRemotePath + "/" + entry.name);
-            if (paneType === "local") loadLocalDir(next);
-            else loadRemoteDir(next);
-          } else {
-            if (paneType === "local") uploadSelected();
-            else downloadSelected();
-          }
-        };
-
-        tbody.appendChild(tr);
-      });
-    }
-
-    function localGoUp() {
-      const parts = currentLocalPath.split("/").filter(Boolean);
-      parts.pop();
-      const parent = "/" + parts.join("/");
-      loadLocalDir(parent || "/");
-    }
-
-    function remoteGoUp() {
-      const parts = currentRemotePath.split("/").filter(Boolean);
-      parts.pop();
-      const parent = "/" + parts.join("/");
-      loadRemoteDir(parent || "/");
-    }
-
-    async function quickConnect() {
-      const proto = document.getElementById("quickProtocol").value;
-      const host = document.getElementById("quickHost").value;
-      const port = parseInt(document.getElementById("quickPort").value) || 22;
-      const username = document.getElementById("quickUser").value;
-      const password = document.getElementById("quickPass").value;
-
-      await doConnect({ protocol: proto, host, port, username, password, hostkey: "*" });
-    }
-
-    async function doConnect(session) {
-      try {
-        const res = await fetch("/api/session/connect", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session })
-        });
-        const data = await res.json();
-        if (data.success) {
-          isConnected = true;
-          await checkStatus();
-          await loadRemoteDir(data.remote_dir || "/");
-          await pollTransfers();
-          await pollLogs();
-        } else {
-          alert("Connection failed: " + data.error);
-        }
-      } catch (e) {
-        alert("Connection request error: " + e);
-      }
-    }
-
-    async function disconnectSession() {
-      await fetch("/api/session/disconnect", { method: "POST" });
-      isConnected = false;
-      await checkStatus();
-      loadRemoteDir("/");
-    }
-
-    async function uploadSelected() {
-      if (!selectedLocal) {
-        alert("Please select a local file or folder to upload.");
-        return;
-      }
-      try {
-        const res = await fetch("/api/transfer/upload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            local_item: selectedLocal.name,
-            remote_dir: currentRemotePath,
-            resume: true,
-            recursive: true
-          })
-        });
-        const data = await res.json();
-        if (data.success) {
-          switchTab("queue");
-          pollTransfers();
-          setTimeout(() => loadRemoteDir(currentRemotePath), 1500);
-        } else {
-          alert("Upload failed: " + data.error);
-        }
-      } catch (e) {
-        alert("Upload error: " + e);
-      }
-    }
-
-    async function downloadSelected() {
-      if (!selectedRemote) {
-        alert("Please select a remote file or folder to download.");
-        return;
-      }
-      try {
-        const res = await fetch("/api/transfer/download", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            remote_item: selectedRemote.name,
-            local_dir: currentLocalPath,
-            resume: true,
-            recursive: true
-          })
-        });
-        const data = await res.json();
-        if (data.success) {
-          switchTab("queue");
-          pollTransfers();
-          setTimeout(() => loadLocalDir(currentLocalPath), 1500);
-        } else {
-          alert("Download failed: " + data.error);
-        }
-      } catch (e) {
-        alert("Download error: " + e);
-      }
-    }
-
-    async function triggerSynchronize() {
-      if (!isConnected) {
-        alert("Please connect to a remote site first.");
-        return;
-      }
-      const mode = prompt("Choose synchronization direction: 'local' (remote->local), 'remote' (local->remote), or 'both':", "local");
-      if (!mode) return;
-      const deleteObs = confirm("Delete obsolete destination files during synchronization?");
-
-      try {
-        const res = await fetch("/api/transfer/synchronize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mode: mode.toLowerCase(), delete: deleteObs })
-        });
-        const data = await res.json();
-        if (data.success) {
-          switchTab("queue");
-          pollTransfers();
-          setTimeout(() => {
-            loadLocalDir(currentLocalPath);
-            loadRemoteDir(currentRemotePath);
-          }, 2000);
-        }
-      } catch (e) {
-        alert("Sync error: " + e);
-      }
-    }
-
-    async function openTerminal() {
-      if (!isConnected) {
-        alert("Please connect to a remote site first.");
-        return;
-      }
-      try {
-        const res = await fetch("/api/session/terminal", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
-        });
-        const data = await res.json();
-        if (!data.success) {
-          alert("Cannot open a terminal: " + (data.error || "unknown error"));
-        }
-      } catch (e) {
-        alert("Terminal error: " + e);
-      }
-    }
-
-    async function newFolderPrompt() {
-      const name = prompt("Enter new folder name:");
-      if (!name) return;
-      // create on remote if selected, otherwise local
-      if (document.querySelector("#remotePane .selected")) {
-        await fetch("/api/remote/mkdir", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name })
-        });
-        loadRemoteDir(currentRemotePath);
-      } else {
-        await fetch("/api/local/mkdir", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name })
-        });
-        loadLocalDir(currentLocalPath);
-      }
-    }
-
-    async function deletePrompt() {
-      if (document.querySelector("#remotePane .selected") && selectedRemote) {
-        if (confirm(`Delete remote item '${selectedRemote.name}'?`)) {
-          await fetch("/api/remote/delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: selectedRemote.name, is_dir: selectedRemote.is_dir })
-          });
-          loadRemoteDir(currentRemotePath);
-        }
-      } else if (selectedLocal) {
-        if (confirm(`Delete local item '${selectedLocal.name}'?`)) {
-          await fetch("/api/local/delete", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: selectedLocal.name })
-          });
-          loadLocalDir(currentLocalPath);
-        }
-      } else {
-        alert("Select an item to delete.");
-      }
-    }
-
-    async function renamePrompt() {
-      if (selectedRemote) {
-        const newName = prompt(`Rename '${selectedRemote.name}' to:`, selectedRemote.name);
-        if (newName && newName !== selectedRemote.name) {
-          await fetch("/api/remote/rename", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ old_name: selectedRemote.name, new_name: newName })
-          });
-          loadRemoteDir(currentRemotePath);
-        }
-      }
-    }
-
-    function refreshBoth() {
-      loadLocalDir(currentLocalPath);
-      if (isConnected) loadRemoteDir(currentRemotePath);
-    }
-
-    function switchTab(tabName) {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
-
-      if (tabName === "queue") {
-        document.getElementById("tabQueueBtn").classList.add("active");
-        document.getElementById("tabQueue").classList.add("active");
-        pollTransfers();
-      } else if (tabName === "log") {
-        document.getElementById("tabLogBtn").classList.add("active");
-        document.getElementById("tabLog").classList.add("active");
-        pollLogs();
-      } else if (tabName === "cli") {
-        document.getElementById("tabCliBtn").classList.add("active");
-        document.getElementById("tabCli").classList.add("active");
-        document.getElementById("cliInput").focus();
-      }
-    }
-
-    async function pollTransfers() {
-      try {
-        const res = await fetch("/api/transfers");
-        const data = await res.json();
-        const tbody = document.getElementById("queueList");
-        document.getElementById("tabQueueBtn").textContent = `Transfer Queue (${data.transfers.length})`;
-        if (!data.transfers || data.transfers.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="5" style="padding:8px; color:#888;">No active transfers in queue.</td></tr>`;
-          return;
-        }
-        tbody.innerHTML = data.transfers.map(t => `
-          <tr style="border-bottom:1px solid #eee;">
-            <td style="padding:4px; font-weight:bold;">${t.type}</td>
-            <td style="padding:4px;">${t.source}</td>
-            <td style="padding:4px;">${t.destination}</td>
-            <td style="padding:4px; color:${t.status === 'Completed' ? '#008800' : (t.status === 'Failed' ? '#cc0000' : '#0066cc')}; font-weight:bold;">${t.status}</td>
-            <td style="padding:4px;">${t.start_time}</td>
-          </tr>
-        `).join("");
-      } catch (e) {}
-    }
-
-    async function pollLogs() {
-      try {
-        const res = await fetch("/api/logs");
-        const data = await res.json();
-        const container = document.getElementById("logOutput");
-        container.innerHTML = data.logs.map(l => `
-          <div class="log-line">
-            <span class="log-time">[${l.time}]</span>
-            <span class="log-${l.level}">${l.text}</span>
-          </div>
-        `).join("");
-        container.scrollTop = container.scrollHeight;
-      } catch (e) {}
-    }
-
-    async function execCliCommand() {
-      const input = document.getElementById("cliInput");
-      const cmd = input.value.trim();
-      if (!cmd) return;
-      input.value = "";
-
-      const out = document.getElementById("cliOutput");
-      out.textContent += `\n> ${cmd}\n`;
-      try {
-        const res = await fetch("/api/command/exec", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ command: cmd })
-        });
-        const data = await res.json();
-        out.textContent += data.stdout || "";
-        if (data.stderr) out.textContent += `\nError: ${data.stderr}`;
-        out.scrollTop = out.scrollHeight;
-      } catch (e) {
-        out.textContent += `\nExecution error: ${e}`;
-      }
-    }
-
-    function openLoginModal() {
-      document.getElementById("loginModal").classList.add("open");
-    }
-    function closeModal(id) {
-      document.getElementById(id).classList.remove("open");
-    }
-    async function modalConnect() {
-      const session = {
-        protocol: document.getElementById("modalProtocol").value,
-        host: document.getElementById("modalHost").value,
-        port: parseInt(document.getElementById("modalPort").value) || 22,
-        username: document.getElementById("modalUser").value,
-        password: document.getElementById("modalPass").value,
-        keyfile: document.getElementById("modalKey").value,
-        hostkey: document.getElementById("modalHostKey").value
-      };
-      closeModal("loginModal");
-      await doConnect(session);
-    }
-
-    function showHelp() {
-      alert("LinuxSCP Dual-Pane Commander GUI\n\n- Left Pane: Local Filesystem\n- Right Pane: Remote Server Filesystem\n- Drag or use F5 to copy/transfer files with automatic resume support\n- Multi-protocol support: SFTP, FTP, FTPS, WebDAV, Amazon S3, SCP\n- Press F9 to synchronize folders");
-    }
-
-    // Auto-init on page load
-    window.addEventListener("DOMContentLoaded", async () => {
-      await checkStatus();
-      await loadLocalDir();
-      setInterval(pollTransfers, 2000);
-      setInterval(pollLogs, 3000);
+  }
+  function apiGet(url) { return api(url); }
+  function apiPost(url, body) {
+    return api(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
     });
+  }
+
+  let toastTimer = null;
+  function toast(message, isError) {
+    const box = $('toast');
+    box.textContent = message;
+    box.className = 'toast show' + (isError ? ' error' : '');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { box.className = 'toast'; }, 4000);
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(2) + ' GB';
+  }
+
+  function escapeHtml(text) {
+    return String(text === null || text === undefined ? '' : text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function joinPath(base, name, remote) {
+    if (remote) {
+      return (base.replace(/\/+$/, '') || '/') + '/' + name;
+    }
+    const separator = base.includes('\\') ? '\\' : '/';
+    return base.replace(/[\\\/]+$/, '') + separator + name;
+  }
+
+  function parentPath(path, remote) {
+    const separator = (!remote && path.includes('\\')) ? '\\' : '/';
+    const trimmed = path.replace(/[\\\/]+$/, '');
+    const index = trimmed.lastIndexOf(separator);
+    if (index <= 0) return separator;
+    return trimmed.substring(0, index) || separator;
+  }
+
+  function activeTab() {
+    return state.tabs.find(tab => tab.id === state.activeTab) || null;
+  }
+  function tabId() {
+    const tab = activeTab();
+    return tab ? tab.id : null;
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Status, tabs and panes                                             *
+   * ------------------------------------------------------------------ */
+
+  async function refreshStatus() {
+    const data = await apiGet('/api/status');
+    if (!data) return;
+    state.tabs = data.tabs || [];
+    if (data.active_tab) state.activeTab = data.active_tab;
+    const tab = activeTab();
+    if (tab) {
+      state.local.path = tab.local_dir || state.local.path;
+      state.remote.path = tab.remote_dir || state.remote.path;
+      if (tab.observed_hostkey && (!tab.session || tab.session.hostkey === '*')) {
+        showHostKeyBar(tab);
+      }
+    }
+    state.paused = !!data.paused;
+    $('pauseBtn').textContent = state.paused ? 'Resume' : 'Pause';
+    $('statusBadge').className = tab && tab.connected ? 'badge-connected' : 'badge-disconnected';
+    $('statusBadge').textContent = tab ? (tab.connected ? 'Connected: ' + tab.name : 'Disconnected: ' + tab.name)
+                                       : 'Disconnected';
+    renderTabs();
+  }
+
+  function renderTabs() {
+    const strip = $('tabStrip');
+    strip.innerHTML = '';
+    for (const tab of state.tabs) {
+      const div = document.createElement('div');
+      div.className = 'session-tab' + (tab.id === state.activeTab ? ' active' : '');
+      div.innerHTML = '<span class="dot ' + (tab.connected ? 'on' : 'off') + '"></span>' +
+        '<span>' + escapeHtml(tab.name) + '</span>' +
+        '<span class="tab-close" onclick="event.stopPropagation(); closeTab(' + tab.id + ')">✕</span>';
+      div.onclick = () => selectTab(tab.id);
+      strip.appendChild(div);
+    }
+  }
+
+  function showHostKeyBar(tab) {
+    $('hostKeyText').textContent = 'Accepted the host key ' + tab.observed_hostkey +
+      ' without checking it (session "' + tab.name + '").';
+    $('hostKeyBar').style.display = 'flex';
+  }
+
+  async function pinHostKey() {
+    const tab = activeTab();
+    if (!tab || !tab.observed_hostkey) return;
+    const fingerprint = tab.observed_hostkey.split(' ').pop();
+    const name = prompt('Save this host key in which stored session?', tab.name);
+    if (!name) return;
+    const session = Object.assign({}, tab.session, { hostkey: fingerprint });
+    const result = await apiPost('/api/sessions/save', { name: name, session: session, pin_hostkey: true });
+    if (result.success) {
+      tab.session.hostkey = fingerprint;
+      $('hostKeyBar').style.display = 'none';
+      toast('The host key is now pinned for "' + name + '".');
+      loadSessions();
+    } else {
+      toast(result.error || 'Cannot save the session.', true);
+    }
+  }
+
+  async function selectTab(id) {
+    await apiPost('/api/tabs/select', { tab: id });
+    state.activeTab = id;
+    state.local.selection.clear();
+    state.remote.selection.clear();
+    await refreshStatus();
+    await loadLocal(state.local.path);
+    if (activeTab() && activeTab().connected) await loadRemote(state.remote.path);
+  }
+
+  async function closeTab(id) {
+    await apiPost('/api/tabs/close', { tab: id });
+    await refreshStatus();
+    await loadLocal(state.local.path);
+    await loadRemote(state.remote.path);
+  }
+
+  function newTab() { openSiteManager(); }
+
+  async function reconnectTab() {
+    const tab = activeTab();
+    if (!tab) return;
+    const result = await apiPost('/api/tabs/reconnect', { tab: tab.id });
+    if (result.success) {
+      toast('Reconnected.');
+      await refreshStatus();
+      await loadRemote(state.remote.path);
+    } else {
+      toast(result.error || 'Cannot reconnect.', true);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Directory listings                                                 *
+   * ------------------------------------------------------------------ */
+
+  async function loadLocal(path) {
+    const query = path ? '?path=' + encodeURIComponent(path) : '';
+    const data = await apiGet('/api/local/list' + query + (query ? '&' : '?') + 'tab=' + tabId());
+    if (!data || !data.success) {
+      if (data && data.error) toast(data.error, true);
+      return;
+    }
+    state.local.path = data.path;
+    state.local.entries = data.entries || [];
+    state.local.selection.clear();
+    $('localPathInput').value = data.path;
+    renderPane('local');
+  }
+
+  async function loadRemote(path) {
+    const tab = activeTab();
+    if (!tab || !tab.connected) {
+      state.remote.entries = [];
+      renderPane('remote');
+      return;
+    }
+    const query = path ? '?path=' + encodeURIComponent(path) : '';
+    const data = await apiGet('/api/remote/list' + query + (query ? '&' : '?') + 'tab=' + tabId());
+    if (!data || !data.success) {
+      if (data && data.error) toast(data.error, true);
+      return;
+    }
+    state.remote.path = data.path;
+    state.remote.entries = data.entries || [];
+    state.remote.selection.clear();
+    $('remotePathInput').value = data.path;
+    renderPane('remote');
+  }
+
+  function renderPane(side) {
+    const pane = state[side];
+    const tbody = $(side + 'FileList');
+    tbody.innerHTML = '';
+    let total = 0;
+    let selected = 0;
+    for (const entry of pane.entries) {
+      const row = document.createElement('tr');
+      if (pane.selection.has(entry.name)) {
+        row.className = 'selected';
+        selected++;
+      }
+      if (entry.is_dir) total++;
+      const icon = entry.is_dir ? '📁' : '📄';
+      row.innerHTML =
+        '<td title="' + escapeHtml(entry.name) + '">' + icon + ' ' + escapeHtml(entry.name) + '</td>' +
+        '<td>' + (entry.is_dir ? '&lt;DIR&gt;' : formatBytes(entry.size)) + '</td>' +
+        '<td>' + escapeHtml(entry.date || '') + '</td>' +
+        '<td>' + escapeHtml(entry.permissions || '') + '</td>';
+      row.onclick = (event) => selectEntry(side, entry, event);
+      row.ondblclick = () => openEntry(side, entry);
+      tbody.appendChild(row);
+    }
+    const size = pane.entries.reduce((sum, entry) => sum + (entry.is_dir ? 0 : (entry.size || 0)), 0);
+    $(side + 'Summary').textContent = pane.entries.length + ' item(s), ' +
+      formatBytes(size) + (selected ? ', ' + selected + ' selected' : '');
+    if (side === 'remote' && (!activeTab() || !activeTab().connected)) {
+      $('remoteSummary').textContent = 'Not connected';
+    }
+  }
+
+  function selectEntry(side, entry, event) {
+    const pane = state[side];
+    if (event && (event.ctrlKey || event.metaKey)) {
+      if (pane.selection.has(entry.name)) pane.selection.delete(entry.name);
+      else pane.selection.add(entry.name);
+    } else if (event && event.shiftKey && pane.lastClicked) {
+      const names = pane.entries.map(item => item.name);
+      const from = names.indexOf(pane.lastClicked);
+      const to = names.indexOf(entry.name);
+      if (from >= 0 && to >= 0) {
+        pane.selection.clear();
+        for (let i = Math.min(from, to); i <= Math.max(from, to); i++) {
+          pane.selection.add(names[i]);
+        }
+      }
+    } else {
+      pane.selection.clear();
+      pane.selection.add(entry.name);
+    }
+    pane.lastClicked = entry.name;
+    renderPane(side);
+  }
+
+  function selectedNames(side) {
+    return Array.from(state[side].selection);
+  }
+
+  function openEntry(side, entry) {
+    if (entry.is_dir) {
+      const path = joinPath(state[side].path, entry.name, side === 'remote');
+      if (side === 'local') loadLocal(path); else loadRemote(path);
+    } else if (side === 'remote') {
+      openEditor(joinPath(state.remote.path, entry.name, true));
+    }
+  }
+
+  function goUp(side) {
+    const path = parentPath(state[side].path, side === 'remote');
+    if (side === 'local') loadLocal(path); else loadRemote(path);
+  }
+
+  function focusPane(side) { state.focusPane = side; }
+
+  /* ------------------------------------------------------------------ *
+   * File operations                                                    *
+   * ------------------------------------------------------------------ */
+
+  function actionUpload() { transfer('upload'); }
+  function actionDownload() { transfer('download'); }
+
+  async function transfer(direction) {
+    const source = direction === 'upload' ? 'local' : 'remote';
+    const names = selectedNames(source);
+    if (!names.length) {
+      toast('Select something in the ' + source + ' pane first.', true);
+      return;
+    }
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast('Not connected.', true); return; }
+    const endpoint = direction === 'upload' ? '/api/transfer/upload' : '/api/transfer/download';
+    const payload = {
+      tab: tab.id,
+      names: names,
+      local_dir: state.local.path,
+      remote_dir: state.remote.path,
+      resume: true,
+      recursive: true,
+      preserve_time: true
+    };
+    const result = await apiPost(endpoint, payload);
+    if (result.success) {
+      toast(names.length + ' transfer(s) queued.');
+      switchTab('queue');
+      refreshQueue();
+    } else {
+      toast(result.error || 'Cannot queue the transfer.', true);
+    }
+  }
+
+  async function newFolderPrompt(side) {
+    const target = side || state.focusPane;
+    const name = prompt('Name of the new folder in ' + (target === 'remote' ? state.remote.path : state.local.path));
+    if (!name) return;
+    const endpoint = target === 'remote' ? '/api/remote/mkdir' : '/api/local/mkdir';
+    const result = await apiPost(endpoint, { tab: tabId(), name: name });
+    if (!result.success) toast(result.error || 'Cannot create the folder.', true);
+    await refreshPanes(target);
+  }
+
+  async function renamePrompt(side) {
+    const target = side || state.focusPane;
+    const names = selectedNames(target);
+    if (names.length !== 1) { toast('Select exactly one item to rename.', true); return; }
+    const newName = prompt('New name:', names[0]);
+    if (!newName || newName === names[0]) return;
+    const endpoint = target === 'remote' ? '/api/remote/rename' : '/api/local/rename';
+    const result = await apiPost(endpoint, { tab: tabId(), old_name: names[0], new_name: newName });
+    if (!result.success) toast(result.error || 'Cannot rename.', true);
+    await refreshPanes(target);
+  }
+
+  async function permissionsPrompt() {
+    const names = selectedNames('remote');
+    if (!names.length) { toast('Select a remote file first.', true); return; }
+    const value = prompt('Permissions (octal), e.g. 644:', '644');
+    if (!value) return;
+    for (const name of names) {
+      const result = await apiPost('/api/remote/chmod', { tab: tabId(), name: name, permissions: value });
+      if (!result.success) toast(result.error || 'Cannot change the permissions.', true);
+    }
+    await refreshPanes('remote');
+  }
+
+  async function deletePrompt(side) {
+    const target = side || state.focusPane;
+    const names = selectedNames(target);
+    if (!names.length) { toast('Select something to delete first.', true); return; }
+    if (!confirm('Delete ' + names.length + ' item(s) from the ' + target + ' side?\n\n' + names.join('\n'))) {
+      return;
+    }
+    const endpoint = target === 'remote' ? '/api/remote/delete' : '/api/local/delete';
+    const items = target === 'remote'
+      ? names.map(name => {
+          const entry = state.remote.entries.find(item => item.name === name);
+          return { name: name, is_dir: entry ? entry.is_dir : false };
+        })
+      : names;
+    const payload = target === 'remote' ? { tab: tabId(), names: items } : { tab: tabId(), names: items };
+    const result = await apiPost(endpoint, payload);
+    if (!result.success) toast(result.error || 'Cannot delete.', true);
+    await refreshPanes(target);
+  }
+
+  async function refreshPanes(side) {
+    if (!side || side === 'local') await loadLocal(state.local.path);
+    if (!side || side === 'remote') await loadRemote(state.remote.path);
+  }
+
+  async function refreshAll() {
+    await refreshStatus();
+    await refreshPanes(null);
+    refreshQueue();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Site manager                                                       *
+   * ------------------------------------------------------------------ */
+
+  async function loadSessions() {
+    const data = await apiGet('/api/sessions');
+    state.sessions = (data && data.sessions) || [];
+    renderSites();
+  }
+
+  function renderSites() {
+    const list = $('siteList');
+    list.innerHTML = '';
+    for (const site of state.sessions) {
+      const div = document.createElement('div');
+      div.className = 'site-item' + (state.selectedSite === site.name ? ' selected' : '');
+      div.textContent = site.name;
+      div.onclick = () => fillSiteForm(site);
+      list.appendChild(div);
+    }
+    if (!state.sessions.length) {
+      list.innerHTML = '<div class="site-empty">No stored sessions yet.</div>';
+    }
+  }
+
+  function fillSiteForm(site) {
+    state.selectedSite = site.name;
+    $('siteName').value = site.name || '';
+    $('siteProtocol').value = site.protocol || 'sftp';
+    $('siteHost').value = site.host || '';
+    $('sitePort').value = site.port || 22;
+    $('siteUser').value = site.username || '';
+    $('sitePass').value = site.password || '';
+    $('siteKey').value = site.keyfile || '';
+    $('siteHostKey').value = site.hostkey || '*';
+    $('siteRemoteDir').value = site.initial_dir || '/';
+    $('siteLocalDir').value = site.local_dir || state.local.path || '';
+    $('siteRemember').checked = !!site.password;
+    renderSites();
+  }
+
+  function newSite() {
+    state.selectedSite = null;
+    fillSiteForm({
+      name: '', protocol: 'sftp', host: '', port: 22,
+      username: '', password: '', keyfile: '', hostkey: '*',
+      initial_dir: '/', local_dir: state.local.path || ''
+    });
+  }
+
+  function currentSiteForm() {
+    return {
+      protocol: $('siteProtocol').value,
+      host: $('siteHost').value.trim(),
+      port: parseInt($('sitePort').value, 10) || 22,
+      username: $('siteUser').value,
+      password: $('sitePass').value,
+      keyfile: $('siteKey').value.trim(),
+      hostkey: $('siteHostKey').value.trim() || '*',
+      initial_dir: $('siteRemoteDir').value.trim() || '/',
+      local_dir: $('siteLocalDir').value.trim()
+    };
+  }
+
+  async function saveSite() {
+    const name = $('siteName').value.trim();
+    if (!name) { toast('A site name is required.', true); return; }
+    const session = currentSiteForm();
+    if (!session.host) { toast('A host name is required.', true); return; }
+    if (!$('siteRemember').checked) session.password = '';
+    const result = await apiPost('/api/sessions/save', { name: name, session: session });
+    if (!result.success) { toast(result.error || 'Cannot save the site.', true); return; }
+    toast('Saved "' + name + '".');
+    await loadSessions();
+    state.selectedSite = name;
+    renderSites();
+  }
+
+  async function deleteSite() {
+    if (!state.selectedSite) { toast('Select a site first.', true); return; }
+    if (!confirm('Remove the stored session "' + state.selectedSite + '"?')) return;
+    const result = await apiPost('/api/sessions/delete', { name: state.selectedSite });
+    if (!result.success) { toast(result.error || 'Cannot remove the site.', true); return; }
+    state.selectedSite = null;
+    await loadSessions();
+    newSite();
+  }
+
+  async function connectFromSiteManager() {
+    const session = currentSiteForm();
+    if (!session.host) { toast('A host name is required.', true); return; }
+    const name = $('siteName').value.trim() || session.host;
+    closeModal('siteModal');
+    const result = await apiPost('/api/tabs/open', { session: session, name: name });
+    if (result.success) {
+      state.activeTab = result.tab.id;
+      await refreshStatus();
+      await loadLocal(state.local.path);
+      await loadRemote(state.remote.path);
+      toast('Connected to ' + session.host + '.');
+    } else {
+      toast(result.error || 'Cannot connect.', true);
+      await refreshStatus();
+    }
+  }
+
+  function openSiteManager() {
+    loadSessions();
+    if (state.sessions.length && !state.selectedSite) fillSiteForm(state.sessions[0]);
+    openModal('siteModal');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Synchronization                                                    *
+   * ------------------------------------------------------------------ */
+
+  function openSynchronize() {
+    $('syncLocal').value = state.local.path;
+    $('syncRemote').value = state.remote.path;
+    $('syncPreviewBox').style.display = 'none';
+    $('syncHint').textContent = 'A preview does not change anything; it only compares the two trees.';
+    openModal('syncModal');
+  }
+
+  function syncSettings() {
+    return {
+      tab: tabId(),
+      mode: $('syncMode').value,
+      local_dir: $('syncLocal').value,
+      remote_dir: $('syncRemote').value,
+      criteria: $('syncCriteria').value,
+      filemask: $('syncMask').value.trim(),
+      recursive: $('syncRecursive').checked,
+      delete: $('syncDelete').checked
+    };
+  }
+
+  async function previewSynchronization() {
+    const result = await apiPost('/api/sync/preview', syncSettings());
+    if (!result.success) {
+      toast(result.error || 'Cannot read the plan.', true);
+      return;
+    }
+    state.syncPlan = result.plan;
+    const summary = result.plan.summary || {};
+    $('syncSummary').textContent =
+      (summary.upload || 0) + ' to upload, ' + (summary.download || 0) + ' to download, ' +
+      (summary['delete-local'] || 0) + ' local and ' + (summary['delete-remote'] || 0) +
+      ' remote deletions, ' + (summary.conflict || 0) + ' conflict(s), ' +
+      (summary.unchanged || 0) + ' unchanged.';
+    const list = $('syncPreview');
+    list.innerHTML = '';
+    for (const item of result.plan.items) {
+      const div = document.createElement('div');
+      div.className = 'plan-item ' + item.action;
+      div.innerHTML = '<span class="plan-action">' + escapeHtml(item.action) + '</span>' +
+        '<span class="plan-path">' + escapeHtml(item.path) + '</span>' +
+        '<span class="plan-reason">' + escapeHtml(item.reason) + '</span>';
+      list.appendChild(div);
+    }
+    if (!result.plan.items.length) {
+      list.innerHTML = '<div class="plan-item">Nothing to do: the two directories are in sync.</div>';
+    }
+    $('syncPreviewBox').style.display = 'block';
+    if ((summary['delete-local'] || 0) + (summary['delete-remote'] || 0) > 0) {
+      $('syncHint').textContent = 'This plan deletes files. In "both" mode only files that '
+        + 'the record of the previous synchronization proves were removed on the other side '
+        + 'are deleted, and nothing is deleted while a conflict is unresolved.';
+    }
+  }
+
+  async function runSynchronization() {
+    const settings = syncSettings();
+    if (settings.delete && !confirm('Delete obsolete files as part of this synchronization?')) return;
+    const result = await apiPost('/api/sync/run', settings);
+    if (result.success) {
+      closeModal('syncModal');
+      switchTab('queue');
+      refreshQueue();
+      toast('Synchronization queued.');
+    } else {
+      toast(result.error || 'Cannot queue the synchronization.', true);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Remote editor                                                      *
+   * ------------------------------------------------------------------ */
+
+  async function editSelected() {
+    const names = selectedNames('remote');
+    if (names.length !== 1) { toast('Select one remote file to edit.', true); return; }
+    const entry = state.remote.entries.find(item => item.name === names[0]);
+    if (entry && entry.is_dir) { toast('That is a directory.', true); return; }
+    await openEditor(joinPath(state.remote.path, names[0], true));
+  }
+
+  async function openEditor(path) {
+    const data = await apiGet('/api/remote/edit?tab=' + tabId() + '&path=' + encodeURIComponent(path));
+    if (!data.success) { toast(data.error || 'Cannot open the file.', true); return; }
+    state.editor = {
+      path: path,
+      content: data.content,
+      original: data.content,
+      baseMtime: data.info.mtime,
+      dirty: false
+    };
+    $('editorTitle').textContent = 'Editing ' + path;
+    $('editorText').value = data.content;
+    $('editorStatus').textContent = data.info.size + ' bytes, modified ' +
+      new Date(data.info.mtime * 1000).toLocaleString();
+    openModal('editorModal');
+    setTimeout(() => $('editorText').focus(), 50);
+  }
+
+  function markDirty() {
+    state.editor.dirty = $('editorText').value !== state.editor.original;
+    $('editorStatus').textContent = state.editor.dirty
+      ? 'Modified - not saved'
+      : 'No changes';
+  }
+
+  async function reloadEditorFile() {
+    if (state.editor.dirty && !confirm('Discard your changes and reload?')) return;
+    await openEditor(state.editor.path);
+  }
+
+  async function saveEditorFile() {
+    const content = $('editorText').value;
+    const result = await apiPost('/api/remote/save', {
+      tab: tabId(),
+      path: state.editor.path,
+      content: content,
+      base_mtime: state.editor.baseMtime
+    });
+    if (!result.success) { toast(result.error || 'Cannot save.', true); return; }
+    state.editor.content = content;
+    state.editor.original = content;
+    state.editor.dirty = false;
+    // Remember the new timestamp so that the next save is not refused.
+    const info = await apiGet('/api/remote/list?tab=' + tabId() + '&path=' +
+      encodeURIComponent(parentPath(state.editor.path, true)));
+    void info;
+    toast('Saved ' + state.editor.path);
+    $('editorStatus').textContent = 'Saved.';
+    await refreshPanes('remote');
+  }
+
+  async function saveEditorFileAs() {
+    const name = prompt('Save as (remote path):', state.editor.path);
+    if (!name) return;
+    const result = await apiPost('/api/remote/save', {
+      tab: tabId(), path: name, content: $('editorText').value
+    });
+    if (!result.success) { toast(result.error || 'Cannot save.', true); return; }
+    state.editor.path = name;
+    state.editor.original = $('editorText').value;
+    state.editor.dirty = false;
+    $('editorTitle').textContent = 'Editing ' + name;
+    toast('Saved as ' + name);
+    await refreshPanes('remote');
+  }
+
+  function closeEditor() {
+    if (state.editor.dirty && !confirm('Close without saving your changes?')) return;
+    closeModal('editorModal');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Search                                                             *
+   * ------------------------------------------------------------------ */
+
+  function openSearch() {
+    $('searchPath').value = state.remote.path;
+    $('searchResults').innerHTML = '';
+    $('searchSummary').textContent = 'No search yet.';
+    openModal('searchModal');
+  }
+
+  async function runSearch() {
+    const result = await apiPost('/api/remote/search', {
+      tab: tabId(),
+      path: $('searchPath').value || state.remote.path,
+      pattern: $('searchPattern').value || '*',
+      case_sensitive: $('searchCase').checked
+    });
+    if (!result.success) { toast(result.error || 'Cannot search.', true); return; }
+    $('searchSummary').textContent = result.matches.length + ' match(es)' +
+      (result.truncated ? ' (limited, refine the mask)' : '');
+    const list = $('searchResults');
+    list.innerHTML = '';
+    for (const match of result.matches) {
+      const div = document.createElement('div');
+      div.className = 'plan-item download';
+      div.innerHTML = '<span class="plan-action">' + (match.is_dir ? 'dir' : formatBytes(match.size)) +
+        '</span><span class="plan-path">' + escapeHtml(match.path) + '</span>' +
+        '<span class="plan-reason">' + escapeHtml(match.permissions || '') + '</span>';
+      div.ondblclick = async () => {
+        closeModal('searchModal');
+        await loadRemote(parentPath(match.path, true));
+        state.remote.selection.clear();
+        state.remote.selection.add(match.name);
+        renderPane('remote');
+      };
+      list.appendChild(div);
+    }
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Queue, log and CLI                                                 *
+   * ------------------------------------------------------------------ */
+
+  async function refreshQueue() {
+    const data = await apiGet('/api/transfers');
+    if (!data) return;
+    state.queue = data.transfers || [];
+    state.paused = !!data.paused;
+    $('pauseBtn').textContent = state.paused ? 'Resume' : 'Pause';
+    $('tabQueueBtn').textContent = 'Transfer Queue (' + state.queue.length + ')';
+    const tbody = $('queueList');
+    tbody.innerHTML = '';
+    if (!state.queue.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="padding:8px; color:#888;">No transfers in the queue.</td></tr>';
+      return;
+    }
+    for (const task of state.queue) {
+      const row = document.createElement('tr');
+      const percent = task.percent || 0;
+      const bar = task.bytes_total
+        ? '<div class="progress"><div class="progress-bar" style="width:' + percent + '%"></div></div>' +
+          '<span class="progress-text">' + formatBytes(task.bytes_done) + ' / ' +
+          formatBytes(task.bytes_total) + '</span>'
+        : '<span class="progress-text">' + escapeHtml(task.detail || '') + '</span>';
+      const actions = [];
+      if (task.status === 'Running' || task.status === 'Queued') actions.push('<button class="btn tiny" onclick="cancelTask(' + task.id + ')">Cancel</button>');
+      if (task.status === 'Failed' || task.status === 'Cancelled') actions.push('<button class="btn tiny" onclick="retryTask(' + task.id + ')">Retry</button>');
+      row.innerHTML =
+        '<td>' + escapeHtml(task.type) + '</td>' +
+        '<td title="' + escapeHtml(task.source) + '">' + escapeHtml(task.source) + '</td>' +
+        '<td title="' + escapeHtml(task.destination) + '">' + escapeHtml(task.destination) + '</td>' +
+        '<td>' + bar + '</td>' +
+        '<td><span class="status status-' + task.status.toLowerCase().replace(/[^a-z]/g, '') + '">' +
+        escapeHtml(task.status) + '</span><br>' + actions.join(' ') + '</td>';
+      if (task.error) {
+        row.title = task.error;
+      }
+      tbody.appendChild(row);
+    }
+  }
+
+  async function cancelTask(id) { await apiPost('/api/queue/cancel', { task_id: id }); refreshQueue(); }
+  async function retryTask(id) { await apiPost('/api/queue/retry', { task_id: id }); refreshQueue(); }
+  async function togglePause() {
+    await apiPost(state.paused ? '/api/queue/resume' : '/api/queue/pause', {});
+    refreshQueue();
+  }
+  async function clearFinished() { await apiPost('/api/queue/clear', {}); refreshQueue(); }
+  async function cancelAllTasks() {
+    for (const task of state.queue) {
+      if (task.status === 'Running' || task.status === 'Queued') await cancelTask(task.id);
+    }
+  }
+
+  async function refreshLogs() {
+    const data = await apiGet('/api/logs');
+    if (!data) return;
+    const box = $('logOutput');
+    box.innerHTML = '';
+    for (const entry of data.logs) {
+      const div = document.createElement('div');
+      div.className = 'log-line';
+      div.innerHTML = '<span class="log-time">' + escapeHtml(entry.time) + '</span>' +
+        '<span class="log-' + entry.level + '">' + escapeHtml(entry.text) + '</span>';
+      box.appendChild(div);
+    }
+    box.scrollTop = box.scrollHeight;
+  }
+
+  async function execCliCommand() {
+    const input = $('cliInput');
+    const command = input.value.trim();
+    if (!command) return;
+    input.value = '';
+    const output = $('cliOutput');
+    output.textContent += '\nlscp> ' + command + '\n';
+    const result = await apiPost('/api/command/exec', { command: command, tab: tabId() });
+    output.textContent += (result.stdout || '') + (result.stderr || '');
+    if (!result.success) output.textContent += '\n(exit code ' + result.exit_code + ')';
+    output.textContent += '\n';
+    output.scrollTop = output.scrollHeight;
+    // 'cd' and 'lcd' move the panes of this tab.
+    await refreshStatus();
+    if (/^\s*lcd\b/.test(command)) await loadLocal(state.local.path);
+    else await refreshPanes(null);
+  }
+
+  async function openTerminal() {
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast('Not connected.', true); return; }
+    const result = await apiPost('/api/session/terminal', { tab: tab.id });
+    if (!result.success) toast(result.error || 'Cannot open a terminal.', true);
+    else toast('A terminal window was opened on the desktop running the backend.');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Modal and keyboard plumbing                                        *
+   * ------------------------------------------------------------------ */
+
+  function openModal(id) { $(id).classList.add('open'); }
+  function closeModal(id) { $(id).classList.remove('open'); }
+  function showHelp() { openModal('helpModal'); }
+
+  function switchTab(name) {
+    for (const key of ['queue', 'log', 'cli']) {
+      $('tab' + key.charAt(0).toUpperCase() + key.slice(1)).style.display = key === name ? 'block' : 'none';
+      $('tab' + key.charAt(0).toUpperCase() + key.slice(1) + 'Btn').classList.toggle('active', key === name);
+    }
+    if (name === 'cli') $('tabCli').style.display = 'flex';
+    if (name === 'log') refreshLogs();
+    if (name === 'queue') refreshQueue();
+  }
+
+  document.addEventListener('keydown', async (event) => {
+    const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
+    if (event.key === 'Escape') {
+      document.querySelectorAll('.modal-overlay.open').forEach(node => node.classList.remove('open'));
+      return;
+    }
+    if (event.ctrlKey && event.key === 's' && $('editorModal').classList.contains('open')) {
+      event.preventDefault();
+      await saveEditorFile();
+      return;
+    }
+    if (inField) return;
+    if (event.ctrlKey && event.key === 'a') {
+      event.preventDefault();
+      const pane = state[state.focusPane];
+      pane.selection.clear();
+      pane.entries.forEach(entry => pane.selection.add(entry.name));
+      renderPane(state.focusPane);
+      return;
+    }
+    switch (event.key) {
+      case 'F4': event.preventDefault(); editSelected(); break;
+      case 'F5': event.preventDefault(); actionUpload(); break;
+      case 'F6': event.preventDefault(); actionDownload(); break;
+      case 'F7': event.preventDefault(); newFolderPrompt(null); break;
+      case 'F8': event.preventDefault(); deletePrompt(null); break;
+      case 'F9': event.preventDefault(); openSynchronize(); break;
+      case 'F10': event.preventDefault(); refreshAll(); break;
+      case 'Enter': {
+        const pane = state[state.focusPane];
+        const names = selectedNames(state.focusPane);
+        if (names.length === 1) {
+          const entry = pane.entries.find(item => item.name === names[0]);
+          if (entry) openEntry(state.focusPane, entry);
+        }
+        break;
+      }
+      case 'Backspace': event.preventDefault(); goUp(state.focusPane); break;
+    }
+  });
+
+  /* ------------------------------------------------------------------ *
+   * Startup polling                                                    *
+   * ------------------------------------------------------------------ */
+
+  async function boot() {
+    await refreshStatus();
+    await loadLocal(state.local.path || '');
+    await loadRemote(state.remote.path);
+    refreshQueue();
+    setInterval(refreshQueue, 2000);
+    setInterval(refreshLogs, 4000);
+    setInterval(refreshStatus, 15000);
+  }
+
+  boot();
   </script>
 </body>
 </html>

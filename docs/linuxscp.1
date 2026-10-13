@@ -81,7 +81,21 @@ run
 before those operations.
 .TP
 .B \-gui
-Launch the graphical Commander desktop interface.
+Launch the graphical Commander desktop interface. It is a dual\-pane browser
+served on a local port: the remote pane, the transfer queue, the built\-in
+editor, synchronization and the site manager all drive the commands described
+here, and each tab keeps one connection open.
+.TP
+.B \-server
+Read commands from standard input, one per line, and answer each of them with
+a single
+.B LSCP\-RESULT
+line carrying the exit code. The session stays open between commands, which is
+how the graphical interface browses and edits without reconnecting. The first
+line printed is
+.BR "LSCP\-SERVER 1 ready" .
+This switch cannot be combined with
+.BR \-command= .
 .TP
 .B \-verbose
 Print what the SSH connection layer does as it happens.
@@ -117,11 +131,32 @@ credentials and paths. Prefer
 or
 .B LINUXSCP_PASSWORD
 so that the password is not written into a script file.
+.SS Stored sessions
+A site can be given a name and stored, so that
+.B open
+can be followed by a name instead of a URL. Sessions are kept in
+.I $XDG_CONFIG_HOME/linuxscp/sessions.ini
+(or
+.IR $HOME/.config/linuxscp/sessions.ini ),
+which is the same file the graphical interface reads and writes. Create one
+with
+.BR savesession ,
+list them with
+.BR session ,
+and remove one with
+.BR rmsession .
+A password is only stored when
+.I \-password=
+is given to
+.BR savesession .
 .SH COMMANDS
 .TP
 .BI open " site"
 Connect to
-.IR site .
+.IR site ,
+which is either a URL or the name of a stored session (see
+.B STORED SESSIONS
+above).
 .TP
 .B close
 Disconnect.
@@ -177,16 +212,115 @@ When omitted,
 .I remote
 defaults to the current remote directory.
 .TP
-.BI synchronize " local|remote|both [" localdir " [" remotedir ]]"
+.BI synchronize " " local|remote|both " [" options "] [" localdir " [" remotedir ]]"
 Synchronize directories in the specified direction.
 .B remote
-pushes newer local files to the remote server,
+pushes changed local files to the server,
 .B local
-pulls newer remote files to the local machine, and
+pulls changed remote files to the local machine, and
 .B both
-synchronizes both directions. Supports the
+synchronizes both directions by comparing with the record of the previous
+synchronization. Both directories default to the current local and remote
+directories. The following switches are supported:
+.RS
+.TP
+.BI \-criteria= time|size|either|none
+How to decide whether a file changed. The default is
+.BR time :
+size and time are compared with a one\-second tolerance,
+.B size
+compares sizes only,
+.B either
+synchronizes when either differs, and
+.B none
+copies every file.
+.TP
+.BI \-filemask= masks
+Only synchronize files matching one of the masks. Separate several masks with
+a semicolon and exclude with a leading
+.BR | ,
+for example
+.IR "*" .txt "|" "*.bak" .
+A mask may not contain a path separator.
+.TP
 .B \-delete
-flag.
+Delete files on the target side that were removed on the source side. In
+.B both
+mode a file is only deleted when the record of the previous synchronization
+proves the other side removed it, so a file that was never synchronized is
+left alone, and nothing is deleted while a conflict is unresolved.
+.TP
+.B \-recursive
+Include subdirectories. Without it the two directories are compared at the
+top level only, and a directory that exists on one side is skipped.
+.TP
+.B \-preview
+Print the plan and change nothing. One
+.B SYNCPLAN
+line describes the directories, the mode, the criteria and the mask, then one
+line per item with the action, the path and the reason, and a final
+.B SYNCSUMMARY
+line with the number of uploads, downloads, deletions, conflicts and bytes.
+.RE
+.TP
+.BI keepuptodate " [" options "] [" localdir " [" remotedir ]]"
+Synchronize repeatedly, using the same arguments as
+.BR synchronize .
+The first pass runs immediately and later passes are spaced out by
+.BI \-interval= seconds
+(60 seconds by default, and
+.B 0
+runs one pass only). There is no file\-system watcher, so a pass is a full
+comparison of both directories; give
+.BI \-times= n
+to stop after
+.I n
+passes.
+.TP
+.BI edit " [file]"
+Download
+.I file
+and open it in a text editor, then upload it again when the editor exits. The
+editor is taken from the
+.B LINUXSCP_EDITOR
+or
+.B EDITOR
+variable, from
+.IR option\\ editor ,
+or from the first common editor that is installed. Files larger than
+.I option\\ editmaxsize
+(100 MiB by default) are refused. The file is left untouched when the editor
+does not change it, and an upload is refused when the remote file was modified
+after the download began. Without an argument the current remote directory is
+used.
+.TP
+.B session
+List the stored sessions.
+.TP
+.BI savesession " name [" options ]"
+Store the current session, or the session described by the options, under
+.IR name .
+The options are
+.BR \-protocol= ,
+.BR \-host= ,
+.BR \-port= ,
+.BR \-username= ,
+.BR \-password= ,
+.BR \-privatekey= ,
+.BR \-hostkey= ,
+.BR \-remotedir= " and"
+.BR \-localdir= .
+The password is stored only when
+.I \-password=
+is given, and a host key is stored only when
+.I \-hostkey=
+is given, so a session saved after connecting with
+.B \\-hostkey=*
+stays unpinned. Unknown switches are rejected.
+.TP
+.BI rmsession " name"
+Remove the stored session called
+.IR name .
 .TP
 .BI echo " [" message ]
 Print a message to the console output.
@@ -207,7 +341,12 @@ Move or rename a remote file.
 Change the permissions of a remote file, given in octal.
 .TP
 .BI stat " file"
-Print the attributes of a remote file.
+Print the attributes of a remote file: path, size, permissions, modification
+time and owner. The
+.B SizeBytes
+and
+.B ModifiedEpoch
+lines repeat the size and the time in a form a script can compare.
 .TP
 .B terminal
 Open an interactive shell on the connected server in a terminal window,
@@ -233,6 +372,12 @@ On and abort stop subsequent commands; off and continue proceed, but errors
 still cause a nonzero process exit status.
 .BR option\ resume\ on|off
 controls automatic transfer resumption.
+.BR option\ editor\ program
+and
+.BR option\ editmaxsize\ bytes
+choose the editor used by
+.B edit
+and the largest file it will open.
 .BR option\ transfer\ binary
 is supported. Reconnect settings, ASCII/automatic transfers, file-mask
 switches and other unimplemented compatibility options fail explicitly.
@@ -291,15 +436,64 @@ EOF
 linuxscp \-batch \-script=sync.txt
 .fi
 .RE
+.PP
+Preview what a synchronization would do, then run it:
+.PP
+.RS
+.nf
+linuxscp \-batch \-command="open sftp://user@example.com/var/www \-hostkey=* ; \\
+  synchronize local \-criteria=time \-filemask=*.html \-preview ; \\
+  synchronize local \-criteria=time \-filemask=*.html ; exit"
+.fi
+.RE
+.PP
+Keep two directories in step, deleting what the other side removed:
+.PP
+.RS
+.nf
+linuxscp \-batch \-command="open webserver ; \\
+  synchronize both \-delete /srv/site /var/www ; exit"
+.fi
+.RE
+.PP
+Store a site, then edit a file on it:
+.PP
+.RS
+.nf
+linuxscp \-batch \-command="savesession webserver \-protocol=sftp \\
+  \-host=example.com \-username=user \-remotedir=/var/www ; exit"
+linuxscp \-batch \-command="open webserver ; edit index.html ; exit"
+.fi
+.RE
+.PP
+Start the graphical interface:
+.PP
+.RS
+.nf
+linuxscp \-gui
+.fi
+.RE
 .SH LIMITATIONS
 LinuxSCP does not implement full WinSCP feature parity. Native POSIX SFTP,
-basic recursive transfers/resume, synchronization and a browser-based GUI
-exist. Other protocols use curl and depend on its build capabilities.
-WebDAV listing is incomplete; authenticated S3 signing/listing is absent.
-File masks, ASCII conversion, retries/reconnect, advanced synchronization,
-persistent multi-session management, the remote editor and the .NET API
-are not implemented. Bidirectional synchronization is sequential copying,
-not a conflict-safe planner; both with \-delete is rejected.
+basic recursive transfers/resume, synchronization, persistent sessions, a
+remote editor and a browser-based graphical interface exist. Other protocols
+use curl and depend on its build capabilities. WebDAV listing is incomplete;
+authenticated S3 signing/listing is absent. File masks, ASCII conversion,
+retries/reconnect and the .NET API are not implemented.
+.PP
+.B keepuptodate
+repeats a full comparison on a timer: there is no file-system watcher, so a
+short interval on a large tree is expensive and changes can still be missed
+between passes. It also has no background mode: a script that runs it blocks
+until the last pass finishes.
+.PP
+.B synchronize
+both directions relies on a record of the previous synchronization written to
+the state directory; without one, every file that exists on both sides is a
+conflict. The graphical interface and the
+.B \-server
+protocol are intentionally undocumented interfaces for the browser client and
+may change between releases.
 See docs/upstream-parity.md for the pinned baseline and completion plan.
 .SH SEE ALSO
 .BR sftp (1),

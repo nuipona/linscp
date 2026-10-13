@@ -78,6 +78,32 @@ std::string ConfigDirectory();
  * empty string. Used as the default login name by 'open'. */
 std::string CurrentUserName();
 
+/* Directory for temporary files, without a trailing separator (Windows:
+ * %TEMP%, POSIX: $TMPDIR or /tmp). Empty when none is known. */
+std::string TempDirectory();
+
+/* Creates 'path' with all missing parents, accessible to the current
+ * user only (0700 on POSIX; the default ACL of the parent on Windows,
+ * which is already per-user under the profile directory). Used for the
+ * directories that hold a saved password or an editor temporary file. */
+bool CreatePrivateDirectory(const std::string & path, std::string & error);
+
+/* Sets the permissions of 'path' so that only the current user can read
+ * or write it (0600 on POSIX). Returns false when that is not possible;
+ * on Windows the file keeps the default ACL of its directory. */
+bool RestrictFileToUser(const std::string & path);
+
+/* Sleeps for the given number of milliseconds. */
+void SleepMilliseconds(unsigned milliseconds);
+
+/* Installs a handler that records Ctrl-C (SIGINT / console control
+ * events) instead of letting it kill the process, so that a long
+ * running command such as 'keepuptodate' can stop cleanly. Safe to
+ * call more than once. */
+void InstallInterruptHandler();
+/* True once Ctrl-C has been seen by the installed handler. */
+bool Interrupted();
+
 /* Sets the access/modification times (seconds since the epoch) of a
  * local file. Returns false on failure. */
 bool SetFileTimes(const std::string & path, unsigned long atime,
@@ -122,6 +148,13 @@ bool LaunchGuiApplication(std::string & error);
 std::vector<std::string> BuildSshArguments(const std::string & userName,
     const std::string & hostName, int portNumber,
     const std::string & privateKeyFile);
+
+/* Runs args[0] with args[1..] and waits for it to exit, with the child
+ * inheriting the console (standard input, output and error are not
+ * redirected). Returns the child's exit code, or -1 when it could not be
+ * started, in which case 'error' holds the reason. Used to run the
+ * external editor of the 'edit' command, which needs the terminal. */
+int RunInteractive(const std::vector<std::string> & args, std::string & error);
 
 /* Opens an interactive terminal on the given server: the system ssh in a
  * desktop terminal emulator on POSIX (the terminal from LINUXSCP_TERMINAL,

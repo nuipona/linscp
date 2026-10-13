@@ -1,0 +1,103 @@
+/*
+ * Editor: remote file editing.
+ *
+ * 'edit' downloads a remote file into a private temporary directory,
+ * starts an editor on it and uploads the file back when the editor
+ * exits, which is how WinSCP's internal editor works from the console.
+ * The file access is an interface so that every protocol backend can be
+ * edited with the same code, and so the workflow can be tested without
+ * a server.
+ *
+ * The graphical client uses the same idea with its own editor pane:
+ * download, edit, upload. Its 'save' endpoint checks the modification
+ * time it read when the file was opened, so a file that changed on the
+ * server in the meantime is not silently overwritten.
+ */
+
+#ifndef LINUXSCP_EDITOR_H
+#define LINUXSCP_EDITOR_H
+
+#include <string>
+#include <vector>
+
+#include "SftpClient.h"
+
+namespace linuxscp {
+
+class Console;
+
+/* The remote side of an edit session, implemented by Script for the
+ * open connection. The integer results are 0 on success and -1 on
+ * failure, with the reason in 'error'; Stat returns the values below. */
+class RemoteFileAccess
+{
+public:
+    virtual ~RemoteFileAccess() {}
+    virtual int Stat(const std::string & path, LscpAttrs & attrs,
+        std::string & error) = 0;
+    virtual int Download(const std::string & remote, const std::string & local,
+        bool preserveTime, std::string & error) = 0;
+    virtual int Upload(const std::string & local, const std::string & remote,
+        bool preserveTime, std::string & error) = 0;
+};
+
+struct EditOptions
+{
+    /* Editor command line (for example "vim" or "code --wait"). Empty:
+     * $LINUXSCP_EDITOR, $VISUAL, $EDITOR, or a common editor. */
+    std::string editor;
+    /* Keep the temporary file after a successful upload, for
+     * inspection. It is always kept when the upload fails. */
+    bool keepTempFile;
+    /* Largest file that is opened without an explicit -force. */
+    unsigned long long maxSize;
+    /* Edit a file that contains binary data anyway. */
+    bool allowBinary;
+    /* Ignore the size limit and the binary check. */
+    bool force;
+
+    EditOptions() : keepTempFile(false), maxSize(kDefaultMaxSize),
+        allowBinary(false), force(false) {}
+
+    static const unsigned long long kDefaultMaxSize = 64ULL * 1024 * 1024;
+};
+
+/* True when 'data' looks like text rather than binary: no NUL byte in
+ * the first 'length' bytes. */
+bool LooksLikeText(const char * data, size_t length);
+
+/* The command line of the editor to run: the configured one, or the
+ * first of the environment variables and installed editors. Empty with
+ * 'error' set when none was found; an unknown configured program is an
+ * error rather than a surprise. */
+std::vector<std::string> ResolveEditorCommand(const std::string & configured,
+    std::string & error);
+
+/* Full path of the temporary copy of 'remotePath', inside the private
+ * editor directory. The directory is created (0700 on POSIX). */
+bool PrepareEditorTempFile(const std::string & remotePath, std::string & path,
+    std::string & error);
+
+class RemoteEditor
+{
+public:
+    RemoteEditor(RemoteFileAccess & access, Console * console) :
+        mAccess(access), mConsole(console) {}
+
+    /* Downloads 'remotePath', runs the editor and uploads the result
+     * when it changed. Returns false with 'error' set on failure; a
+     * user's decision not to upload is not a failure. */
+    bool Edit(const std::string & remotePath, const EditOptions & options,
+        bool confirmUpload, std::string & error);
+
+private:
+    RemoteEditor(const RemoteEditor &);
+    RemoteEditor & operator=(const RemoteEditor &);
+
+    RemoteFileAccess & mAccess;
+    Console * mConsole;    /* may be NULL: no status messages */
+};
+
+} // namespace linuxscp
+
+#endif /* LINUXSCP_EDITOR_H */

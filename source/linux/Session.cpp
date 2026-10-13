@@ -228,9 +228,14 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
     }
 
     /* '*' is a deliberate one-session override, not a trust decision: do
-     * not poison the persistent host-key cache with an unchecked key. */
+     * not poison the persistent host-key cache with an unchecked key.
+     * Report what was accepted anyway, so that a client (the graphical
+     * interface, an automation script) can pin this key for the next
+     * connection instead of accepting any key again. */
     if (session->AcceptAnyHostKey())
     {
+        Console::Instance().WriteLine("HOSTKEY " + std::string(keytype) + " " +
+            fingerprint);
         return SPR_OK;
     }
 
