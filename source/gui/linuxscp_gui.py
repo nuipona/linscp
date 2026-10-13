@@ -393,6 +393,23 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        if path == "/api/session/terminal":
+            # WinSCP's "Open Terminal": a shell on the connected server,
+            # in a terminal window of the desktop that runs this backend.
+            if not STATE["connected"]:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            add_log("Opening a terminal on the server", "info")
+            code, stdout, stderr = run_linuxscp("terminal")
+            if code == 0:
+                add_log("Terminal opened", "success")
+                self.send_json({"success": True, "output": stdout})
+            else:
+                message = stderr.strip() or stdout.strip() or "Cannot open a terminal"
+                add_log(message, "error")
+                self.send_json({"success": False, "error": message}, status=400)
+            return
+
         if path == "/api/local/mkdir":
             folder_name = body.get("name")
             target = os.path.join(STATE["local_dir"], folder_name)

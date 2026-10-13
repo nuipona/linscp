@@ -376,6 +376,37 @@ void TestDateParsing()
     CHECK_TRUE(thisYear >= 1767225600UL);
 }
 
+/* The 'terminal' command hands the connection details to the system ssh
+ * client; the argument list must not grow options that ssh does not
+ * take, and a PuTTY key file must not be passed as -i. */
+void TestTerminalCommandLine()
+{
+    const std::vector<std::string> plain = BuildSshArguments("user", "host", 22, "");
+    CHECK_EQ(std::to_string(plain.size()), "2");
+    CHECK_EQ(plain[0], "-t");
+    CHECK_EQ(plain[1], "user@host");
+
+    const std::vector<std::string> full = BuildSshArguments("user", "host", 2222,
+        "/home/user/.ssh/id_ed25519");
+    CHECK_EQ(std::to_string(full.size()), "6");
+    CHECK_EQ(full[0], "-i");
+    CHECK_EQ(full[1], "/home/user/.ssh/id_ed25519");
+    CHECK_EQ(full[2], "-p");
+    CHECK_EQ(full[3], "2222");
+    CHECK_EQ(full[4], "-t");
+    CHECK_EQ(full[5], "user@host");
+
+    /* No user name: the client asks for one itself. */
+    const std::vector<std::string> anonymous = BuildSshArguments("", "host", 22, "");
+    CHECK_EQ(anonymous[1], "host");
+
+    /* A PuTTY key file cannot be read by the ssh client. */
+    const std::vector<std::string> ppk = BuildSshArguments("user", "host", 22,
+        "C:/keys/private.PPK");
+    CHECK_EQ(std::to_string(ppk.size()), "2");
+    CHECK_EQ(ppk[0], "-t");
+}
+
 void TestFormatting()
 {
     CHECK_EQ(FormatSize(0), "0");
@@ -667,6 +698,7 @@ int main()
     TestPlatformServices();
     TestFormatting();
     TestDateParsing();
+    TestTerminalCommandLine();
     TestParseSiteUrl();
     TestLocalFs();
     TestSessionRegistry();

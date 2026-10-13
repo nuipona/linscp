@@ -77,6 +77,7 @@ std::string Usage()
 "  mv FROM TO        move/rename a remote file\n"
 "  chmod PERMS FILE  change remote permissions\n"
 "  stat FILE         print remote file attributes\n"
+"  terminal          open an interactive shell on the server\n"
 "  echo [MESSAGE]    display text message\n"
 "  option confirm|batch|resume|reconnect|transfer VALUE  configure session options\n"
 "  help              list the commands\n"

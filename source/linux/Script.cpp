@@ -1,6 +1,7 @@
 #include "Script.h"
 #include "ProtocolClient.h"
 
+#include <cctype>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
@@ -1906,6 +1907,74 @@ bool Script::StatRemote(const std::vector<std::string> & args)
     return true;
 }
 
+/*
+ * WinSCP's "Open Terminal" (Ctrl+P): an interactive shell on the server
+ * that the session is connected to. This client's SSH core offers the
+ * SFTP subsystem only, so the shell comes from the system ssh client in
+ * a terminal window, which is also what makes the command useful in a
+ * script file. The terminal program is picked by the platform layer
+ * (LINUXSCP_TERMINAL overrides it on POSIX).
+ */
+void Script::OpenTerminal(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return;
+    }
+    if (!args.empty())
+    {
+        Console::Instance().Error(Texts::WrongArguments("terminal",
+            "The command takes no arguments."));
+        mErrors++;
+        return;
+    }
+
+    const SessionOptions & options = mSession.Options();
+    if (options.protocol != "sftp")
+    {
+        Console::Instance().Error("An interactive terminal is only available "
+            "for SSH (sftp://) sessions, not for '" + options.protocol + "'.");
+        mErrors++;
+        return;
+    }
+
+    std::string userName = mSession.UserName();
+    if (userName.empty())
+    {
+        userName = options.userName;
+    }
+
+    /* A PuTTY key file cannot be read by the system ssh client, so the
+     * terminal can only use the agent (or ask for a password). */
+    const std::string key = ExpandTilde(options.privateKeyFile);
+    if (key.size() >= 4)
+    {
+        std::string extension = key.substr(key.size() - 4);
+        for (size_t i = 0; i < extension.size(); i++)
+        {
+            extension[i] = static_cast<char>(tolower(static_cast<unsigned char>(extension[i])));
+        }
+        if (extension == ".ppk")
+        {
+            Console::Instance().LogEvent("The PuTTY key file '" + key +
+                "' is not passed to the system ssh client; the terminal will "
+                "use the agent or ask for a password.");
+        }
+    }
+
+    std::string error;
+    if (!LaunchTerminalForServer(userName, options.hostName, options.portNumber,
+            key, error))
+    {
+        Console::Instance().Error(error);
+        mErrors++;
+        return;
+    }
+
+    Console::Instance().WriteLine("Opened a terminal on " +
+        (userName.empty() ? options.hostName : userName + "@" + options.hostName) + ".");
+}
+
 bool Script::SetOption(const std::vector<std::string> & args)
 {
     if (args.empty())
@@ -2145,6 +2214,11 @@ bool Script::ExecuteLine(const std::string & line)
     if (command == "option")
     {
         SetOption(args);
+        return true;
+    }
+    if (command == "terminal")
+    {
+        OpenTerminal(args);
         return true;
     }
     if (command == "call" || command == "show")

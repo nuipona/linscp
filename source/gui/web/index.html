@@ -488,6 +488,10 @@
         <span>Sync</span>
         <span style="font-size: 14px;">⇄</span>
       </button>
+      <button class="action-btn" title="Open a terminal on the server (SSH sessions)" onclick="openTerminal()">
+        <span>Terminal</span>
+        <span style="font-size: 12px; font-family: monospace;">&gt;_</span>
+      </button>
     </div>
 
     <!-- RIGHT PANE: REMOTE -->
@@ -892,6 +896,26 @@
         }
       } catch (e) {
         alert("Sync error: " + e);
+      }
+    }
+
+    async function openTerminal() {
+      if (!isConnected) {
+        alert("Please connect to a remote site first.");
+        return;
+      }
+      try {
+        const res = await fetch("/api/session/terminal", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (!data.success) {
+          alert("Cannot open a terminal: " + (data.error || "unknown error"));
+        }
+      } catch (e) {
+        alert("Terminal error: " + e);
       }
     }
 

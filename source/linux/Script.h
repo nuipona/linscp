@@ -75,6 +75,7 @@ private:
     bool ChangeRemotePermissions(const std::vector<std::string> & args);
     bool StatRemote(const std::vector<std::string> & args);
     bool SetOption(const std::vector<std::string> & args);
+    void OpenTerminal(const std::vector<std::string> & args);
     void PrintHelp();
     void PrintStatus();
 

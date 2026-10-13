@@ -206,6 +206,20 @@ Change the permissions of a remote file, given in octal.
 .BI stat " file"
 Print the attributes of a remote file.
 .TP
+.B terminal
+Open an interactive shell on the connected server in a terminal window,
+using the system
+.B ssh
+client. The terminal program is taken from the
+.B LINUXSCP_TERMINAL
+variable (for example
+.BR "xterm -e"
+or
+.BR foot ),
+otherwise the first common desktop terminal that is installed. SSH
+.RB ( sftp:// )
+sessions only.
+.TP
 .BI option " name value"
 Configure session options:
 .BR option\ confirm\ on|off

@@ -85,7 +85,10 @@ Windows file system.
 The GUI (`linuxscp -gui`, `linuxscp-gui.bat`, or
 `python linuxscp_gui.py`) opens the dual-pane Commander in the browser
 at `http://localhost:8080/`. In the local pane, entering `/` lists the
-available drive letters.
+available drive letters. The "Terminal" button opens an interactive
+shell on the connected server, like WinSCP's "Open Terminal": PuTTY
+when it is installed, otherwise Windows Terminal, and `ssh.exe` (the
+in-box OpenSSH client) as a last resort.
 
 ## How SFTP works on Windows (read this)
 

@@ -106,7 +106,7 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 
 `open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lcd`, `lpwd`, `get`,
 `put`, `synchronize`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`,
-`option`, `help`, `exit`.
+`terminal`, `option`, `help`, `exit`.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
 transfers every match. The exit status is non-zero if any command failed. When a
@@ -133,6 +133,18 @@ put `option confirm off` in a trusted script to disable those checks.
 `option resume on|off` controls automatic transfer resumption across batch
 sessions, `option batch on|off|abort` configures script batch mode, and `echo`
 prints messages for script output logging.
+
+`terminal` opens an interactive shell on the connected server, like the
+"Open Terminal" button of WinSCP: the client starts the system `ssh` client
+in a terminal window of the desktop that runs it. The terminal program is
+taken from `LINUXSCP_TERMINAL` (`<program> [args]`, for example `xterm -e` or
+`foot`), otherwise the first of `x-terminal-emulator`, `gnome-terminal`,
+`konsole`, `xfce4-terminal`, `mate-terminal`, `lxterminal`, `terminator`,
+`alacritty`, `kitty`, `foot`, `wezterm`, `urxvt` and `xterm` that is
+installed. It is available for SSH (`sftp://`) sessions only. The same
+feature is on the "Terminal" button of the graphical client, which asks the
+backend to run this command. On Windows the client opens PuTTY, Windows
+Terminal or `ssh.exe` instead.
 
 `call` and `show` are rejected on purpose: the connection runs the SFTP
 subsystem only, so there is no remote shell to execute a command in.

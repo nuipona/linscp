@@ -116,6 +116,22 @@ std::string ExecutableDirectory();
  * starts the GUI detached and returns true. */
 bool LaunchGuiApplication(std::string & error);
 
+/* Arguments of the system 'ssh' command client that open an interactive
+ * session on the given server, without the program name. Exposed for the
+ * unit tests and for the message shown when no terminal can be started. */
+std::vector<std::string> BuildSshArguments(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile);
+
+/* Opens an interactive terminal on the given server: the system ssh in a
+ * desktop terminal emulator on POSIX (the terminal from LINUXSCP_TERMINAL,
+ * otherwise the first of the common ones that is installed), or PuTTY,
+ * Windows Terminal or the OpenSSH client on Windows. Returns false with
+ * 'error' set when nothing could be started. */
+bool LaunchTerminalForServer(const std::string & userName,
+    const std::string & hostName, int portNumber,
+    const std::string & privateKeyFile, std::string & error);
+
 } // namespace linuxscp
 
 #endif /* LINUXSCP_PLATFORM_H */
