@@ -340,6 +340,42 @@ void TestPlatformServices()
     CHECK_TRUE(!HomeDirectory().empty() || !ConfigDirectory().empty());
 }
 
+void TestDateParsing()
+{
+    /*
+     * The listing date is read in local time. Pin the zone so that the
+     * expected values do not depend on where the tests run.
+     */
+#if defined(_WIN32)
+    _putenv_s("TZ", "UTC");
+    _tzset();
+#else
+    setenv("TZ", "UTC", 1);
+    tzset();
+#endif
+
+    /* curl prints Last-Modified in GMT. */
+    CHECK_EQ(std::to_string(ParseHttpDate("Tue, 13 Oct 2026 05:21:00 GMT")),
+        "1791868860");
+    CHECK_EQ(std::to_string(ParseHttpDate("Sun, 03 Mar 2019 12:00:00 GMT")),
+        "1551614400");
+    CHECK_EQ(std::to_string(ParseHttpDate("")), "0");
+    CHECK_EQ(std::to_string(ParseHttpDate("not a date")), "0");
+
+    /* An 'ls -l' date column: a year for older entries, a clock time
+     * otherwise. */
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "3", "2019")), "1551571200");
+    CHECK_EQ(std::to_string(ParseListingDate("Oct", "13", "2026")),
+        "1791849600");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "3", "25:00")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "3", "12:60")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Xyz", "3", "2019")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "32", "2019")), "0");
+    CHECK_EQ(std::to_string(ParseListingDate("Mar", "", "2019")), "0");
+    const unsigned long thisYear = ParseListingDate("Jan", "1", "00:00");
+    CHECK_TRUE(thisYear >= 1767225600UL);
+}
+
 void TestFormatting()
 {
     CHECK_EQ(FormatSize(0), "0");
@@ -630,6 +666,7 @@ int main()
     TestMaskCase();
     TestPlatformServices();
     TestFormatting();
+    TestDateParsing();
     TestParseSiteUrl();
     TestLocalFs();
     TestSessionRegistry();

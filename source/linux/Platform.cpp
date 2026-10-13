@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <functional>
 
 #if defined(_WIN32)
@@ -654,6 +655,167 @@ bool LaunchGuiApplication(std::string & error)
     error = std::string("Failed to launch LinuxSCP GUI: ") + strerror(errno);
     return false;
 #endif
+}
+
+/*
+ * The date columns of the protocol backends: curl's 'Last-Modified'
+ * header and the date column of an 'ls -l' listing. Both live here so
+ * that the unit tests can reach them without the PuTTY core.
+ */
+
+static int MonthFromName(const std::string & name)
+{
+    static const char * const months[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    for (int i = 0; i < 12; i++)
+    {
+        if (name == months[i])
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+unsigned long ParseHttpDate(const std::string & text)
+{
+    /* 'Tue, 13 Oct 2026 05:21:00 GMT', as curl prints Last-Modified. */
+    const char * start = strchr(text.c_str(), ',');
+    start = start != NULL ? start + 1 : text.c_str();
+    int day = 0;
+    int year = 0;
+    int hour = 0;
+    int minute = 0;
+    int second = 0;
+    char monthName[16] = {0};
+    if (sscanf(start, " %d %15s %d %d:%d:%d", &day, monthName, &year, &hour,
+            &minute, &second) != 6)
+    {
+        return 0;
+    }
+    const int month = MonthFromName(monthName);
+    if (month < 0 || day <= 0 || day > 31)
+    {
+        return 0;
+    }
+    struct tm value = {};
+    value.tm_year = year - 1900;
+    value.tm_mon = month;
+    value.tm_mday = day;
+    value.tm_hour = hour;
+    value.tm_min = minute;
+    value.tm_sec = second;
+    /* The header is in GMT. */
+#if defined(_WIN32)
+    const std::time_t stamp = _mkgmtime(&value);
+#else
+    const std::time_t stamp = timegm(&value);
+#endif
+    return stamp > 0 ? static_cast<unsigned long>(stamp) : 0;
+}
+
+unsigned long ParseListingDate(const std::string & monthName,
+    const std::string & dayText, const std::string & timeOrYear)
+{
+    /*
+     * 'Oct 13 05:21' for an entry from the last six months, 'Oct 13  2026'
+     * for an older one. The listing uses the server's local time, which is
+     * the same clock the client displays timestamps in.
+     */
+    const int month = MonthFromName(monthName);
+    int day = 0;
+    if (month < 0 || dayText.empty())
+    {
+        return 0;
+    }
+    try
+    {
+        day = std::stoi(dayText);
+    }
+    catch (...)
+    {
+        return 0;
+    }
+    if (day <= 0 || day > 31)
+    {
+        return 0;
+    }
+
+    const bool hasClockTime = timeOrYear.find(':') != std::string::npos;
+    int hour = 0;
+    int minute = 0;
+    int year = 0;
+    if (hasClockTime)
+    {
+        const std::string::size_type colon = timeOrYear.find(':');
+        try
+        {
+            hour = std::stoi(timeOrYear.substr(0, colon));
+            minute = std::stoi(timeOrYear.substr(colon + 1));
+        }
+        catch (...)
+        {
+            return 0;
+        }
+        if (hour < 0 || hour > 23 || minute < 0 || minute > 59)
+        {
+            return 0;
+        }
+        std::time_t now = std::time(NULL);
+        struct tm nowParts;
+        if (!LocalTime(now, nowParts))
+        {
+            return 0;
+        }
+        year = nowParts.tm_year + 1900;
+    }
+    else
+    {
+        try
+        {
+            year = std::stoi(timeOrYear);
+        }
+        catch (...)
+        {
+            return 0;
+        }
+    }
+    if (year < 1970 || year > 9999)
+    {
+        return 0;
+    }
+
+    struct tm value = {};
+    value.tm_year = year - 1900;
+    value.tm_mon = month;
+    value.tm_mday = day;
+    value.tm_hour = hour;
+    value.tm_min = minute;
+    value.tm_sec = 0;
+    value.tm_isdst = -1;
+#if defined(_WIN32)
+    std::time_t stamp = _mktime64(&value);
+#else
+    std::time_t stamp = std::mktime(&value);
+#endif
+    if (hasClockTime)
+    {
+        /* No year in the listing: a date more than a day ahead of the
+         * clock must belong to the previous year. */
+        const std::time_t limit = std::time(NULL) + 24 * 60 * 60;
+        if (stamp > limit)
+        {
+            value.tm_year--;
+#if defined(_WIN32)
+            stamp = _mktime64(&value);
+#else
+            stamp = std::mktime(&value);
+#endif
+        }
+    }
+    return stamp > 0 ? static_cast<unsigned long>(stamp) : 0;
 }
 
 } // namespace linuxscp

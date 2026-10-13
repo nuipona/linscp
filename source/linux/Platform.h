@@ -83,6 +83,18 @@ std::string CurrentUserName();
 bool SetFileTimes(const std::string & path, unsigned long atime,
     unsigned long mtime);
 
+/* Parses an HTTP 'Last-Modified' header value ('Tue, 13 Oct 2026
+ * 05:21:00 GMT') into seconds since the epoch. Returns 0 when the text
+ * cannot be read. */
+unsigned long ParseHttpDate(const std::string & text);
+
+/* Parses the date column of an 'ls -l' entry, which is either a clock
+ * time for a recent file ('Oct 13 05:21') or a year for an older one
+ * ('Oct 13  2026'), into seconds since the epoch. Returns 0 when the
+ * text cannot be read. */
+unsigned long ParseListingDate(const std::string & monthName,
+    const std::string & dayText, const std::string & timeOrYear);
+
 /* Runs args[0] with args[1..] without a shell, capturing everything the
  * child writes to stdout and stderr (read concurrently, so a child can
  * fill both pipes without deadlocking). Returns the child's exit code,

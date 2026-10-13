@@ -125,7 +125,13 @@ def run_linuxscp(command_script, session=None):
         url += f":{port}"
     url += "/"
 
-    full_commands = f"open -hostkey={hostkey} {url} ; {command_script} ; exit"
+    # The GUI asks its own questions (the web client confirms before it
+    # deletes or overwrites anything), so the core must not stop at its
+    # interactive 'are you sure' guard: every operation here is
+    # non-interactive and would otherwise come back as 'Cannot confirm
+    # this action without a terminal'.
+    full_commands = (f"open -hostkey={hostkey} {url} ; option confirm off ; "
+                     f"{command_script} ; exit")
     
     cmd = [
         bin_path,

@@ -24,8 +24,10 @@
 #include "Session.h"
 #include "Texts.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -262,6 +264,205 @@ void PutUtf8(BinarySink * bs, unsigned long value)
 }
 
 } // namespace
+
+/* ======================================================================
+ * Private key files
+ * ==================================================================== */
+
+/*
+ * The SSH core only ever opens PuTTY .ppk files (and public key files) in
+ * its user authentication code; the OpenSSH "new format" and old PEM keys
+ * that every Linux user actually has are understood only by the importer
+ * that PuTTY's conversion tools use. So a foreign key file is imported
+ * here and written out as an unencrypted .ppk (mode 0600) below the
+ * configuration directory for the core to read.
+ */
+
+namespace linuxscp {
+
+namespace {
+
+const char * const ImportedKeyPrefix = "imported-key-";
+
+std::string gImportedKeyPath;
+
+void DeleteImportedKeyFile()
+{
+    if (!gImportedKeyPath.empty())
+    {
+        remove(gImportedKeyPath.c_str());
+        gImportedKeyPath.clear();
+    }
+}
+
+/*
+ * A key file left behind by a process that died before it could remove it
+ * (the file name carries the process ID). Only files whose process is gone
+ * are removed, so a converted key that another running client is still
+ * using stays where it is.
+ */
+void DeleteStaleImportedKeyFiles()
+{
+    const std::string dir = StorageRoot();
+    DIR * handle = opendir(dir.c_str());
+    if (handle == NULL)
+    {
+        return;
+    }
+    const size_t prefixLength = strlen(ImportedKeyPrefix);
+    struct dirent * entry;
+    while ((entry = readdir(handle)) != NULL)
+    {
+        const std::string name(entry->d_name);
+        if (name.compare(0, prefixLength, ImportedKeyPrefix) != 0)
+        {
+            continue;
+        }
+        const std::string::size_type dash = name.find_last_of('-');
+        const std::string::size_type dot = name.rfind(".ppk");
+        if (dash == std::string::npos || dot == std::string::npos || dot < dash)
+        {
+            continue;
+        }
+        const std::string pidText = name.substr(dash + 1, dot - dash - 1);
+        if (pidText.empty())
+        {
+            continue;
+        }
+        char * end = NULL;
+        const long pid = strtol(pidText.c_str(), &end, 10);
+        if (end == NULL || *end != '\0' || pid <= 0)
+        {
+            continue;
+        }
+        if (kill(static_cast<pid_t>(pid), 0) == 0 || errno == EPERM)
+        {
+            continue; /* still in use */
+        }
+        remove((dir + "/" + name).c_str());
+    }
+    closedir(handle);
+}
+
+} // namespace
+
+std::string PreparePrivateKeyFile(const std::string & keyFile, std::string & error)
+{
+    error.clear();
+    DeleteImportedKeyFile();
+    DeleteStaleImportedKeyFiles();
+    if (keyFile.empty())
+    {
+        return std::string();
+    }
+
+    Filename * fileName = filename_from_str(keyFile.c_str());
+    const int type = key_type(fileName);
+
+    /*
+     * PuTTY key files (with or without the private half) are read by the
+     * core itself, so they need no conversion.
+     */
+    if (type == SSH_KEYTYPE_SSH2 || type == SSH_KEYTYPE_SSH2_PUBLIC_RFC4716 ||
+        type == SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH || type == SSH_KEYTYPE_SSH1 ||
+        type == SSH_KEYTYPE_SSH1_PUBLIC)
+    {
+        filename_free(fileName);
+        return keyFile;
+    }
+    if (!import_possible(type))
+    {
+        error = "Cannot use the private key file '" + keyFile + "': " +
+            key_type_to_str(type) + ".";
+        filename_free(fileName);
+        return std::string();
+    }
+
+    /* An encrypted key needs its passphrase before it can be imported.
+     * (import_encrypted writes a key comment out through this pointer
+     * without a NULL check, so it must always be a real variable.) */
+    std::string passphrase;
+    char * keyComment = NULL;
+    const bool encrypted = import_encrypted(fileName, type, &keyComment);
+    sfree(keyComment);
+    if (encrypted)
+    {
+        if (!Console::Instance().IsInteractive())
+        {
+            error = "The private key file '" + keyFile + "' is encrypted; "
+                "run interactively to enter its passphrase.";
+            filename_free(fileName);
+            return std::string();
+        }
+        if (!Console::Instance().ReadPassword(
+                "Passphrase for key file '" + keyFile + "': ", passphrase) ||
+            passphrase.empty())
+        {
+            error = "No passphrase given for the private key file '" + keyFile + "'.";
+            filename_free(fileName);
+            return std::string();
+        }
+    }
+
+    /* Importing hashes the key and so needs the random pool, which the
+     * SSH backend would only set up later. */
+    random_ref();
+    const char * importError = NULL;
+    ssh2_userkey * key = import_ssh2(fileName, type,
+        passphrase.empty() ? NULL : &passphrase[0], &importError);
+    if (!passphrase.empty())
+    {
+        smemclr(&passphrase[0], passphrase.size());
+    }
+    filename_free(fileName);
+    random_unref();
+
+    if (key == NULL || key == SSH2_WRONG_PASSPHRASE)
+    {
+        error = "Cannot read the private key file '" + keyFile + "'";
+        error += (key == SSH2_WRONG_PASSPHRASE) ? ": wrong passphrase." :
+            (importError != NULL ? std::string(": ") + importError : ".");
+        return std::string();
+    }
+
+    if (!MakeDirectoryTree(StorageRoot()))
+    {
+        error = "Cannot create the configuration directory '" + StorageRoot() + "'.";
+        ssh_key_free(key->key);
+        sfree(key->comment);
+        sfree(key);
+        return std::string();
+    }
+
+    char suffix[32];
+    snprintf(suffix, sizeof(suffix), "-%u.ppk", static_cast<unsigned int>(getpid()));
+    const std::string importedPath = StoragePath("imported-key" + std::string(suffix));
+    Filename * imported = filename_from_str(importedPath.c_str());
+    random_ref();
+    const bool written = ppk_save_f(imported, key, NULL, &ppk_save_default_parameters);
+    random_unref();
+    filename_free(imported);
+    ssh_key_free(key->key);
+    sfree(key->comment);
+    sfree(key);
+    if (!written)
+    {
+        error = "Cannot write the converted private key file '" + importedPath + "'.";
+        return std::string();
+    }
+
+    gImportedKeyPath = importedPath;
+    Console::Instance().LogEvent("Imported the " + std::string(key_type_to_str(type)) +
+        " key file '" + keyFile + "' as a PuTTY key file.");
+    return importedPath;
+}
+
+void DiscardImportedPrivateKeyFile()
+{
+    DeleteImportedKeyFile();
+}
+
+} // namespace linuxscp
 
 /* ======================================================================
  * C entry points expected by the core
@@ -541,35 +742,114 @@ static std::string HostKeyPrefix(const char * hostname, int port)
     return std::string(hostname) + "@" + buffer;
 }
 
+static bool IsSpaceOrTab(char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+/*
+ * Parses a cache line, which reads
+ *
+ *     <hostname>@<port> <key type> <key>
+ *
+ * where <key> may itself contain no spaces but is otherwise opaque.
+ * Returns false for a line that does not belong to this host and port
+ * ('example.com@22' must not match a line for 'example.com@222'), or one
+ * that is malformed. The separators are runs of spaces/tabs, so the
+ * leading blank after the prefix is not mistaken for an empty key type.
+ */
+bool ParseHostKeyLine(const std::string & line, const std::string & prefix,
+    std::string & type, std::string & value)
+{
+    if (line.size() <= prefix.size() ||
+        line.compare(0, prefix.size(), prefix) != 0 ||
+        !IsSpaceOrTab(line[prefix.size()]))
+    {
+        return false;
+    }
+    const std::string::size_type typeStart =
+        line.find_first_not_of(" \t", prefix.size());
+    if (typeStart == std::string::npos)
+    {
+        return false;
+    }
+    const std::string::size_type typeEnd =
+        line.find_first_of(" \t", typeStart);
+    if (typeEnd == std::string::npos)
+    {
+        return false;
+    }
+    const std::string::size_type valueStart =
+        line.find_first_not_of(" \t", typeEnd);
+    if (valueStart == std::string::npos)
+    {
+        return false;
+    }
+    type = line.substr(typeStart, typeEnd - typeStart);
+    value = line.substr(valueStart);
+    return true;
+}
+
+/* Reads the cache for this host, port and key type. Returns 1 and fills
+ * 'key' when an entry was found, 0 when there is none. */
 int retrieve_host_key(const char * hostname, int port, const char * keytype,
     char * key, int maxlen)
 {
     std::vector<std::string> lines;
     ReadLines(HostKeyPath(), lines);
-    std::string prefix = HostKeyPrefix(hostname, port);
+    const std::string prefix = HostKeyPrefix(hostname, port);
     for (size_t i = 0; i < lines.size(); i++)
     {
-        if (lines[i].compare(0, prefix.size(), prefix) == 0)
+        std::string type;
+        std::string value;
+        if (!ParseHostKeyLine(lines[i], prefix, type, value))
         {
-            std::string rest = lines[i].substr(prefix.size());
-            std::string::size_type pos = rest.find(' ');
-            if (pos == std::string::npos)
-            {
-                continue;
-            }
-            std::string type = rest.substr(0, pos);
-            std::string value = rest.substr(pos + 1);
-            if (keytype != NULL && type != keytype)
-            {
-                continue;
-            }
-            if (key != NULL && maxlen > 0)
-            {
-                strncpy(key, value.c_str(), maxlen - 1);
-                key[maxlen - 1] = '\0';
-            }
-            return 1;
+            continue;
         }
+        if (keytype != NULL && type != keytype)
+        {
+            continue;
+        }
+        if (key != NULL && maxlen > 0)
+        {
+            strncpy(key, value.c_str(), maxlen - 1);
+            key[maxlen - 1] = '\0';
+        }
+        return 1;
+    }
+    return 0;
+}
+
+/*
+ * The console client keeps the trust decision in its own hands (the
+ * FORK_BUILD core always asks the Seat), so this is what
+ * seat_confirm_ssh_host_key uses:
+ *
+ *   1  a cached key exists for this host/port/key type and equals 'key'
+ *   0  no key is cached for this host
+ *  -1  a cached key exists and differs from 'key'
+ *
+ * 'key' is the server key in the same text form store_host_key() saved.
+ */
+int linuxscp_check_cached_host_key(const char * hostname, int port,
+    const char * keytype, const char * key)
+{
+    std::vector<std::string> lines;
+    ReadLines(HostKeyPath(), lines);
+    const std::string prefix = HostKeyPrefix(hostname, port);
+    for (size_t i = 0; i < lines.size(); i++)
+    {
+        std::string type;
+        std::string value;
+        if (!ParseHostKeyLine(lines[i], prefix, type, value))
+        {
+            continue;
+        }
+        if (keytype != NULL && type != keytype)
+        {
+            continue;
+        }
+        return (key != NULL && value == key) ? 1 : -1;
     }
     return 0;
 }
@@ -589,15 +869,12 @@ void store_host_key(Seat * seat, const char * hostname, int port,
     bool replaced = false;
     for (size_t i = 0; i < lines.size(); i++)
     {
-        if (lines[i].compare(0, prefix.size(), prefix) == 0)
+        std::string type;
+        std::string value;
+        if (ParseHostKeyLine(lines[i], prefix, type, value) && type == keytype)
         {
-            std::string rest = lines[i].substr(prefix.size());
-            std::string::size_type pos = rest.find(' ');
-            if (pos != std::string::npos && rest.substr(0, pos) == keytype)
-            {
-                lines[i] = entry;
-                replaced = true;
-            }
+            lines[i] = entry;
+            replaced = true;
         }
     }
     if (!replaced)

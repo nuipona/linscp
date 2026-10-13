@@ -21,13 +21,13 @@ public:
 
     static int Get(const SessionOptions & options, const std::string & remotePath,
         const std::string & localPath, unsigned long long resumeOffset,
-        unsigned long long * size, LscpProgressFn progress, void * progressCtx,
-        std::string & error);
+        bool preserveTime, unsigned long long * size, LscpProgressFn progress,
+        void * progressCtx, std::string & error);
 
     static int Put(const SessionOptions & options, const std::string & localPath,
         const std::string & remotePath, int permissions, unsigned long long resumeOffset,
-        unsigned long long * size, LscpProgressFn progress, void * progressCtx,
-        std::string & error);
+        bool preserveTime, unsigned long long * size, LscpProgressFn progress,
+        void * progressCtx, std::string & error);
 
     static int Remove(const SessionOptions & options, const std::string & remotePath,
         std::string & error);

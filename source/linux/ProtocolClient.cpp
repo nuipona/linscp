@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -141,8 +142,14 @@ unsigned long PermissionsFromString(const std::string & text)
 std::string BuildUrl(const SessionOptions & options, const std::string & remotePath)
 {
     std::string proto = ToLower(options.protocol);
-    if (proto == "webdav" || proto == "dav")
+    if (proto == "dav")
     {
+        /* Plain WebDAV, with the port 80 default ParseSiteUrl gives it. */
+        proto = "http";
+    }
+    else if (proto == "webdav")
+    {
+        /* Secure WebDAV, matching the port 443 default. */
         proto = "https";
     }
     else if (proto == "ssh")
@@ -184,6 +191,13 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     args.push_back(CurlExecutable());
     args.push_back("-s");
     args.push_back("-S");
+    /*
+     * -f (--fail) turns a server-side error into a non-zero exit code
+     * instead of a successful transfer of the error document. Without it
+     * a missing file on an HTTP(S) server looks like a 335-byte
+     * download, and 'stat' reports the error page as the file.
+     */
+    args.push_back("-f");
 
     if (!options.userName.empty())
     {
@@ -191,6 +205,18 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
         if (!options.password.empty())
         {
             cred += ":" + options.password;
+        }
+        else if (!StdInIsTerminal())
+        {
+            /*
+             * Without the separator curl asks for the password itself and
+             * reads it from stdin. In a '-script=-' run stdin is the
+             * command source, so the prompt would eat pending commands (and
+             * the prompt text ended up inside error messages). Give curl an
+             * explicitly empty password instead; interactive runs still get
+             * the prompt.
+             */
+            cred += ":";
         }
         args.push_back("-u");
         args.push_back(cred);
@@ -239,6 +265,110 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
         args.push_back("--connect-timeout");
         args.push_back(std::to_string(options.timeoutSecs));
     }
+}
+
+struct ListingEntry
+{
+    std::string name;
+    std::string longname;
+    /* False for a names-only listing, where neither the type nor the
+     * size of the entry is known. */
+    bool typeKnown;
+    bool isDir;
+    unsigned long permissions;
+    unsigned long long size;
+    /* Set when the listing carried a usable date column. */
+    bool timeKnown;
+    unsigned long mtime;
+};
+
+/*
+ * Runs one directory listing and parses it. Both the long 'ls -l' format
+ * (what FTP servers and curl's own SFTP engine produce) and a names-only
+ * listing are understood; the latter leaves 'typeKnown' false.
+ */
+bool FetchListing(const SessionOptions & options, const std::string & remotePath,
+    std::vector<ListingEntry> & entries, std::string & error)
+{
+    entries.clear();
+
+    std::string path = remotePath;
+    if (path.empty() || path.back() != '/')
+    {
+        path += "/";
+    }
+
+    std::vector<std::string> args;
+    BuildCommonCurlArgs(options, args);
+    args.push_back(BuildUrl(options, path));
+
+    std::string outStr;
+    std::string errStr;
+    const int rc = RunCurl(args, outStr, errStr);
+    if (rc != 0)
+    {
+        error = errStr.empty() ? "Curl error " + std::to_string(rc) : errStr;
+        return false;
+    }
+
+    std::istringstream stream(outStr);
+    std::string line;
+    while (std::getline(stream, line))
+    {
+        if (!line.empty() && line.back() == '\r')
+        {
+            line.pop_back();
+        }
+        if (line.empty() || line == "." || line == "..")
+        {
+            continue;
+        }
+
+        ListingEntry entry;
+        entry.typeKnown = false;
+        entry.isDir = false;
+        entry.permissions = 0100644;
+        entry.size = 0;
+        entry.timeKnown = false;
+        entry.mtime = 0;
+        entry.longname = line;
+
+        std::vector<std::string> fields;
+        if (SplitLongListing(line, fields) && LooksLikePermissions(fields[0]))
+        {
+            entry.name = fields[8];
+            entry.typeKnown = true;
+            entry.isDir = fields[0][0] == 'd';
+            entry.permissions = PermissionsFromString(fields[0]);
+            try
+            {
+                entry.size = std::stoull(fields[4]);
+            }
+            catch (...)
+            {
+                entry.size = 0;
+            }
+            entry.mtime = ParseListingDate(fields[5], fields[6], fields[7]);
+            entry.timeKnown = entry.mtime != 0;
+        }
+        else
+        {
+            entry.name = line;
+            if (!entry.name.empty() && entry.name.back() == '/')
+            {
+                entry.name.pop_back();
+                entry.typeKnown = true;
+                entry.isDir = true;
+                entry.permissions = 0040755;
+            }
+        }
+        if (entry.name.empty() || entry.name == "." || entry.name == "..")
+        {
+            continue;
+        }
+        entries.push_back(entry);
+    }
+    return true;
 }
 
 std::string OctalPermissions(int permissions)
@@ -290,93 +420,10 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
     names->count = 0;
     names->names = NULL;
 
-    std::string path = remotePath;
-    if (path.empty() || path.back() != '/')
+    std::vector<ListingEntry> entries;
+    if (!FetchListing(options, remotePath, entries, error))
     {
-        path += "/";
-    }
-
-    std::vector<std::string> args;
-    BuildCommonCurlArgs(options, args);
-
-    std::string proto = ToLower(options.protocol);
-    if (proto == "ftp" || proto == "ftps")
-    {
-        args.push_back("-l"); // List-only for FTP
-    }
-
-    std::string url = BuildUrl(options, path);
-    args.push_back(url);
-
-    std::string outStr;
-    std::string errStr;
-    int rc = RunCurl(args, outStr, errStr);
-    if (rc != 0)
-    {
-        error = errStr.empty() ? "Curl error " + std::to_string(rc) : errStr;
         return false;
-    }
-
-    struct Entry
-    {
-        std::string name;
-        std::string longname;
-        bool isDir;
-        unsigned long permissions;
-        unsigned long long size;
-    };
-    std::vector<Entry> entries;
-
-    std::istringstream stream(outStr);
-    std::string line;
-    while (std::getline(stream, line))
-    {
-        if (!line.empty() && line.back() == '\r')
-        {
-            line.pop_back();
-        }
-        if (line.empty() || line == "." || line == "..")
-        {
-            continue;
-        }
-
-        Entry entry;
-        entry.isDir = false;
-        entry.permissions = 0100644;
-        entry.size = 0;
-        entry.longname = line;
-
-        std::vector<std::string> fields;
-        if (SplitLongListing(line, fields) && LooksLikePermissions(fields[0]))
-        {
-            /* 'ls -l' style output (SFTP and some FTP servers). */
-            entry.name = fields[8];
-            entry.isDir = fields[0][0] == 'd';
-            entry.permissions = PermissionsFromString(fields[0]);
-            try
-            {
-                entry.size = std::stoull(fields[4]);
-            }
-            catch (...)
-            {
-                entry.size = 0;
-            }
-        }
-        else
-        {
-            entry.name = line;
-            if (!entry.name.empty() && entry.name.back() == '/')
-            {
-                entry.name.pop_back();
-                entry.isDir = true;
-                entry.permissions = 0040755;
-            }
-        }
-        if (entry.name.empty() || entry.name == "." || entry.name == "..")
-        {
-            continue;
-        }
-        entries.push_back(entry);
     }
 
     names->count = static_cast<int>(entries.size());
@@ -390,6 +437,7 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
     if (names->names == NULL)
     {
         error = "Out of memory allocating directory entries.";
+        names->count = 0;
         return false;
     }
 
@@ -400,7 +448,12 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
         names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
         names->names[i].attrs.permissions = entries[i].permissions;
         names->names[i].attrs.size = entries[i].size;
-        names->names[i].attrs.mtime = 0;
+        if (entries[i].timeKnown)
+        {
+            names->names[i].attrs.flags |= LSCP_ATTR_ACMODTIME;
+            names->names[i].attrs.atime = entries[i].mtime;
+            names->names[i].attrs.mtime = entries[i].mtime;
+        }
     }
 
     return true;
@@ -415,9 +468,13 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
     }
 
     std::string proto = ToLower(options.protocol);
-    if (proto == "sftp")
+    if (proto == "sftp" || proto == "ftp" || proto == "ftps")
     {
-        /* curl cannot HEAD an SFTP path; stat by listing the parent. */
+        /*
+         * curl cannot HEAD an SFTP path at all, and for FTP a HEAD asks
+         * for the SIZE of a file, which a directory does not have. Look
+         * the name up in its parent directory instead.
+         */
         std::string fileName = RemoteFileName(remotePath);
         if (fileName.empty())
         {
@@ -433,33 +490,33 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
         {
             parent = "/";
         }
-        LscpNames names;
-        names.count = 0;
-        names.names = NULL;
-        if (!List(options, parent, &names, error))
+        std::vector<ListingEntry> entries;
+        if (!FetchListing(options, parent, entries, error))
         {
             return LSCP_SFTP_STAT_ERROR;
         }
-        int result = LSCP_SFTP_STAT_MISSING;
-        for (int i = 0; i < names.count; i++)
+        for (size_t i = 0; i < entries.size(); i++)
         {
-            if (names.names[i].filename != NULL &&
-                fileName == names.names[i].filename)
+            if (entries[i].name != fileName)
             {
-                if (attrs != NULL)
-                {
-                    *attrs = names.names[i].attrs;
-                }
-                result = LSCP_SFTP_STAT_EXISTS;
-                break;
+                continue;
             }
+            if (attrs != NULL)
+            {
+                attrs->flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
+                attrs->permissions = entries[i].permissions;
+                attrs->size = entries[i].size;
+                if (entries[i].timeKnown)
+                {
+                    attrs->flags |= LSCP_ATTR_ACMODTIME;
+                    attrs->atime = entries[i].mtime;
+                    attrs->mtime = entries[i].mtime;
+                }
+            }
+            return LSCP_SFTP_STAT_EXISTS;
         }
-        FreeNames(&names);
-        if (result == LSCP_SFTP_STAT_MISSING)
-        {
-            error = "No such file or directory.";
-        }
-        return result;
+        error = "No such file or directory.";
+        return LSCP_SFTP_STAT_MISSING;
     }
 
     std::vector<std::string> args;
@@ -469,7 +526,7 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCurl(args, outStr, errStr);
+    const int rc = RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
         error = errStr;
@@ -485,14 +542,26 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
         std::string line;
         while (std::getline(stream, line))
         {
-            if (StartsWith(ToLower(line), "content-length:"))
+            const std::string lower = ToLower(line);
+            const size_t pos = line.find(':');
+            if (pos == std::string::npos)
             {
-                size_t pos = line.find(':');
-                if (pos != std::string::npos)
+                continue;
+            }
+            if (StartsWith(lower, "content-length:"))
+            {
+                try {
+                    attrs->size = std::stoull(line.substr(pos + 1));
+                } catch (...) {}
+            }
+            else if (StartsWith(lower, "last-modified:"))
+            {
+                const unsigned long stamp = ParseHttpDate(line.substr(pos + 1));
+                if (stamp != 0)
                 {
-                    try {
-                        attrs->size = std::stoull(line.substr(pos + 1));
-                    } catch (...) {}
+                    attrs->flags |= LSCP_ATTR_ACMODTIME;
+                    attrs->atime = stamp;
+                    attrs->mtime = stamp;
                 }
             }
         }
@@ -502,8 +571,8 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
 
 int ProtocolClient::Get(const SessionOptions & options, const std::string & remotePath,
     const std::string & localPath, unsigned long long resumeOffset,
-    unsigned long long * size, LscpProgressFn progress, void * progressCtx,
-    std::string & error)
+    bool preserveTime, unsigned long long * size, LscpProgressFn progress,
+    void * progressCtx, std::string & error)
 {
     (void)progress;
     (void)progressCtx;
@@ -519,6 +588,13 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
     {
         args.push_back("-C");
         args.push_back(std::to_string(resumeOffset));
+    }
+
+    if (preserveTime)
+    {
+        /* Give the downloaded file the server's timestamps where the
+         * protocol carries them (FTP, SFTP, SCP, HTTP Last-Modified). */
+        args.push_back("-R");
     }
 
     args.push_back("-o");
@@ -544,8 +620,8 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
 
 int ProtocolClient::Put(const SessionOptions & options, const std::string & localPath,
     const std::string & remotePath, int permissions, unsigned long long resumeOffset,
-    unsigned long long * size, LscpProgressFn progress, void * progressCtx,
-    std::string & error)
+    bool preserveTime, unsigned long long * size, LscpProgressFn progress,
+    void * progressCtx, std::string & error)
 {
     (void)permissions;
     (void)progress;
@@ -562,6 +638,13 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
     {
         args.push_back("-C");
         args.push_back(std::to_string(resumeOffset));
+    }
+
+    if (preserveTime)
+    {
+        /* -R gives the uploaded file the local file's modification
+         * time where the protocol supports it (FTP MFMT, SFTP). */
+        args.push_back("-R");
     }
 
     args.push_back("-T");

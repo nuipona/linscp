@@ -82,6 +82,9 @@ int lscp_sftp_remove(const char * path);
 int lscp_sftp_rename(const char * from, const char * to);
 /* permissions < 0 leaves the permissions unchanged */
 int lscp_sftp_set_permissions(const char * path, int permissions);
+/* Sets the access and modification times of a remote file. */
+int lscp_sftp_set_times(const char * path, unsigned long atime,
+    unsigned long mtime);
 
 /* size may be NULL. On success it holds the number of bytes transferred. */
 int lscp_sftp_get(const char * remotePath, const char * localPath,

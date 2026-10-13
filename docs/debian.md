@@ -87,7 +87,7 @@ linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 | `-script=<file>` | read commands from a file, one per line |
 | `-command="<cmd1>;<cmd2>"` | run the given commands (`;` separated) |
 | `-hostkey=<fingerprint>` | pin the host key; `*` accepts any for this connection only |
-| `-privatekey=<file>` | private key for public key authentication |
+| `-privatekey=<file>` | private key for public key authentication (`.ppk` or OpenSSH format) |
 | `-username=<name>` | user name |
 | `-password=<password>` | password (also read from `LINUXSCP_PASSWORD`) |
 | `-port=<number>` | port number |
@@ -165,9 +165,13 @@ LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
 
 * **ssh-agent** (recommended): with `SSH_AUTH_SOCK` set, the keys in the agent
   are offered automatically.
-* **Private key file**: `-privatekey=` expects a PuTTY `.ppk` file. The PuTTY
-  core in this tree rejects OpenSSH and PEM private keys outright ("Unable to
-  use key file"), so convert them first, or load them into the agent instead.
+* **Private key file**: `-privatekey=` accepts a PuTTY `.ppk` file as well as
+  OpenSSH (`id_rsa`, `id_ed25519`, old PEM) and ssh.com private keys. A key in
+  a foreign format is imported by the PuTTY core and used as a temporary
+  `.ppk` for the connection, which is removed when the session closes. An
+  encrypted key asks for its passphrase interactively; in `-batch` mode an
+  encrypted key fails with "run interactively to enter its passphrase", so
+  load such keys into the agent instead.
 * **Password**: `-password=` or `LINUXSCP_PASSWORD`. In interactive mode the
   client asks; in `-batch` mode it fails rather than prompting.
 

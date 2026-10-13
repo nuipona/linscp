@@ -18,12 +18,13 @@ struct LocalFileInfo
     bool isDir;
     bool isRegular;
     uint64_t size;
+    unsigned long atime;
     unsigned long mtime;
     unsigned long permissions;
     int error;
 
     LocalFileInfo() : exists(false), isDir(false), isRegular(false), size(0),
-        mtime(0), permissions(0), error(0) {}
+        atime(0), mtime(0), permissions(0), error(0) {}
 };
 
 /* Returns path attributes; if stat fails, 'error' contains the errno value. */
