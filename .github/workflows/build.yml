@@ -25,16 +25,33 @@ jobs:
       - name: Smoke test the GUI backend
         run: |
           python3 -m py_compile source/gui/linuxscp_gui.py
+          gui_log="$RUNNER_TEMP/gui-backend.log"
+          rm -f "$gui_log"
           LINUXSCP_CONFIG_DIR="$RUNNER_TEMP/linuxscp-gui-config" \
-            python3 source/gui/linuxscp_gui.py --port=18080 &
+            python3 source/gui/linuxscp_gui.py --port=18080 --print-token > "$gui_log" &
           gui=$!
-          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+          token=""
+          for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
             sleep 1
-            curl -fsS http://localhost:18080/api/status >/dev/null && break
+            token=$(sed -n 's/^Token: //p' "$gui_log" | head -1)
+            [ -n "$token" ] && break
           done
-          curl -fsS http://localhost:18080/api/status | grep -q '"binary"'
-          curl -fsS "http://localhost:18080/api/local/list?path=/tmp" | grep -q '"success": *true'
-          curl -fsS http://localhost:18080/api/sessions | grep -q '"sessions"'
+          if [ -z "$token" ]; then
+            cat "$gui_log"
+            kill "$gui"
+            exit 1
+          fi
+          api() { curl -fsS -H "X-LSCP-Token: $token" "$@"; }
+          api http://localhost:18080/api/status | grep -q '"binary"'
+          api "http://localhost:18080/api/local/list?path=/tmp" | grep -q '"success": *true'
+          api http://localhost:18080/api/sessions | grep -q '"sessions"'
+          # The guards are part of the interface: no token, or a host name the
+          # server does not answer to, has to be refused.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18080/api/status)
+          [ "$code" = "401" ] || { echo "no token was accepted ($code)"; kill "$gui"; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "Host: not-allowed.example" \
+                      -H "X-LSCP-Token: $token" http://localhost:18080/api/status)
+          [ "$code" = "403" ] || { echo "a foreign host was accepted ($code)"; kill "$gui"; exit 1; }
           kill "$gui"
       - name: Graphical client regression test
         run: |
@@ -90,13 +107,29 @@ jobs:
         shell: pwsh
         run: |
           python -m py_compile source/gui/linuxscp_gui.py
-          $p = Start-Process python -ArgumentList "source/gui/linuxscp_gui.py","--port=18081" -PassThru -NoNewWindow
+          $log = Join-Path $env:RUNNER_TEMP "gui-backend.log"
+          Remove-Item $log -ErrorAction SilentlyContinue
+          $p = Start-Process python -ArgumentList "source/gui/linuxscp_gui.py","--port=18081","--print-token" `
+            -PassThru -NoNewWindow -RedirectStandardOutput $log
           try {
-            Start-Sleep -Seconds 3
-            $status = Invoke-RestMethod -Uri "http://localhost:18081/api/status"
+            $token = $null
+            foreach ($i in 1..20) {
+              Start-Sleep -Seconds 1
+              if (Test-Path $log) {
+                $line = Select-String -Path $log -Pattern '^Token: ' | Select-Object -First 1
+                if ($line) { $token = $line.Line.Substring(7).Trim(); break }
+              }
+            }
+            if (-not $token) { throw "The GUI did not print an API token" }
+            $headers = @{ 'X-LSCP-Token' = $token }
+            $status = Invoke-RestMethod -Uri "http://localhost:18081/api/status" -Headers $headers
             if (-not $status.binary) { throw "GUI did not report a core binary" }
-            $list = Invoke-RestMethod -Uri "http://localhost:18081/api/local/list?path=C:\"
+            $list = Invoke-RestMethod -Uri "http://localhost:18081/api/local/list?path=C:\" -Headers $headers
             if (-not $list.success) { throw "GUI local listing failed" }
+            $code = 200
+            try { Invoke-WebRequest -Uri "http://localhost:18081/api/status" | Out-Null }
+            catch { $code = [int]$_.Exception.Response.StatusCode }
+            if ($code -ne 401) { throw "The API answered a call without a token ($code)" }
           } finally {
             Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
           }

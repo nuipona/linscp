@@ -37,13 +37,22 @@ Several commands may be given, separated by
 .BR ; .
 .TP
 .BI \-hostkey= fingerprint
-Accept only the host key with this fingerprint. Use
+Accept only the host key with this fingerprint, which may be given as the
+whole
+.RI ' type\ bits\ SHA256: ...'
+string, as
+.RI ' SHA256: ...',
+or as the bare fingerprint. Use
 .B *
 to accept any key for this connection only; it is not added to the persistent
 host-key cache. Without this option an unknown host key is accepted only
 after the client has been able to ask; in
 .B \-batch
-mode the connection fails instead.
+mode the connection fails instead. Either way the key the server offered is
+reported on a
+.B HOSTKEY
+line, so a script or the graphical interface can pin it afterwards instead of
+accepting any key next time.
 .TP
 .BI \-privatekey= file
 Private key to authenticate with. Both PuTTY
@@ -84,7 +93,24 @@ before those operations.
 Launch the graphical Commander desktop interface. It is a dual\-pane browser
 served on a local port: the remote pane, the transfer queue, the built\-in
 editor, synchronization and the site manager all drive the commands described
-here, and each tab keeps one connection open.
+here, and each tab keeps one connection open. The server listens on
+.B 127.0.0.1
+only and every
+.I /api/
+call has to carry the token of this run in an
+.B X\-LSCP\-Token
+header; the token is generated at start\-up, injected into the page the
+server serves, and shown by
+.BR \-print\-token .
+Pass
+.I \-host=
+to listen on another address and
+.I \-allow\-host=NAME
+to answer requests that a reverse proxy addresses to another name, or
+.I \-allow\-any\-host
+to skip that check. A new site starts without a host key, so its first
+connection reports the fingerprint it was offered and waits for it to be
+pinned.
 .TP
 .B \-server
 Read commands from standard input, one per line, and answer each of them with
@@ -486,6 +512,13 @@ repeats a full comparison on a timer: there is no file-system watcher, so a
 short interval on a large tree is expensive and changes can still be missed
 between passes. It also has no background mode: a script that runs it blocks
 until the last pass finishes.
+.PP
+The graphical interface is a local web application, not a remote one: it is
+reachable from the machine that runs it (or through a proxy you point at it
+with
+.IR \-allow\-host ),
+and its API is protected by a per\-run token rather than by a user account,
+so it expects to be the only thing talking to that port.
 .PP
 .B synchronize
 both directions relies on a record of the previous synchronization written to

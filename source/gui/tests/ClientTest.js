@@ -77,8 +77,25 @@ const responses = {
   '/api/remote/search': { success: true, matches: [
     { path: '/tmp/slowremote/keep.txt', name: 'keep.txt', is_dir: false, size: 22,
       date: 'Oct 13 07:07', permissions: '-rw-r--r--' }], truncated: false },
-  '/api/command/exec': { success: true, exit_code: 0, stdout: '/tmp/slowremote\n', stderr: '' }
+  '/api/command/exec': { success: true, exit_code: 0, stdout: '/tmp/slowremote\n', stderr: '' },
+  /* A new site has no host key, so the backend asks instead of connecting. */
+  '/api/tabs/open': {
+    success: false,
+    error: 'The host key is not cached; use -hostkey to accept it',
+    challenge: { tab: 7, host: '127.0.0.1', port: 2222,
+      fingerprint: 'ssh-ed25519 255 SHA256:2cxQVcO3EC5SbPVedJPA1XHIV2sEvZzPVTIiBgoZaxM' },
+    tab: { id: 7, name: 'local test', connected: false, error: '' }
+  },
+  '/api/tabs/verify': { success: true, tab: {
+    id: 7, name: 'local test', connected: true,
+    session: { protocol: 'sftp', host: '127.0.0.1', port: 2222, username: 'user',
+      hostkey: 'ssh-ed25519 255 SHA256:2cxQVcO3EC5SbPVedJPA1XHIV2sEvZzPVTIiBgoZaxM' },
+    remote_dir: '/tmp/slowremote', local_dir: '/tmp/slowlocal',
+    observed_hostkey: 'ssh-ed25519 255 SHA256:2cxQVcO3EC5SbPVedJPA1XHIV2sEvZzPVTIiBgoZaxM',
+    error: '' } }
 };
+
+const TOKEN = 'test-token-0123456789abcdef';
 
 const calls = [];
 const errors = [];
@@ -88,6 +105,8 @@ const dom = new JSDOM(html, {
   runScripts: 'dangerously',
   pretendToBeVisual: true,
   beforeParse(window) {
+    // What the backend injects into the page it serves.
+    window.LSCP_TOKEN = TOKEN;
     window.fetch = (url, options) => {
       const path = String(url).replace('http://localhost:8080', '').split('?')[0];
       calls.push({ path: path, options: options });
@@ -240,6 +259,41 @@ function text(id) {
     doc.getElementById('syncModal').className.indexOf('open') >= 0);
   doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   check('Escape closes it', doc.getElementById('syncModal').className.indexOf('open') < 0);
+
+  // Every API call has to carry this run's token.
+  check('every API call carries the token',
+    calls.length > 0 && calls.every(call => call.options && call.options.headers &&
+      call.options.headers['X-LSCP-Token'] === TOKEN),
+    calls.filter(call => !(call.options && call.options.headers &&
+      call.options.headers['X-LSCP-Token'] === TOKEN)).map(c => c.path).join(','));
+
+  // Host keys are verified instead of accepted.
+  window.openSiteManager();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  await window.connectFromSiteManager();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  check('an unknown host key opens the verification dialog',
+    doc.getElementById('hostKeyModal').className.indexOf('open') >= 0);
+  check('the dialog shows the fingerprint',
+    text('hostKeyFingerprint') ===
+      'ssh-ed25519 255 SHA256:2cxQVcO3EC5SbPVedJPA1XHIV2sEvZzPVTIiBgoZaxM',
+    text('hostKeyFingerprint'));
+  check('the dialog names the host',
+    text('hostKeyQuestion').indexOf('127.0.0.1 (port 2222)') >= 0, text('hostKeyQuestion'));
+  await window.acceptHostKey();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  const verify = calls.filter(call => call.path === '/api/tabs/verify').pop();
+  check('connecting pins the fingerprint that was shown',
+    verify && JSON.parse(verify.options.body).fingerprint ===
+      'ssh-ed25519 255 SHA256:2cxQVcO3EC5SbPVedJPA1XHIV2sEvZzPVTIiBgoZaxM');
+  check('remembering the key is the default',
+    verify && JSON.parse(verify.options.body).remember === true);
+  check('the pinned connection becomes the active tab',
+    text('statusBadge').indexOf('Connected') >= 0, text('statusBadge'));
+
+  window.showHelp();
+  check('help shows the token of this run', text('helpToken') === TOKEN, text('helpToken'));
+  window.closeModal('helpModal');
 
   check('no script errors', errors.length === 0, errors.join(' | '));
   window.close();

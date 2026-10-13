@@ -505,6 +505,12 @@
       padding: 6px; line-height: 1.45; background: white;
     }
 
+    .fingerprint {
+      font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 11px;
+      background: #fff; border: 1px solid #b0b0b0; padding: 6px;
+      word-break: break-all; user-select: text;
+    }
+
     /* Toast */
     .toast {
       position: fixed; bottom: 12px; right: 12px; max-width: 380px;
@@ -740,7 +746,7 @@
           <div class="form-row"><label>User name:</label><input type="text" id="siteUser" class="input-field" value="user"></div>
           <div class="form-row"><label>Password:</label><input type="password" id="sitePass" class="input-field" placeholder="(not stored by default)"></div>
           <div class="form-row"><label>Private key:</label><input type="text" id="siteKey" class="input-field" placeholder="path/to/key"></div>
-          <div class="form-row"><label>Host key:</label><input type="text" id="siteHostKey" class="input-field" value="*"></div>
+          <div class="form-row"><label>Host key:</label><input type="text" id="siteHostKey" class="input-field" placeholder="empty = check it on the first connection"></div>
           <div class="form-row"><label>Remote dir:</label><input type="text" id="siteRemoteDir" class="input-field" value="/"></div>
           <div class="form-row"><label>Local dir:</label><input type="text" id="siteLocalDir" class="input-field"></div>
           <div class="form-row"><label></label>
@@ -748,9 +754,11 @@
               <input type="checkbox" id="siteRemember"> Store the password in the session file
             </label>
           </div>
-          <div class="hint">
-            '*' accepts any host key for this connection. Connect once, then press
-            "Remember this key" to pin the key that was used.
+  <div class="hint">
+            Leave the host key empty and the first connection asks you to check
+            the server's fingerprint before it goes ahead; tick the box there to
+            remember it. '*' accepts any key for one connection, which is only
+            sensible when you are about to pin the key it reports.
           </div>
         </div>
       </div>
@@ -854,6 +862,34 @@
     </div>
   </div>
 
+  <!-- Host key verification -->
+  <div class="modal-overlay" id="hostKeyModal">
+    <div class="modal-box" style="width:540px;">
+      <div class="modal-header">
+        <span>Unknown host key</span>
+        <span style="cursor:pointer;" onclick="cancelHostKey()">✕</span>
+      </div>
+      <div class="modal-body">
+        <div id="hostKeyQuestion" style="font-size:11px;"></div>
+        <div class="fingerprint" id="hostKeyFingerprint"></div>
+        <div class="hint">
+          Compare this fingerprint with the one the server's own console shows, or
+          with the one your server administrator published. Connecting without
+          checking it lets anybody who can redirect your connection read and change
+          your files.
+        </div>
+        <label class="form-row" style="font-weight:normal;">
+          <input type="checkbox" id="hostKeyRemember" checked>
+          <span style="flex:1;">Remember this key, so the next connection is silent</span>
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="acceptHostKey()">Connect</button>
+        <button class="btn" onclick="cancelHostKey()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Help -->
   <div class="modal-overlay" id="helpModal">
     <div class="modal-box" style="width:560px;">
@@ -875,6 +911,10 @@
         <p><b>Keys:</b> F4 edit, F5 upload, F6 download, F7 new folder, F8 delete,
         F9 synchronize, F10 refresh, Ctrl+A select all, Enter open, Backspace up.</p>
         <p>The CLI tab runs commands in the live session of the current tab.</p>
+        <p><b>This run's API token:</b> <code id="helpToken"></code><br>
+        Every request the page makes carries it, and the backend refuses an
+        <code>/api/</code> call without it, so only a page served by this run of the
+        server can drive it.</p>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="closeModal('helpModal')">Close</button>
@@ -903,9 +943,18 @@
   function $(id) { return document.getElementById(id); }
 
   async function api(url, options) {
+    options = options || {};
+    options.headers = Object.assign({}, options.headers);
+    if (window.LSCP_TOKEN) {
+      options.headers['X-LSCP-Token'] = window.LSCP_TOKEN;
+    }
     try {
       const response = await fetch(url, options);
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
+      if (response.status === 401 || response.status === 403) {
+        toast(data.error || 'The backend refused this request.', true);
+        return { success: false, error: data.error || 'refused' };
+      }
       return data;
     } catch (error) {
       toast('Cannot reach the LinuxSCP backend: ' + error, true);
@@ -1048,6 +1097,54 @@
   }
 
   function newTab() { openSiteManager(); }
+
+  /* An unknown host key is a question, not an error: show what the server
+   * offered and let the user pin it. */
+  let pendingChallenge = null;
+
+  function showHostKeyChallenge(challenge) {
+    if (!challenge || !challenge.fingerprint) return;
+    pendingChallenge = challenge;
+    $('hostKeyQuestion').textContent =
+      challenge.host + ' (port ' + challenge.port + ') offers this key, and it is ' +
+      'not cached yet. Connect only if the fingerprint is the one you expect:';
+    $('hostKeyFingerprint').textContent = challenge.fingerprint;
+    $('hostKeyRemember').checked = true;
+    openModal('hostKeyModal');
+  }
+
+  async function acceptHostKey() {
+    const challenge = pendingChallenge;
+    if (!challenge) return;
+    pendingChallenge = null;
+    closeModal('hostKeyModal');
+    const result = await apiPost('/api/tabs/verify', {
+      tab: challenge.tab,
+      fingerprint: challenge.fingerprint,
+      remember: $('hostKeyRemember').checked,
+      name: challenge.name || ''
+    });
+    if (result.success) {
+      state.activeTab = result.tab.id;
+      await refreshStatus();
+      await loadLocal(state.local.path);
+      await loadRemote(state.remote.path);
+      toast('Connected, with that host key pinned.');
+    } else {
+      toast(result.error || 'Cannot connect with that host key.', true);
+      if (result.challenge) showHostKeyChallenge(result.challenge);
+    }
+  }
+
+  async function cancelHostKey() {
+    const challenge = pendingChallenge;
+    pendingChallenge = null;
+    closeModal('hostKeyModal');
+    if (challenge) {
+      await apiPost('/api/tabs/close', { tab: challenge.tab });
+      toast('Connection abandoned.', true);
+    }
+  }
 
   async function reconnectTab() {
     const tab = activeTab();
@@ -1320,7 +1417,7 @@
     state.selectedSite = null;
     fillSiteForm({
       name: '', protocol: 'sftp', host: '', port: 22,
-      username: '', password: '', keyfile: '', hostkey: '*',
+      username: '', password: '', keyfile: '', hostkey: '',
       initial_dir: '/', local_dir: state.local.path || ''
     });
   }
@@ -1333,7 +1430,7 @@
       username: $('siteUser').value,
       password: $('sitePass').value,
       keyfile: $('siteKey').value.trim(),
-      hostkey: $('siteHostKey').value.trim() || '*',
+      hostkey: $('siteHostKey').value.trim(),
       initial_dir: $('siteRemoteDir').value.trim() || '/',
       local_dir: $('siteLocalDir').value.trim()
     };
@@ -1375,10 +1472,15 @@
       await loadLocal(state.local.path);
       await loadRemote(state.remote.path);
       toast('Connected to ' + session.host + '.');
-    } else {
-      toast(result.error || 'Cannot connect.', true);
-      await refreshStatus();
+      return;
     }
+    if (result.challenge) {
+      result.challenge.name = name;
+      showHostKeyChallenge(result.challenge);
+      return;
+    }
+    toast(result.error || 'Cannot connect.', true);
+    await refreshStatus();
   }
 
   function openSiteManager() {
@@ -1685,7 +1787,11 @@
 
   function openModal(id) { $(id).classList.add('open'); }
   function closeModal(id) { $(id).classList.remove('open'); }
-  function showHelp() { openModal('helpModal'); }
+  function showHelp() {
+    $('helpToken').textContent = window.LSCP_TOKEN ||
+      '(none: this page was not served by the backend)';
+    openModal('helpModal');
+  }
 
   function switchTab(name) {
     for (const key of ['queue', 'log', 'cli']) {

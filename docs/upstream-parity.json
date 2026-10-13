@@ -119,7 +119,7 @@
     },
     "open": {
       "status": "partial",
-      "notes": "URL sessions and stored-session names; no raw settings, SSH tunnels, session folders or session selection UI in the console client."
+      "notes": "URL sessions and stored-session names; an unknown host key is refused and reported on a HOSTKEY line so it can be pinned. No raw settings, SSH tunnels, session folders or session selection UI in the console client."
     },
     "option": {
       "status": "partial",
@@ -218,12 +218,12 @@
     {
       "name": "Security/authentication",
       "status": "partial",
-      "notes": "POSIX passwords, keys, agent and host-key checks exist. GSSAPI is disabled; SSH tunnels, proxy UI/settings and curl pin equivalence need work. GUI defaults to wildcard host key."
+      "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account or encrypted credential store."
     },
     {
       "name": "GUI",
       "status": "partial",
-      "notes": "Browser Commander with per-tab persistent sessions, dual panes, background transfer queue (progress, pause, cancel, retry), synchronization preview, remote search and site manager, all driven through a documented local HTTP API over the -server protocol. Missing: Commander/Explorer equivalence beyond browsing, drag and drop, custom commands and localization."
+      "notes": "Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API behind a per-run token (Host-checked) over -server; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization."
     },
     {
       "name": "Editing/search",
