@@ -417,14 +417,17 @@ void SleepMilliseconds(unsigned milliseconds)
 
 namespace {
 
+#if !defined(_WIN32)
 volatile sig_atomic_t gInterrupted = 0;
 
-#if !defined(_WIN32)
 void InterruptHandler(int)
 {
     gInterrupted = 1;
 }
 #else
+/* There is no sig_atomic_t without <signal.h>, which is POSIX only. */
+volatile LONG gInterrupted = 0;
+
 BOOL WINAPI ConsoleInterruptHandler(DWORD type)
 {
     if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT ||
