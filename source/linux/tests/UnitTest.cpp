@@ -561,14 +561,16 @@ void TestLocalFs()
     CHECK_TRUE(error.empty());
     CHECK_TRUE(CreateLocalDirectory(dir + "/sub", error));
 
-    FILE * file = fopen((dir + "/one.txt").c_str(), "w");
+    /* Binary mode: the size check below is about six bytes, and a text
+     * stream would turn the newline into CRLF on Windows. */
+    FILE * file = fopen((dir + "/one.txt").c_str(), "wb");
     CHECK_TRUE(file != NULL);
     if (file != NULL)
     {
         fputs("hello\n", file);
         fclose(file);
     }
-    file = fopen((dir + "/two.log").c_str(), "w");
+    file = fopen((dir + "/two.log").c_str(), "wb");
     CHECK_TRUE(file != NULL);
     if (file != NULL)
     {
