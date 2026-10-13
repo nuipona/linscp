@@ -58,6 +58,10 @@ private:
     Script(const Script &);
     Script & operator=(const Script &);
 
+    bool ExecuteCommand(const std::string & line);
+    bool ValidateTransferSwitches(const std::string & command,
+        const std::vector<std::string> & args);
+    bool ListLocal(const std::vector<std::string> & args);
     bool OpenSite(const std::vector<std::string> & args);
     void CloseSite();
     bool ChangeRemoteDirectory(const std::vector<std::string> & args);
@@ -122,6 +126,9 @@ private:
     SessionOptions mDefaults;
     Session mSession;
     std::string mRemoteDirectory;
+    enum class BatchMode { Off, On, Abort, Continue };
+    BatchMode mBatchMode;
+    bool mBatchConfigured;
     bool mConfirm;
     bool mResume;
     bool mExit;

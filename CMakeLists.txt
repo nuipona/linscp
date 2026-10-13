@@ -84,6 +84,19 @@ add_executable(linuxscp-unittest ${FRONTEND}/tests/UnitTest.cpp)
 target_link_libraries(linuxscp-unittest PRIVATE linuxscp-frontend)
 add_test(NAME unit-tests COMMAND linuxscp-unittest)
 
+# Server-free script regressions and the offline upstream gap inventory.
+# Python is optional for C++-only builds; CI always provides it.
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME script-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/ScriptTest.py
+    $<TARGET_FILE:linuxscp>)
+  add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)
+  add_test(NAME parity-inventory COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_upstream_parity.py)
+endif()
+
 if(NOT WIN32)
   # ---- PuTTY core + POSIX platform layer (mirrors source/linux/Makefile) --
   file(GLOB_RECURSE PUTTY_CORE_SOURCES CONFIGURE_DEPENDS

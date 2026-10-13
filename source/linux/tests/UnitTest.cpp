@@ -22,6 +22,7 @@
 #include "Platform.h"
 #include "Session.h"
 #include "Script.h"
+#include "Console.h"
 
 namespace {
 
@@ -664,12 +665,26 @@ void TestScriptCommands()
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option batch abort"));
     CHECK_TRUE(script.ErrorCount() == 0);
-    CHECK_TRUE(script.ExecuteLine("option reconnect 10"));
-    CHECK_TRUE(script.ErrorCount() == 0);
+
     CHECK_TRUE(script.ExecuteLine("option transfer binary"));
     CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("binary"));
+    CHECK_TRUE(script.ExecuteLine("option batch continue"));
+    CHECK_TRUE(script.ExecuteLine("option reconnect 10"));
+    CHECK_TRUE(script.ErrorCount() == 1);
+    CHECK_TRUE(script.ExecuteLine("option transfer ascii"));
+    CHECK_TRUE(script.ErrorCount() == 2);
     CHECK_FALSE(script.ExecuteLine("exit"));
     CHECK_TRUE(script.ExitRequested());
+
+    Script aborting;
+    CHECK_TRUE(aborting.ExecuteLine("option batch abort"));
+    CHECK_FALSE(aborting.ExecuteLine("invalid-command"));
+    CHECK_TRUE(aborting.ExitRequested());
+    CHECK_TRUE(aborting.ErrorCount() == 1);
+    CHECK_FALSE(aborting.ExecuteLine("option confirm off"));
+    CHECK_TRUE(aborting.ErrorCount() == 1);
+    Console::Instance().SetBatchMode(false);
 }
 
 void TestSessionRegistry()

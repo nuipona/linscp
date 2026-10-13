@@ -1,0 +1,31 @@
+name: Track upstream script command drift
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  command-inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download upstream script sources at one revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/upstream-parity
+          revision=$(gh api repos/winscp/winscp/commits/master --jq .sha)
+          echo "Reviewing upstream revision $revision"
+          for file in Script.cpp Script.h; do
+            gh api "repos/winscp/winscp/contents/source/core/$file?ref=$revision" \
+              --jq .content | base64 --decode > "build/upstream-parity/$file"
+          done
+      - name: Check registrations (not behavioral parity)
+        run: |
+          python3 tools/check_upstream_parity.py \
+            --upstream-script build/upstream-parity/Script.cpp \
+            --upstream-header build/upstream-parity/Script.h

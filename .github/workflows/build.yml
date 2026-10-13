@@ -12,6 +12,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and run unit tests
         run: make -C source/linux clean all check
+      - name: Script compatibility regressions
+        run: python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
+      - name: Validate upstream gap inventory (not full parity)
+        run: |
+          python3 tools/check_upstream_parity.py
+          python3 tools/tests/test_parity_inventory.py
       - name: Smoke test
         run: |
           source/linux/build/linuxscp -version

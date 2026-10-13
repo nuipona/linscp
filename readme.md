@@ -16,14 +16,16 @@ downloads in, uploads out.
 ## Requirements
 
 Debian 12 (bookworm) or newer, on any architecture with a GCC or Clang
-toolchain. The client only needs the C library and POSIX threads, so there are
-no third-party runtime libraries to install.
+toolchain. Native SFTP uses the bundled PuTTY core; other transfer paths require a
+protocol-capable `curl` executable. The GUI requires Python 3. No external
+SSH library is required for native POSIX SFTP.
 
-    sudo apt install build-essential dpkg-dev
+    sudo apt install build-essential dpkg-dev curl python3
 
 On Windows: Windows 10 (1803) or later with CMake and Visual Studio
-2022 or MinGW-w64. The resulting `linuxscp.exe` needs only the in-box
-`curl.exe` at run time (plus Python 3 for the GUI). See
+2022 or MinGW-w64. The resulting `linuxscp.exe` needs a protocol-capable
+`curl.exe` at run time (plus Python 3 for the GUI). The in-box curl build
+may not provide SSH protocols. See
 [`docs/windows.md`](docs/windows.md).
 
 ## Building
@@ -50,23 +52,29 @@ feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
     linuxscp -batch -script=script.txt
     linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 
-## Linux port scope and roadmap
+## Linux port scope and upstream parity
 
-LinuxSCP provides full parity for Linux workflows with both an interactive
-command-line interface and a dual-pane graphical Commander desktop interface
-(`linuxscp-gui`):
-* **Transfer Resume Support**: Interrupted downloads and uploads can be resumed
-  seamlessly using `get -resume`, `put -resume`, or `option resume on`.
-* **Multi-Protocol Support**: In addition to native SFTP and SCP, LinuxSCP connects
-  to FTP, FTPS, WebDAV (`dav://`, `webdav://`), and Amazon S3 (`s3://`) servers.
-* **Graphical Desktop Client**: The `linuxscp-gui` client provides an authentic
-  WinSCP / Norton Commander dual-pane interface with live transfer queues,
-  real-time command logging, and an integrated interactive terminal.
-* **Debian Packaging**: Integrates standard `.desktop` launchers, icons, and
-  manpages into the `linuxscp` Debian distribution package.
+LinuxSCP implements a subset of WinSCP workflows, **not full upstream feature
+parity**. It has a command-line interpreter, native SFTP on POSIX, curl-backed
+transfer paths, basic recursive transfers/resume/synchronization, and a
+browser-based dual-pane Commander interface (`linuxscp-gui`).
 
-The supported commands and current validation status are listed in
-[`docs/debian.md`](docs/debian.md). The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
+Protocol URL acceptance is not proof of complete support: WebDAV directory
+listing is incomplete, and authenticated Amazon S3 (signing and bucket/object
+listing) is not implemented. Windows SSH protocols depend on the installed
+curl build. ASCII transfers, WinSCP file masks, reconnect settings, persistent
+multi-session management, the remote editor and the .NET automation API are
+among the remaining gaps.
+
+See [the upstream parity audit and completion plan](docs/upstream-parity.md)
+for the pinned upstream baseline, command inventory, limitations and tests.
+Unsupported compatibility options fail explicitly instead of silently doing
+nothing. Batch scripts default to stopping after errors; `option batch continue`
+permits subsequent commands while preserving a failing process exit status.
+
+The supported commands and validation history are listed in
+[`docs/debian.md`](docs/debian.md). The manual page is
+[`docs/linuxscp.1`](docs/linuxscp.1).
 
 ## Repository layout
 
