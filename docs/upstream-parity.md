@@ -37,11 +37,11 @@ LinuxSCP-specific aliases and commands are not counted as upstream coverage.
 | WebDAV | HTTP operations exist, but listing does not implement DAV PROPFIND/XML properties. Not a complete WebDAV filesystem. |
 | S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
 | Transfers | Binary recursive transfers and basic offset resume. Missing full masks/exclusions, ASCII/automatic conversion, speed limits, retry/reconnect, atomic temporary-file policy and complete metadata handling. |
-| Synchronization | Recursive timestamp-based copying. Missing plan/preview, criteria, mirror, masks, continuous watch and conflict-safe bidirectional synchronization. `both` is sequential copying, not an equivalent upstream planner. |
-| Sessions | One core connection; no full persistent site manager, multiple sessions, configuration import/export or raw settings. GUI operations start fresh core processes. |
-| Security | POSIX password/key/agent and host-key policy exist. GSSAPI is compiled out. Proxy/tunnel configuration and curl fingerprint equivalence are incomplete. GUI wildcard host-key defaults need remediation before claiming WinSCP security parity. |
-| GUI | Browser-based Commander layout and background jobs; not upstream Commander/Explorer, tabbed persistent sessions or a full pause/cancel/retry queue. Progress/API behavior needs end-to-end validation. |
-| Editing/search | No full integrated remote editor, save/upload monitoring, remote search or custom command system. |
+| Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-delete`, `-recursive` and a state record that tells a change from a conflict, with unit coverage and live-server checks. Missing `-mirror`, `-nodelete`, `-continue`, path exclusions, text conversion and a real watch mode: `keepuptodate` repeats a full comparison on a timer. |
+| Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
+| Security | POSIX password/key/agent and host-key policy exist. GSSAPI is compiled out. Proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI still defaults to `-hostkey=*`, but it reports the fingerprint it accepted for one-click pinning and never stores a wildcard or a password in `sessions.ini`; pinning by default remains the goal before claiming WinSCP security parity. |
+| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor and the site manager, driven by a local HTTP API over `-server`; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization, and the API is bound to the loopback interface without authentication. |
+| Editing/search | `edit` downloads, runs the configured editor and uploads on change, with a size limit (`option editmaxsize`) and a refusal when the remote file changed meanwhile; remote search walks directories by name mask. Missing save/upload monitoring of local edits, full-text search, encoding handling and the custom command system. |
 | Automation | Subset CLI. No equivalent .NET/PowerShell API, XML action log, full parameter/environment expansion or command abbreviation resolution. |
 | Integration | Debian launcher/icons and external SSH terminal, not full desktop drag/drop, shell integration and extensions. Windows-only mechanisms need equivalent workflows, not silently skipped requirements. |
 | Localization/accessibility | No upstream translation catalog or equivalent accessibility validation. |
@@ -109,19 +109,23 @@ behavioral evidence on each supported platform, not merely a dispatcher entry.
 
 ## Prioritized completion plan
 
-1. **Safety and automation:** secure GUI host-key defaults and API access;
-   enforce fingerprints consistently; implement file masks, batch per-file
-   semantics, parameter expansion, retries and atomic transfers. Add live-server
-   tests for failed opens, denied operations and interruption/data integrity.
+1. **Safety and automation:** pin host keys by default instead of accepting
+   `*`, require authentication (or a per-run token) on the GUI API; implement
+   file masks, batch per-file semantics, parameter expansion, retries and atomic
+   transfers. Add live-server tests for failed opens, denied operations and
+   interruption/data integrity.
 2. **Real protocol coverage:** replace generic listing approximations with
    protocol-specific SCP, WebDAV and signed S3 clients; expand FTP/SFTP handling.
    Test CRUD, directory enumeration, metadata, authentication and resume against
    controlled servers on Linux and Windows.
-3. **Synchronization:** build a comparison/operation planner with previews,
-   criteria, filtering, deletion guards and conflict handling before watch mode.
-4. **Session and desktop capabilities:** persistent configuration and session
-   management, full queues, remote editor, search, custom commands, Commander
-   and Explorer workflows, accessibility and translations, with GUI tests.
+3. **Synchronization:** the planner exists with previews, criteria, filtering
+   and deletion guards; remaining work is `-mirror`/`-nodelete`/`-continue`,
+   path exclusions, text conversion, a conflict resolution workflow and a real
+   file-system watch mode behind `keepuptodate`.
+4. **Session and desktop capabilities:** session folders, raw settings and
+   encrypted passwords; queue priorities, speed limits and reconnect; local-side
+   editing, full-text search and custom commands; Commander/Explorer workflows,
+   drag and drop, accessibility and translations, with GUI workflow tests.
 5. **External compatibility:** remaining script commands, structured logs,
    automation API equivalents and platform integrations. Maintain explicit
    exclusions only if product scope is intentionally narrowed; exclusions do

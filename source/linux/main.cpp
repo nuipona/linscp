@@ -78,6 +78,7 @@ int main(int argc, char ** argv)
     std::string logFile;
     bool batch = false;
     bool launchGui = false;
+    bool serverMode = false;
     bool help = false;
     bool version = false;
     bool scriptSpecified = false;
@@ -94,7 +95,7 @@ int main(int argc, char ** argv)
             static const char * known[] = {
                 "script=", "command=", "hostkey=", "password=", "privatekey=",
                 "username=", "port=", "timeout=", "log=",
-                "batch", "batch=on", "batch=off", "gui", "verbose",
+                "batch", "batch=on", "batch=off", "gui", "server", "verbose",
                 "version", "help", "h"
             };
             const char * rest = arg + 1;
@@ -172,6 +173,10 @@ int main(int argc, char ** argv)
         {
             launchGui = true;
         }
+        else if (strcmp(arg, "-server") == 0 || strcmp(arg, "--server") == 0)
+        {
+            serverMode = true;
+        }
         else if (strcmp(arg, "-verbose") == 0)
         {
             options.verbose = true;
@@ -222,6 +227,12 @@ int main(int argc, char ** argv)
     {
         console.WriteLine(linuxscp::Texts::Usage());
         return 0;
+    }
+    if (serverMode && (scriptSpecified || commandSpecified))
+    {
+        console.Error("-server reads commands from standard input and cannot "
+            "be combined with -script or -command.");
+        return 1;
     }
     if (scriptSpecified && commandSpecified)
     {
@@ -280,7 +291,11 @@ int main(int argc, char ** argv)
     script.SetDefaults(options);
 
     int result;
-    if (scriptSpecified)
+    if (serverMode)
+    {
+        result = script.RunServer();
+    }
+    else if (scriptSpecified)
     {
         result = script.RunFile(scriptFile);
     }

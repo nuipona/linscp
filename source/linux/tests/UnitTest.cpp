@@ -17,12 +17,17 @@
 #include <vector>
 #include <filesystem>
 
+#include <map>
+
 #include "PathUtil.h"
 #include "LocalFs.h"
 #include "Platform.h"
 #include "Session.h"
 #include "Script.h"
 #include "Console.h"
+#include "Editor.h"
+#include "SessionStore.h"
+#include "SyncPlanner.h"
 
 namespace {
 
@@ -702,6 +707,772 @@ void TestSessionRegistry()
     CHECK_TRUE(CurrentSession() == NULL);
 }
 
+/* ------------------------------------------------------------------ *
+ * Synchronization planning                                            *
+ * ------------------------------------------------------------------ */
+
+namespace {
+
+/* An in-memory tree, so that the planner can be tested without a
+ * server and without touching the file system. Paths are kept with '/'
+ * on both sides and normalised on the way in, so that the same tree
+ * works for the local side (whose separator is the host one) and for
+ * the remote side (always POSIX). */
+class MemoryFileSystem : public SyncFileSystem
+{
+public:
+    MemoryFileSystem(const std::string & label, const std::string & root) :
+        mLabel(label), mRoot(Normalize(root))
+    {
+        mDirectories[mRoot];
+    }
+
+    void AddFile(const std::string & path, unsigned long long size,
+        unsigned long mtime)
+    {
+        Add(path, false, size, mtime);
+    }
+
+    void AddDirectory(const std::string & path, unsigned long mtime)
+    {
+        Add(path, true, 0, mtime);
+    }
+
+    /* An existing but empty root, as opposed to a missing one. */
+    void MakeRootListable() { mDirectories[mRoot]; }
+
+    virtual bool ListDirectory(const std::string & path,
+        std::vector<SyncEntry> & entries, std::string & error)
+    {
+        std::string key = Normalize(path);
+        while (key.size() > 1 && key[key.size() - 1] == '/')
+        {
+            key.erase(key.size() - 1);
+        }
+        std::map<std::string, std::vector<SyncEntry> >::const_iterator it =
+            mDirectories.find(key);
+        if (it == mDirectories.end())
+        {
+            error = "no such directory";
+            return false;
+        }
+        entries = it->second;
+        return true;
+    }
+
+    virtual const char * Label() const { return mLabel.c_str(); }
+
+private:
+    static std::string Normalize(const std::string & path)
+    {
+        std::string result = path;
+        for (size_t i = 0; i < result.size(); i++)
+        {
+            if (result[i] == '\\')
+            {
+                result[i] = '/';
+            }
+        }
+        return result;
+    }
+
+    bool HasEntry(const std::string & directory, const std::string & name) const
+    {
+        std::map<std::string, std::vector<SyncEntry> >::const_iterator it =
+            mDirectories.find(directory);
+        if (it == mDirectories.end())
+        {
+            return false;
+        }
+        for (size_t i = 0; i < it->second.size(); i++)
+        {
+            if (it->second[i].name == name)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void Add(const std::string & path, bool isDirectory, unsigned long long size,
+        unsigned long mtime)
+    {
+        const std::vector<std::string> parts = SplitRelativePath(Normalize(path));
+        if (parts.empty())
+        {
+            return;
+        }
+        std::string walk = mRoot;
+        for (size_t i = 0; i + 1 < parts.size(); i++)
+        {
+            if (!HasEntry(walk, parts[i]))
+            {
+                SyncEntry parent;
+                parent.name = parts[i];
+                parent.isDirectory = true;
+                mDirectories[walk].push_back(parent);
+            }
+            walk += "/" + parts[i];
+            mDirectories[walk];
+        }
+        SyncEntry entry;
+        entry.name = parts.back();
+        entry.isDirectory = isDirectory;
+        entry.size = size;
+        entry.mtime = mtime;
+        if (!HasEntry(walk, entry.name))
+        {
+            mDirectories[walk].push_back(entry);
+        }
+        if (isDirectory)
+        {
+            mDirectories[walk + "/" + entry.name];
+        }
+    }
+
+    std::map<std::string, std::vector<SyncEntry> > mDirectories;
+    std::string mLabel;
+    std::string mRoot;
+};
+
+const SyncItem * FindItem(const SyncPlan & plan, const std::string & path)
+{
+    for (size_t i = 0; i < plan.items.size(); i++)
+    {
+        if (plan.items[i].path == path)
+        {
+            return &plan.items[i];
+        }
+    }
+    return NULL;
+}
+
+SyncAction ActionOf(const SyncPlan & plan, const std::string & path)
+{
+    const SyncItem * item = FindItem(plan, path);
+    return item != NULL ? item->action : SyncAction::None;
+}
+
+bool RemoveTreeQuiet(const std::string & path)
+{
+    std::error_code ec;
+    std::filesystem::remove_all(std::filesystem::path(path), ec);
+    return !ec;
+}
+
+} // namespace
+
+void TestFileMaskParsing()
+{
+    FileMask mask;
+    std::string error;
+
+    CHECK_TRUE(mask.Parse("*.txt", error));
+    CHECK_TRUE(mask.include.size() == 1);
+    CHECK_TRUE(mask.exclude.empty());
+    CHECK_TRUE(mask.Accepts("a.txt", false));
+    CHECK_FALSE(mask.Accepts("a.log", false));
+    /* An include mask never prunes a directory. */
+    CHECK_TRUE(mask.Accepts("logs", true));
+
+    CHECK_TRUE(mask.Parse("*.txt|*.bak", error));
+    CHECK_TRUE(mask.include.size() == 1);
+    CHECK_TRUE(mask.exclude.size() == 1);
+    CHECK_TRUE(mask.Accepts("a.txt", false));
+    CHECK_FALSE(mask.Accepts("a.bak", false));
+    CHECK_TRUE(mask.Accepts("logs", true));
+    CHECK_FALSE(mask.Accepts("cache.bak", true));
+
+    CHECK_TRUE(mask.Parse("|*.bak;*.tmp", error));
+    CHECK_TRUE(mask.include.empty());
+    CHECK_TRUE(mask.exclude.size() == 2);
+    CHECK_TRUE(mask.Accepts("anything", false));
+    CHECK_FALSE(mask.Accepts("a.bak", false));
+    CHECK_FALSE(mask.Accepts("a.tmp", false));
+    /* Exclusions do prune a directory. */
+    CHECK_FALSE(mask.Accepts("cache.tmp", true));
+
+    CHECK_TRUE(mask.Parse("*.txt;*.md", error));
+    CHECK_TRUE(mask.include.size() == 2);
+    CHECK_TRUE(mask.Accepts("readme.md", false));
+    CHECK_FALSE(mask.Accepts("a.log", false));
+
+    /* An empty mask selects everything. */
+    CHECK_TRUE(mask.Parse("", error));
+    CHECK_TRUE(mask.empty());
+    CHECK_EQ(mask.Describe(), "(none)");
+
+    /* A path mask is refused instead of being silently ignored. */
+    CHECK_FALSE(mask.Parse("sub/*.txt", error));
+    CHECK_FALSE(error.empty());
+    CHECK_EQ(mask.Describe(), "(none)");
+}
+
+void TestSyncPlannerModes()
+{
+    MemoryFileSystem local("local", "/local");
+    MemoryFileSystem remote("remote", "/remote");
+    std::string error;
+
+    /* same.txt:        identical on both sides
+     * older.txt:       the remote copy is newer
+     * only-remote.txt: only on the remote side
+     * only-local.txt:  only on the local side */
+    local.AddFile("same.txt", 10, 1000);
+    remote.AddFile("same.txt", 10, 1000);
+    local.AddFile("older.txt", 10, 1000);
+    remote.AddFile("older.txt", 20, 2000);
+    remote.AddFile("only-remote.txt", 5, 1500);
+    local.AddFile("only-local.txt", 7, 1500);
+
+    SyncOptions options;
+    SyncPlan plan;
+
+    /* Local: the remote tree wins. */
+    options.mode = SyncMode::Local;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_EQ(error, "");
+    CHECK_TRUE(ActionOf(plan, "same.txt") == SyncAction::None);
+    CHECK_TRUE(ActionOf(plan, "older.txt") == SyncAction::Download);
+    CHECK_TRUE(ActionOf(plan, "only-remote.txt") == SyncAction::Download);
+    CHECK_TRUE(ActionOf(plan, "only-local.txt") == SyncAction::None);
+    CHECK_FALSE(plan.DeletesAnything());
+
+    /* -delete removes what the winning side does not have. */
+    options.deleteObsolete = true;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "only-local.txt") == SyncAction::DeleteLocal);
+    CHECK_TRUE(plan.DeletesAnything());
+    options.deleteObsolete = false;
+
+    /* Remote: the local tree wins. */
+    options.mode = SyncMode::Remote;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "older.txt") == SyncAction::None);
+    CHECK_TRUE(ActionOf(plan, "only-local.txt") == SyncAction::Upload);
+    CHECK_TRUE(ActionOf(plan, "only-remote.txt") == SyncAction::None);
+    options.deleteObsolete = true;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "only-remote.txt") == SyncAction::DeleteRemote);
+    options.deleteObsolete = false;
+
+    /* Both, without a previous state: the newer side wins. */
+    options.mode = SyncMode::Both;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "older.txt") == SyncAction::Download);
+    CHECK_TRUE(ActionOf(plan, "only-remote.txt") == SyncAction::Download);
+    CHECK_TRUE(ActionOf(plan, "only-local.txt") == SyncAction::Upload);
+    CHECK_TRUE(ActionOf(plan, "same.txt") == SyncAction::None);
+    /* Without a state nothing is deleted, whatever the switches say. */
+    options.deleteObsolete = true;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_FALSE(plan.DeletesAnything());
+    options.deleteObsolete = false;
+}
+
+void TestSyncPlannerCriteria()
+{
+    MemoryFileSystem local("local", "/local");
+    MemoryFileSystem remote("remote", "/remote");
+    std::string error;
+
+    /* The remote file is older but larger. */
+    local.AddFile("file.txt", 10, 2000);
+    remote.AddFile("file.txt", 30, 1000);
+
+    SyncOptions options;
+    options.mode = SyncMode::Local;
+    SyncPlan plan;
+
+    options.criteria = SyncCriteria::Time;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::None);
+
+    options.criteria = SyncCriteria::Size;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
+
+    options.criteria = SyncCriteria::Either;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
+
+    options.criteria = SyncCriteria::None;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
+}
+
+void TestSyncPlannerMaskAndRecursion()
+{
+    MemoryFileSystem local("local", "/local");
+    MemoryFileSystem remote("remote", "/remote");
+    std::string error;
+
+    remote.AddDirectory("sub", 1000);
+    remote.AddFile("sub/keep.txt", 4, 1200);
+    remote.AddFile("sub/skip.log", 4, 1200);
+    remote.AddFile("top.txt", 2, 1200);
+
+    SyncOptions options;
+    options.mode = SyncMode::Local;
+    SyncPlan plan;
+    CHECK_TRUE(options.mask.Parse("*.txt", error));
+
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "sub/keep.txt") == SyncAction::Download);
+    CHECK_FALSE(FindItem(plan, "sub/skip.log") != NULL);
+    CHECK_TRUE(ActionOf(plan, "top.txt") == SyncAction::Download);
+
+    /* Non-recursive: only the top directory is compared. */
+    options.recursive = false;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "top.txt") == SyncAction::Download);
+    CHECK_FALSE(FindItem(plan, "sub/keep.txt") != NULL);
+
+    /* A directory that only one side has is planned as a whole subtree. */
+    options.recursive = true;
+    options.mask = FileMask();
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    const SyncItem * sub = FindItem(plan, "sub");
+    CHECK_TRUE(sub != NULL && sub->isDirectory);
+    CHECK_TRUE(sub != NULL && sub->action == SyncAction::Download);
+    CHECK_TRUE(ActionOf(plan, "sub/skip.log") == SyncAction::Download);
+
+    /* Plan paths are rebuilt with the separator of each side. */
+    CHECK_EQ(LocalPathForRelative("/local", "sub/keep.txt"),
+        JoinLocalPath(JoinLocalPath("/local", "sub"), "keep.txt"));
+    CHECK_EQ(RemotePathForRelative("/remote", "sub/keep.txt"), "/remote/sub/keep.txt");
+    CHECK_EQ(LocalPathForRelative("/local", ""), "/local");
+}
+
+void TestSyncPlannerConflictsAndState()
+{
+    MemoryFileSystem local("local", "/local");
+    MemoryFileSystem remote("remote", "/remote");
+    std::string error;
+
+    local.AddFile("recorded.txt", 10, 1000);
+    remote.AddFile("recorded.txt", 10, 1000);
+    local.AddFile("deleted-on-remote.txt", 3, 1000);
+    local.AddFile("new-locally.txt", 4, 1000);
+    remote.AddFile("new-remotely.txt", 5, 1000);
+
+    /* The state of the last synchronization: everything was equal except
+     * for the file that has since been deleted on the remote side. */
+    SyncState state;
+    SyncStateEntry recorded;
+    recorded.localTime = 1000;
+    recorded.remoteTime = 1000;
+    recorded.size = 10;
+    state.Update("recorded.txt", recorded);
+    recorded.size = 3;
+    state.Update("deleted-on-remote.txt", recorded);
+
+    SyncOptions options;
+    options.mode = SyncMode::Both;
+    options.deleteObsolete = true;
+    options.state = &state;
+    SyncPlan plan;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+
+    /* Known on both sides and unchanged since: nothing to do. */
+    CHECK_TRUE(ActionOf(plan, "recorded.txt") == SyncAction::None);
+    /* Unknown to the state: new on one side, so it is copied. */
+    CHECK_TRUE(ActionOf(plan, "new-locally.txt") == SyncAction::Upload);
+    CHECK_TRUE(ActionOf(plan, "new-remotely.txt") == SyncAction::Download);
+    /* It was on the remote side at the last pass and is gone now, so the
+     * deletion is carried over to the local side instead of being read
+     * as a new local file. */
+    CHECK_TRUE(ActionOf(plan, "deleted-on-remote.txt") == SyncAction::DeleteLocal);
+
+    /* Both sides changed since the last pass: a conflict, never a guess. */
+    MemoryFileSystem local2("local", "/local");
+    MemoryFileSystem remote2("remote", "/remote");
+    local2.AddFile("recorded.txt", 11, 2000);
+    remote2.AddFile("recorded.txt", 12, 3000);
+    SyncPlan conflictPlan;
+    CHECK_TRUE(PlanSynchronization(local2, remote2, "/local", "/remote",
+        options, conflictPlan, error));
+    CHECK_TRUE(ActionOf(conflictPlan, "recorded.txt") == SyncAction::Conflict);
+    CHECK_TRUE(conflictPlan.HasConflicts());
+    /* A plan with conflicts never deletes anything. */
+    CHECK_FALSE(conflictPlan.DeletesAnything());
+
+    /* One side changed: that side wins. */
+    MemoryFileSystem local3("local", "/local");
+    MemoryFileSystem remote3("remote", "/remote");
+    local3.AddFile("recorded.txt", 11, 2000);
+    remote3.AddFile("recorded.txt", 10, 1000);
+    SyncPlan localWins;
+    CHECK_TRUE(PlanSynchronization(local3, remote3, "/local", "/remote",
+        options, localWins, error));
+    CHECK_TRUE(ActionOf(localWins, "recorded.txt") == SyncAction::Upload);
+
+    MemoryFileSystem local4("local", "/local");
+    MemoryFileSystem remote4("remote", "/remote");
+    local4.AddFile("recorded.txt", 10, 1000);
+    remote4.AddFile("recorded.txt", 13, 4000);
+    SyncPlan remoteWins;
+    CHECK_TRUE(PlanSynchronization(local4, remote4, "/local", "/remote",
+        options, remoteWins, error));
+    CHECK_TRUE(ActionOf(remoteWins, "recorded.txt") == SyncAction::Download);
+}
+
+void TestSyncPlanOrder()
+{
+    /* Transfers are applied before deletions, and deletions deepest
+     * first, so that a directory is empty by the time it is removed. */
+    MemoryFileSystem local("local", "/local");
+    MemoryFileSystem remote("remote", "/remote");
+    local.MakeRootListable();
+    local.AddDirectory("sub", 1000);
+    local.AddFile("keep.txt", 10, 5000);
+    remote.AddDirectory("sub", 1000);
+    remote.AddFile("keep.txt", 10, 1000);
+    remote.AddFile("old.txt", 2, 1);
+    remote.AddFile("sub/old.txt", 2, 1);
+    std::string error;
+
+    SyncOptions options;
+    options.mode = SyncMode::Remote;
+    options.deleteObsolete = true;
+    SyncPlan plan;
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(plan.items.size() == 3);
+    if (plan.items.size() == 3)
+    {
+        CHECK_EQ(plan.items[0].path, "keep.txt");
+        CHECK_TRUE(plan.items[0].action == SyncAction::Upload);
+        CHECK_TRUE(plan.items[1].action == SyncAction::DeleteRemote);
+        CHECK_EQ(plan.items[1].path, "sub/old.txt");
+        CHECK_TRUE(plan.items[2].action == SyncAction::DeleteRemote);
+        CHECK_EQ(plan.items[2].path, "old.txt");
+    }
+
+    /* A whole directory that only one side has is removed in one item,
+     * not one per file. */
+    MemoryFileSystem emptyLocal("local", "/local");
+    MemoryFileSystem onlyRemote("remote", "/remote");
+    emptyLocal.MakeRootListable();
+    onlyRemote.AddDirectory("gone", 1);
+    onlyRemote.AddFile("gone/inside.txt", 2, 1);
+    SyncPlan treePlan;
+    CHECK_TRUE(PlanSynchronization(emptyLocal, onlyRemote, "/local", "/remote",
+        options, treePlan, error));
+    CHECK_TRUE(treePlan.items.size() == 1);
+    CHECK_TRUE(treePlan.items.size() == 1 && treePlan.items[0].path == "gone");
+    CHECK_TRUE(treePlan.items.size() == 1 && treePlan.items[0].isDirectory);
+}
+
+void TestSyncStateFile()
+{
+    const std::string temporary = MakeTempDirectory();
+    if (temporary.empty())
+    {
+        return;
+    }
+    const char * oldConfig = getenv("LINUXSCP_CONFIG_DIR");
+    const bool hadConfig = oldConfig != NULL;
+    const std::string savedConfig = hadConfig ? oldConfig : "";
+    SetEnvVar("LINUXSCP_CONFIG_DIR", temporary.c_str());
+
+    const std::string key = SyncState::MakeKey("host", "/local", "/remote");
+    CHECK_FALSE(key.empty());
+    CHECK_TRUE(SyncState::MakeKey("host", "/local", "/remote") == key);
+    CHECK_FALSE(SyncState::MakeKey("other", "/local", "/remote") == key);
+
+    const std::string path = SyncState::DefaultPath(key);
+    CHECK_FALSE(path.empty());
+
+    SyncState state;
+    SyncStateEntry entry;
+    entry.localTime = 111;
+    entry.remoteTime = 222;
+    entry.size = 4096;
+    state.Update("dir/file name.txt", entry);
+    entry.localTime = 333;
+    state.Update("plain.txt", entry);
+    std::string error;
+    CHECK_TRUE(state.Save(path, error));
+    CHECK_TRUE(state.Size() == 2);
+
+    SyncState reloaded;
+    CHECK_TRUE(reloaded.Load(path, error));
+    CHECK_TRUE(reloaded.Size() == 2);
+    SyncStateEntry back;
+    CHECK_TRUE(reloaded.Lookup("dir/file name.txt", back));
+    CHECK_TRUE(back.localTime == 111);
+    CHECK_TRUE(back.remoteTime == 222);
+    CHECK_TRUE(back.size == 4096);
+    CHECK_FALSE(reloaded.Lookup("missing", back));
+
+    reloaded.Remove("plain.txt");
+    CHECK_TRUE(reloaded.Size() == 1);
+    CHECK_TRUE(reloaded.Save(path, error));
+
+    SyncState afterRemoval;
+    CHECK_TRUE(afterRemoval.Load(path, error));
+    CHECK_TRUE(afterRemoval.Size() == 1);
+    CHECK_FALSE(afterRemoval.Lookup("plain.txt", back));
+
+    /* A missing state file is an empty state, not an error. */
+    SyncState missingState;
+    CHECK_TRUE(missingState.Load(path + ".does-not-exist", error));
+    CHECK_TRUE(missingState.Empty());
+
+    SetEnvVar("LINUXSCP_CONFIG_DIR", hadConfig ? savedConfig.c_str() : NULL);
+    RemoveTreeQuiet(temporary);
+}
+
+/* ------------------------------------------------------------------ *
+ * Stored sessions                                                     *
+ * ------------------------------------------------------------------ */
+
+void TestSessionStore()
+{
+    const std::string temporary = MakeTempDirectory();
+    if (temporary.empty())
+    {
+        return;
+    }
+    const std::string path = temporary + "/sessions.ini";
+
+    {
+        SessionStore store(path);
+        CHECK_TRUE(store.Empty());
+
+        StoredSession session;
+        session.name = "Servers/web.example.com";
+        session.protocol = "sftp";
+        session.hostName = "web.example.com";
+        session.portNumber = 2222;
+        session.userName = "alice";
+        session.hostKey = "SHA256:abc";
+        session.remoteDirectory = "/srv/www";
+        session.localDirectory = "/home/alice/www";
+        session.privateKeyFile = "/home/alice/.ssh/id_ed25519";
+        std::string error;
+        CHECK_TRUE(store.AddOrUpdate(session, error));
+        CHECK_TRUE(store.Save(error));
+        CHECK_TRUE(!store.Empty());
+    }
+    {
+        SessionStore store(path);
+        CHECK_TRUE(store.Sessions().size() == 1);
+        const StoredSession * found = store.Find("Servers/web.example.com");
+        CHECK_TRUE(found != NULL);
+        CHECK_TRUE(found != NULL && found->portNumber == 2222);
+        CHECK_TRUE(found != NULL && found->hostKey == "SHA256:abc");
+        CHECK_TRUE(found != NULL && found->remoteDirectory == "/srv/www");
+        /* Lookup is case-insensitive and finds a bare host name too. */
+        CHECK_TRUE(store.Find("SERVERS/WEB.example.com") != NULL);
+        CHECK_TRUE(store.Find("web.example.com") != NULL);
+        CHECK_TRUE(store.Find("no-such-session") == NULL);
+
+        SessionOptions defaults;
+        defaults.portNumber = 22;
+        defaults.protocol = "sftp";
+        SessionOptions options = SessionStore::ToSessionOptions(*found, defaults);
+        CHECK_EQ(options.hostName, "web.example.com");
+        CHECK_TRUE(options.portNumber == 2222);
+        CHECK_EQ(options.userName, "alice");
+        CHECK_EQ(options.initialDirectory, "/srv/www");
+
+        /* The connection round-trips back into a session. */
+        StoredSession back = SessionStore::FromSessionOptions("copy", options,
+            "/srv/www", "/home/alice/www");
+        CHECK_EQ(back.hostName, "web.example.com");
+        CHECK_EQ(back.userName, "alice");
+        CHECK_TRUE(back.lastUsed != 0);
+
+        /* A second session, then export and import. */
+        StoredSession second;
+        second.name = "backup";
+        second.hostName = "backup.example.com";
+        second.protocol = "sftp";
+        std::string error;
+        CHECK_TRUE(store.AddOrUpdate(second, error));
+        CHECK_TRUE(store.Save(error));
+        CHECK_TRUE(store.Sessions().size() == 2);
+
+        const std::string exported = temporary + "/exported.ini";
+        CHECK_TRUE(store.ExportFile(exported, error));
+
+        SessionStore importStore(temporary + "/imported.ini");
+        const int imported = importStore.ImportFile(exported, true, error);
+        CHECK_TRUE(imported == 2);
+        CHECK_TRUE(importStore.Find("backup") != NULL);
+        CHECK_TRUE(importStore.Find("Servers/web.example.com") != NULL);
+
+        /* Removing one leaves the other. */
+        CHECK_TRUE(store.Remove("backup", error));
+        CHECK_TRUE(store.Find("backup") == NULL);
+        CHECK_FALSE(store.Remove("backup", error));
+
+        CHECK_TRUE(store.Rename("Servers/web.example.com", "Servers/web2", error));
+        CHECK_TRUE(store.Find("Servers/web2") != NULL);
+        CHECK_TRUE(store.Save(error));
+
+        SessionStore reread(path);
+        CHECK_TRUE(reread.Find("Servers/web2") != NULL);
+        CHECK_TRUE(reread.Find("backup") == NULL);
+    }
+
+    /* Names are validated. */
+    CHECK_FALSE(SessionStore::IsValidName(""));
+    CHECK_FALSE(SessionStore::IsValidName(" leading"));
+    CHECK_FALSE(SessionStore::IsValidName("]"));
+    CHECK_TRUE(SessionStore::IsValidName("Servers/web1"));
+
+    RemoveTreeQuiet(temporary);
+}
+
+/* ------------------------------------------------------------------ *
+ * Remote editing                                                      *
+ * ------------------------------------------------------------------ */
+
+void TestEditorHelpers()
+{
+    const char text[] = "hello\nworld";
+    CHECK_TRUE(LooksLikeText(text, sizeof(text) - 1));
+    const char binary[] = "he\0llo";
+    CHECK_TRUE(LooksLikeText(binary, sizeof(binary) - 1) == false);
+    CHECK_TRUE(LooksLikeText("", 0));
+
+    std::string error;
+    /* A configured editor that does not exist is an error, not a
+     * surprise later on. */
+    CHECK_TRUE(ResolveEditorCommand("linuxscp-no-such-editor-xyz", error).empty());
+    CHECK_FALSE(error.empty());
+    (void)text;
+    (void)binary;
+
+#if defined(_WIN32)
+    const std::string program = FindExecutableOnPath("cmd");
+#else
+    const std::string program = "/bin/echo";
+#endif
+    if (!program.empty())
+    {
+        const std::vector<std::string> words = ResolveEditorCommand(program, error);
+        CHECK_TRUE(!words.empty());
+        CHECK_TRUE(error.empty());
+
+        /* An editor command with arguments keeps them. */
+        const std::vector<std::string> withArgs =
+            ResolveEditorCommand(program + " --wait", error);
+        CHECK_TRUE(withArgs.size() == 2);
+        CHECK_TRUE(withArgs.size() == 2 && withArgs[1] == "--wait");
+    }
+
+    /* The environment decides when nothing is configured. */
+    const char * oldEditor = getenv("LINUXSCP_EDITOR");
+    const bool hadEditor = oldEditor != NULL;
+    const std::string savedEditor = hadEditor ? oldEditor : "";
+    SetEnvVar("LINUXSCP_EDITOR", "linuxscp-no-such-editor-xyz");
+    CHECK_TRUE(ResolveEditorCommand("", error).empty());
+    if (!program.empty())
+    {
+        SetEnvVar("LINUXSCP_EDITOR", program.c_str());
+        CHECK_TRUE(!ResolveEditorCommand("", error).empty());
+    }
+    SetEnvVar("LINUXSCP_EDITOR", hadEditor ? savedEditor.c_str() : NULL);
+
+    /* The temporary copy lives in a private directory. */
+    std::string temporary;
+    CHECK_TRUE(PrepareEditorTempFile("/etc/nginx/nginx.conf", temporary, error));
+    CHECK_FALSE(temporary.empty());
+    CHECK_TRUE(temporary.find("nginx.conf") != std::string::npos);
+    const std::string directory = LocalDirName(temporary);
+    CHECK_TRUE(StatLocal(directory).isDir);
+    RemoveLocalFile(temporary, error);
+    RemoveLocalDirectory(directory, error);
+}
+
+void TestNewScriptCommands()
+{
+    const std::string temporary = MakeTempDirectory();
+    if (temporary.empty())
+    {
+        return;
+    }
+    const char * oldConfig = getenv("LINUXSCP_CONFIG_DIR");
+    const bool hadConfig = oldConfig != NULL;
+    const std::string savedConfig = hadConfig ? oldConfig : "";
+    SetEnvVar("LINUXSCP_CONFIG_DIR", temporary.c_str());
+    Console::Instance().SetBatchMode(false);
+
+    /* The store is reachable through the script engine, and an empty one
+     * is reported instead of failing. */
+    Script script;
+    CHECK_TRUE(script.ExecuteLine("session"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.Sessions().Empty());
+
+    CHECK_TRUE(script.ExecuteLine(
+        "savesession demo -host=demo.example.com -username=alice -port=2222"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.Sessions().Find("demo") != NULL);
+
+    CHECK_TRUE(script.ExecuteLine("rmsession demo"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.Sessions().Find("demo") == NULL);
+
+    /* Unknown switches and missing names fail explicitly. */
+    CHECK_TRUE(script.ExecuteLine("savesession demo -nonsense=1"));
+    CHECK_TRUE(script.ErrorCount() == 1);
+    CHECK_TRUE(script.ExecuteLine("savesession demo"));
+    CHECK_TRUE(script.ErrorCount() == 2);
+    CHECK_TRUE(script.ExecuteLine("rmsession"));
+    CHECK_TRUE(script.ErrorCount() == 3);
+    CHECK_TRUE(script.ExecuteLine("rmsession no-such-session"));
+    CHECK_TRUE(script.ErrorCount() == 4);
+
+    /* 'edit' and 'keepuptodate' need a connection and say so. */
+    CHECK_TRUE(script.ExecuteLine("edit /tmp/file.txt"));
+    CHECK_TRUE(script.ErrorCount() == 5);
+    CHECK_TRUE(script.ExecuteLine("keepuptodate local /tmp /tmp"));
+    CHECK_TRUE(script.ErrorCount() == 6);
+
+    /* The editor is configurable and reported back. */
+    CHECK_TRUE(script.ExecuteLine("option editor vim"));
+    CHECK_TRUE(script.ErrorCount() == 6);
+    CHECK_TRUE(script.ExecuteLine("option editor"));
+    CHECK_TRUE(script.ExecuteLine("option editmaxsize 1000"));
+    CHECK_TRUE(script.ExecuteLine("option editmaxsize"));
+    CHECK_TRUE(script.ErrorCount() == 6);
+    CHECK_TRUE(script.ExecuteLine("option editmaxsize abc"));
+    CHECK_TRUE(script.ErrorCount() == 7);
+
+    /* Synchronization validates before it connects, and 'both -delete'
+     * is accepted now that the recorded state decides what is obsolete. */
+    CHECK_TRUE(script.ExecuteLine("synchronize both -delete /tmp /tmp"));
+    CHECK_TRUE(script.ErrorCount() == 8);
+    CHECK_TRUE(script.ExecuteLine("synchronize local -criteria=whenever"));
+    CHECK_TRUE(script.ErrorCount() == 9);
+    CHECK_TRUE(script.ExecuteLine("synchronize local -filemask=sub/*"));
+    CHECK_TRUE(script.ErrorCount() == 10);
+    CHECK_TRUE(script.ExecuteLine("synchronize local -unknown"));
+    CHECK_TRUE(script.ErrorCount() == 11);
+
+    SetEnvVar("LINUXSCP_CONFIG_DIR", hadConfig ? savedConfig.c_str() : NULL);
+    RemoveTreeQuiet(temporary);
+}
+
 } // namespace
 
 int main()
@@ -720,6 +1491,16 @@ int main()
     TestLocalFs();
     TestSessionRegistry();
     TestScriptCommands();
+    TestFileMaskParsing();
+    TestSyncPlannerModes();
+    TestSyncPlannerCriteria();
+    TestSyncPlannerMaskAndRecursion();
+    TestSyncPlannerConflictsAndState();
+    TestSyncPlanOrder();
+    TestSyncStateFile();
+    TestSessionStore();
+    TestEditorHelpers();
+    TestNewScriptCommands();
 
     if (gFailures != 0)
     {

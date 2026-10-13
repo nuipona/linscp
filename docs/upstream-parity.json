@@ -74,8 +74,8 @@
       "notes": "General help only; no per-command help or abbreviation resolution."
     },
     "keepuptodate": {
-      "status": "missing",
-      "notes": "Not implemented (some spellings are recognized only to report an error)."
+      "status": "partial",
+      "notes": "Repeats a full synchronize with -interval= and -times=; syntax and switches are parsed and rejected explicitly. It is a scripted loop, not the upstream background watcher: there is no file-system event source, no background mode and no 'stop' command."
     },
     "lcd": {
       "status": "partial",
@@ -119,11 +119,11 @@
     },
     "open": {
       "status": "partial",
-      "notes": "URL sessions only; no stored sites, raw settings, SSH tunnels or session selection."
+      "notes": "URL sessions and stored-session names; no raw settings, SSH tunnels, session folders or session selection UI in the console client."
     },
     "option": {
       "status": "partial",
-      "notes": "Confirm, batch and resume supported; binary only. Reconnect, echo, failonnomatch, include/exclude and other upstream options are not implemented. Batch abort stops subsequent commands, not necessarily remaining files within a command."
+      "notes": "Confirm, batch, resume, editor and editmaxsize supported; binary transfer only. Reconnect, echo, failonnomatch, include/exclude and other upstream options are not implemented, and unknown option names fail explicitly. Batch abort stops subsequent commands, not necessarily remaining files within a command."
     },
     "put": {
       "status": "partial",
@@ -154,8 +154,8 @@
       "notes": "Binary recursive transfers and offset resume; same transfer option gaps as get."
     },
     "session": {
-      "status": "missing",
-      "notes": "Not implemented (some spellings are recognized only to report an error)."
+      "status": "partial",
+      "notes": "Lists the stored sessions from sessions.ini. The non-upstream helpers savesession and rmsession create and remove them, and 'open <name>' resolves a stored session, but there is no folder tree, no raw settings and no password encryption."
     },
     "stat": {
       "status": "partial",
@@ -167,7 +167,11 @@
     },
     "synchronize": {
       "status": "partial",
-      "notes": "Recursive timestamp-based copy; lacks criteria, mirror, preview, filters and conflict handling. Both is sequential copying, not an upstream synchronization planner."
+      "notes": "Direction, -criteria=time|size|either|none, -filemask=, -delete, -recursive and -preview (SYNCPLAN/SYNCSUMMARY) are implemented in a planner with unit and live-server coverage. 'both' uses a state record to tell a change from a conflict, refuses to delete while a conflict is unresolved, and is no longer rejected with -delete. Still missing: -mirror, -nodelete, -continue, -transfer=, -exclude paths and text conversion."
+    },
+    "edit": {
+      "status": "partial",
+      "notes": "Downloads the remote file, runs $LINUXSCP_EDITOR/$EDITOR or option editor, and uploads it back when it changed, refusing files over option editmaxsize and refusing to overwrite a file modified since the download. No local-side edit, no editor fallback chain or encoding handling beyond the installed editor."
     }
   },
   "features": [
@@ -204,12 +208,12 @@
     {
       "name": "Synchronization",
       "status": "partial",
-      "notes": "Sequential recursive copying; missing plan/preview, criteria, mirror, watch mode, exclusions and conflict-safe bidirectional synchronization."
+      "notes": "Planner with direction, -criteria=time|size|either|none, -filemask=, -delete, -recursive and -preview output, unit-tested and verified against a live server; 'both' keeps a state record to tell changes from conflicts. Missing: -mirror, -nodelete, -continue, path exclusions, watch/background mode and upstream's conflict resolution UI."
     },
     {
       "name": "Sessions/configuration",
-      "status": "missing",
-      "notes": "No persistent site manager, multiple core sessions, session import/export or full configuration model."
+      "status": "partial",
+      "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import and last-used tracking. Missing: folder tree, raw settings, encrypted passwords and the full upstream configuration model."
     },
     {
       "name": "Security/authentication",
@@ -219,12 +223,12 @@
     {
       "name": "GUI",
       "status": "partial",
-      "notes": "Browser Commander layout and background jobs exist; no full Commander/Explorer equivalence, tabs/site manager, advanced queue controls or reconnecting persistent sessions."
+      "notes": "Browser Commander with per-tab persistent sessions, dual panes, background transfer queue (progress, pause, cancel, retry), synchronization preview, remote search and site manager, all driven through a documented local HTTP API over the -server protocol. Missing: Commander/Explorer equivalence beyond browsing, drag and drop, custom commands and localization."
     },
     {
       "name": "Editing/search",
-      "status": "missing",
-      "notes": "No integrated remote editor, save/upload monitoring, full remote search or custom command system."
+      "status": "partial",
+      "notes": "'edit' downloads, runs the configured editor and uploads on change, with a size limit and a refusal when the remote file changed meanwhile; remote search matches name masks recursively. Missing: save/upload monitoring of local edits, full-text search, encoding handling and the custom command system."
     },
     {
       "name": "Automation",

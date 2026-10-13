@@ -141,10 +141,13 @@ PUTTY_OBJS := $(foreach s,$(PUTTY_ALL_SRCS),$(call putty_obj,$(s)))
 # Front end (this directory). SftpClient.c is C on purpose, see its header.
 APP_SRCS := \
 	Session.cpp \
+	SessionStore.cpp \
 	SftpClient.c \
 	ProtocolClient.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
+	SyncPlanner.cpp \
+	Editor.cpp \
 	Console.cpp \
 	LocalFs.cpp \
 	PathUtil.cpp \

@@ -1,5 +1,7 @@
 #include "Platform.h"
 
+#include "LocalFs.h"
+
 #include <cerrno>
 #include <cctype>
 #include <cstdint>
@@ -20,6 +22,8 @@
 #else
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
+#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -27,6 +31,7 @@
 #include <unistd.h>
 #endif
 
+#include <chrono>
 #include <thread>
 
 namespace linuxscp {
@@ -267,6 +272,16 @@ std::string HomeDirectory()
 std::string ConfigDirectory()
 {
 #if defined(_WIN32)
+    std::string overrideDir = EnvironmentVariable("LINUXSCP_CONFIG_DIR");
+    if (!overrideDir.empty())
+    {
+        while (overrideDir.size() > 1 && (overrideDir[overrideDir.size() - 1] == '\\' ||
+            overrideDir[overrideDir.size() - 1] == '/'))
+        {
+            overrideDir.erase(overrideDir.size() - 1);
+        }
+        return overrideDir;
+    }
     std::string appData = EnvironmentVariable("APPDATA");
     if (!appData.empty())
     {
@@ -332,6 +347,195 @@ bool SetFileTimes(const std::string & path, unsigned long atime,
     values[1].tv_sec = static_cast<time_t>(mtime);
     values[1].tv_usec = 0;
     return utimes(path.c_str(), values) == 0;
+#endif
+}
+
+std::string TempDirectory()
+{
+#if defined(_WIN32)
+    wchar_t buffer[32768];
+    DWORD len = GetTempPathW(32768, buffer);
+    if (len == 0 || len >= 32768)
+    {
+        return std::string();
+    }
+    std::string path = WideToUtf8(std::wstring(buffer, len));
+    while (!path.empty() && (path[path.size() - 1] == '\\' || path[path.size() - 1] == '/'))
+    {
+        path.erase(path.size() - 1);
+    }
+    return path;
+#else
+    const char * candidates[] = { "TMPDIR", "TEMP", "TMP" };
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++)
+    {
+        std::string value = EnvironmentVariable(candidates[i]);
+        if (!value.empty())
+        {
+            while (value.size() > 1 && value[value.size() - 1] == '/')
+            {
+                value.erase(value.size() - 1);
+            }
+            return value;
+        }
+    }
+    return "/tmp";
+#endif
+}
+
+bool CreatePrivateDirectory(const std::string & path, std::string & error)
+{
+    /* The parents of these directories are the user's own configuration
+     * or temporary directory, which other users cannot reach; only the
+     * leaf is restricted explicitly. */
+    if (!CreateLocalDirectoryRecursive(path, error))
+    {
+        return false;
+    }
+#if !defined(_WIN32)
+    chmod(path.c_str(), 0700);
+#endif
+    return true;
+}
+
+bool RestrictFileToUser(const std::string & path)
+{
+#if defined(_WIN32)
+    /* The profile and temporary directories already keep other users
+     * out; there is no portable ACL edit here. */
+    (void)path;
+    return true;
+#else
+    return chmod(path.c_str(), 0600) == 0;
+#endif
+}
+
+void SleepMilliseconds(unsigned milliseconds)
+{
+    std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds));
+}
+
+namespace {
+
+#if !defined(_WIN32)
+volatile sig_atomic_t gInterrupted = 0;
+
+void InterruptHandler(int)
+{
+    gInterrupted = 1;
+}
+#else
+/* There is no sig_atomic_t without <signal.h>, which is POSIX only. */
+volatile LONG gInterrupted = 0;
+
+BOOL WINAPI ConsoleInterruptHandler(DWORD type)
+{
+    if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT ||
+        type == CTRL_CLOSE_EVENT)
+    {
+        gInterrupted = 1;
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
+} // namespace
+
+void InstallInterruptHandler()
+{
+    static bool installed = false;
+    if (installed)
+    {
+        return;
+    }
+    installed = true;
+#if defined(_WIN32)
+    SetConsoleCtrlHandler(ConsoleInterruptHandler, TRUE);
+#else
+    struct sigaction action;
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = InterruptHandler;
+    sigaction(SIGINT, &action, NULL);
+#endif
+}
+
+bool Interrupted()
+{
+    return gInterrupted != 0;
+}
+
+int RunInteractive(const std::vector<std::string> & args, std::string & error)
+{
+    if (args.empty())
+    {
+        error = "No program to run.";
+        return -1;
+    }
+#if defined(_WIN32)
+    std::wstring commandLine;
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        AppendQuotedArgument(commandLine, args[i]);
+    }
+    STARTUPINFOW startup;
+    PROCESS_INFORMATION process;
+    memset(&startup, 0, sizeof(startup));
+    memset(&process, 0, sizeof(process));
+    startup.cb = sizeof(startup);
+    std::vector<wchar_t> mutableCommand(commandLine.begin(), commandLine.end());
+    mutableCommand.push_back(L'\0');
+    if (CreateProcessW(NULL, mutableCommand.data(), NULL, NULL, TRUE, 0,
+            NULL, NULL, &startup, &process) == 0)
+    {
+        error = std::string("Cannot run '") + args[0] + "'.";
+        return -1;
+    }
+    CloseHandle(process.hThread);
+    WaitForSingleObject(process.hProcess, INFINITE);
+    DWORD code = 1;
+    GetExitCodeProcess(process.hProcess, &code);
+    CloseHandle(process.hProcess);
+    return static_cast<int>(code);
+#else
+    fflush(stdout);
+    fflush(stderr);
+    pid_t pid = fork();
+    if (pid < 0)
+    {
+        error = std::string("Cannot start '") + args[0] + "': " + strerror(errno);
+        return -1;
+    }
+    if (pid == 0)
+    {
+        std::vector<char *> argv;
+        argv.reserve(args.size() + 1);
+        for (size_t i = 0; i < args.size(); i++)
+        {
+            argv.push_back(const_cast<char *>(args[i].c_str()));
+        }
+        argv.push_back(NULL);
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0)
+    {
+        if (errno != EINTR)
+        {
+            error = std::string("Cannot wait for '") + args[0] + "': " + strerror(errno);
+            return -1;
+        }
+    }
+    if (WIFEXITED(status))
+    {
+        return WEXITSTATUS(status);
+    }
+    if (WIFSIGNALED(status))
+    {
+        return 128 + WTERMSIG(status);
+    }
+    return -1;
 #endif
 }
 
