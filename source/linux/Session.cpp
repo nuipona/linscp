@@ -212,6 +212,11 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
     {
         fingerprint = "(no fingerprint available)";
     }
+    /* One machine readable line for whatever the server just offered, so
+     * that a script or the graphical interface can pin this key later
+     * instead of being told only that something went wrong. */
+    const std::string hostkeyLine = "HOSTKEY " + std::string(keytype) + " " +
+        fingerprint;
 
     /* An explicit pin must be checked even if the core can also establish
      * trust from its cache or a host certificate. */
@@ -234,8 +239,7 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
      * connection instead of accepting any key again. */
     if (session->AcceptAnyHostKey())
     {
-        Console::Instance().WriteLine("HOSTKEY " + std::string(keytype) + " " +
-            fingerprint);
+        console.WriteLine(hostkeyLine);
         return SPR_OK;
     }
 
@@ -259,10 +263,12 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
     }
     if (cacheState < 0)
     {
+        console.WriteLine(hostkeyLine);
         console.Error(Texts::HostKeyMismatch(host, port, keytype, fingerprint));
         return make_spr_sw_abort_static("The host key does not match the cached one");
     }
 
+    console.WriteLine(hostkeyLine);
     console.Error(Texts::HostKeyUnknown(host, port, keytype, fingerprint));
     if (!console.IsInteractive())
     {

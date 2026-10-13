@@ -39,8 +39,8 @@ LinuxSCP-specific aliases and commands are not counted as upstream coverage.
 | Transfers | Binary recursive transfers and basic offset resume. Missing full masks/exclusions, ASCII/automatic conversion, speed limits, retry/reconnect, atomic temporary-file policy and complete metadata handling. |
 | Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-delete`, `-recursive` and a state record that tells a change from a conflict, with unit coverage and live-server checks. Missing `-mirror`, `-nodelete`, `-continue`, path exclusions, text conversion and a real watch mode: `keepuptodate` repeats a full comparison on a timer. |
 | Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
-| Security | POSIX password/key/agent and host-key policy exist. GSSAPI is compiled out. Proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI still defaults to `-hostkey=*`, but it reports the fingerprint it accepted for one-click pinning and never stores a wildcard or a password in `sessions.ini`; pinning by default remains the goal before claiming WinSCP security parity. |
-| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor and the site manager, driven by a local HTTP API over `-server`; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization, and the API is bound to the loopback interface without authentication. |
+| Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
+| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization. |
 | Editing/search | `edit` downloads, runs the configured editor and uploads on change, with a size limit (`option editmaxsize`) and a refusal when the remote file changed meanwhile; remote search walks directories by name mask. Missing save/upload monitoring of local edits, full-text search, encoding handling and the custom command system. |
 | Automation | Subset CLI. No equivalent .NET/PowerShell API, XML action log, full parameter/environment expansion or command abbreviation resolution. |
 | Integration | Debian launcher/icons and external SSH terminal, not full desktop drag/drop, shell integration and extensions. Windows-only mechanisms need equivalent workflows, not silently skipped requirements. |
@@ -109,11 +109,12 @@ behavioral evidence on each supported platform, not merely a dispatcher entry.
 
 ## Prioritized completion plan
 
-1. **Safety and automation:** pin host keys by default instead of accepting
-   `*`, require authentication (or a per-run token) on the GUI API; implement
-   file masks, batch per-file semantics, parameter expansion, retries and atomic
-   transfers. Add live-server tests for failed opens, denied operations and
-   interruption/data integrity.
+1. **Safety and automation:** host keys are verified and pinned rather than
+   accepted, and the GUI API is loopback-only behind a per-run token; what is
+   left is a user account or encrypted credential store, file masks, batch
+   per-file semantics, parameter expansion, retries and atomic transfers, plus
+   live-server tests for failed opens, denied operations and interruption/
+   data integrity.
 2. **Real protocol coverage:** replace generic listing approximations with
    protocol-specific SCP, WebDAV and signed S3 clients; expand FTP/SFTP handling.
    Test CRUD, directory enumeration, metadata, authentication and resume against

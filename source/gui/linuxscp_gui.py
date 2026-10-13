@@ -14,12 +14,29 @@ Architecture
   reported on without blocking the session they belong to.
 * Stored sessions are read from (and written through) the same file the
   console client uses, ``sessions.ini`` in the configuration directory.
+
+Access
+------
+The server listens on the loopback interface only, unless ``--host`` says
+otherwise, and every ``/api/`` call has to carry this run's token in an
+``X-LSCP-Token`` header. The token is generated when the server starts and
+is injected into the page it serves, so the browser client knows it without
+the user copying anything: a cross-origin page cannot read it, and a request
+that guessed it is still refused by the ``Host`` check. ``--allow-host``
+lets a reverse proxy in front of the server (a sandbox preview, a container
+host name) through; ``--allow-any-host`` turns the check off.
+
+Host keys are verified rather than accepted: a new site starts with no host
+key, so the first connection reports the fingerprint it was offered and
+waits for the user to pin it (once, or remembered in the stored session)
+instead of connecting with ``-hostkey=*``.
 """
 
 import os
 import sys
 import json
 import time
+import secrets
 import shutil
 import stat
 import getpass
@@ -33,7 +50,14 @@ from fnmatch import fnmatch
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 PORT = 8080
-HOST = "0.0.0.0"
+HOST = "127.0.0.1"
+# Filled in by main(): one random token per run, required on every /api/ call.
+API_TOKEN = ""
+REQUIRE_TOKEN = True
+# Host names a request may be addressed to. The loopback names are always
+# allowed; --allow-host adds more (a reverse proxy, for example).
+ALLOWED_HOSTS = set(["localhost", "127.0.0.1", "::1"])
+ALLOW_ANY_HOST = False
 IS_WINDOWS = os.name == "nt"
 EXE_SUFFIX = ".exe" if IS_WINDOWS else ""
 
@@ -99,6 +123,7 @@ STATE = {
     "paused": False,
     "next_tab": 1,
     "next_task": 1,
+    "challenges": {},   # tab id -> CoreSession waiting for a host key decision
 }
 
 
@@ -225,7 +250,10 @@ def new_session():
         "username": os.environ.get("USERNAME") or os.environ.get("USER") or _default_user(),
         "password": "",
         "keyfile": "",
-        "hostkey": "*",
+        # Empty means 'verify': the core checks the key against its cache and
+        # reports an unknown one instead of connecting. '*' still works, but
+        # it has to be asked for.
+        "hostkey": "",
         "initial_dir": "/",
         "local_dir": os.path.expanduser("~"),
     }
@@ -344,8 +372,10 @@ class CoreSession(object):
         with self.lock:
             if self.proc is not None and self.proc.poll() is None:
                 return True, ""
-            cmd = [find_linuxscp_binary(), "-server", "-batch=on",
-                   "-hostkey=" + (self.session.get("hostkey") or "*")]
+            cmd = [find_linuxscp_binary(), "-server", "-batch=on"]
+            hostkey = (self.session.get("hostkey") or "").strip()
+            if hostkey:
+                cmd.append("-hostkey=" + hostkey)
             if self.session.get("keyfile"):
                 cmd.append("-privatekey=" + self.session["keyfile"])
             try:
@@ -374,17 +404,18 @@ class CoreSession(object):
             return False, error
         path = self.session.get("initial_dir") or "/"
         code, output, errors = self.run_capture("open " + session_url(self.session, path))
+        # Whatever the server offered is worth remembering, connected or
+        # not: a refused connection is exactly when a client needs it, to
+        # offer pinning the key that was turned down.
+        for line in output + errors:
+            if line.startswith("HOSTKEY "):
+                self.observed_hostkey = line.split(" ", 2)[-1].strip()
         if code != 0:
             detail = output + errors
             self.error = "\n".join(detail).strip() or "Cannot connect."
             self.connected = False
             return False, self.error
         self.run("option confirm off")
-        # Remember what a wildcard host key turned out to be, so that the
-        # connection can be pinned instead of accepted again next time.
-        for line in output:
-            if line.startswith("HOSTKEY "):
-                self.observed_hostkey = line.split(" ", 2)[-1].strip()
         code, output = self.run("pwd")
         if code == 0:
             for line in output:
@@ -937,9 +968,102 @@ def parse_sync_preview(output):
 # HTTP API
 # ---------------------------------------------------------------------------
 
+def save_stored_session(name, session, pin_hostkey=False):
+    """Write a session through 'savesession', so sessions.ini stays the only
+    copy of it. Returns (ok, message)."""
+    command = "savesession %s" % quote_remote(name)
+    for key, flag in (("host", "-host"), ("port", "-port"), ("username", "-username"),
+                      ("protocol", "-protocol"), ("keyfile", "-privatekey"),
+                      ("hostkey", "-hostkey"), ("initial_dir", "-remotedir"),
+                      ("local_dir", "-localdir")):
+        value = session.get(key)
+        if value in (None, ""):
+            continue
+        # A wildcard is a decision about one connection, never a stored
+        # setting: only pin it when the caller insists.
+        if key == "hostkey" and str(value).strip() == "*" and not pin_hostkey:
+            continue
+        command += ' %s="%s"' % (flag, str(value).replace('"', ""))
+    code, stdout, stderr = run_linuxscp(command, session)
+    if code == 0:
+        add_log("Saved session '%s'" % name, "success")
+        return True, ""
+    message = stderr.strip() or stdout.strip() or "Cannot save the session"
+    add_log(message, "error")
+    return False, message
+
+
 class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=WEB_DIR, **kwargs)
+
+    # -- access control ----------------------------------------------------
+
+    def _request_host(self):
+        host = (self.headers.get("Host") or "").strip()
+        # A bracketed IPv6 literal keeps its brackets until here.
+        if host.startswith("["):
+            host = host[1:host.find("]")] if "]" in host else host
+        else:
+            host = host.split(":")[0]
+        return host.strip().lower()
+
+    def _supplied_token(self):
+        header = self.headers.get("X-LSCP-Token") or ""
+        if header:
+            return header
+        auth = self.headers.get("Authorization") or ""
+        if auth.lower().startswith("bearer "):
+            return auth[7:].strip()
+        return ""
+
+    def guarded(self):
+        """Check the Host and the token of a /api/ request.
+
+        Returns True when the request may go through. The Host check is what
+        stops a DNS-rebinding page from using this server: such a page is
+        served from another host name, so it arrives with a Host header this
+        server does not answer to, even though the browser thinks it is
+        talking to itself.
+        """
+        if not ALLOW_ANY_HOST and self._request_host() not in ALLOWED_HOSTS:
+            self.send_json({"success": False,
+                            "error": "This host name is not allowed. Start the "
+                                     "server with --allow-host=%s to accept it."
+                                     % (self._request_host() or "this host")},
+                           status=403)
+            return False
+        if REQUIRE_TOKEN and self._supplied_token() != API_TOKEN:
+            self.send_json({"success": False,
+                            "error": "This API needs this run's token in an "
+                                     "X-LSCP-Token header."}, status=401)
+            return False
+        return True
+
+    def serve_client(self):
+        """Send the page, with this run's token baked into it."""
+        for name in ("index.html", "index.htm"):
+            target = os.path.join(WEB_DIR, name)
+            if not os.path.isfile(target):
+                continue
+            try:
+                with open(target, "rb") as handle:
+                    page = handle.read()
+            except OSError as exc:
+                self.send_error(500, "Cannot read %s: %s" % (name, exc))
+                return
+            marker = b"</head>"
+            snippet = (b'<script>window.LSCP_TOKEN = "' +
+                       API_TOKEN.encode("utf-8") + b'";</script>')
+            if marker in page and API_TOKEN:
+                page = page.replace(marker, snippet + marker, 1)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(page)))
+            self.end_headers()
+            self.wfile.write(page)
+            return
+        return super().do_GET()
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -976,6 +1100,12 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
+
+        if path in ("/", "/index.html"):
+            return self.serve_client()
+
+        if path.startswith("/api/") and not self.guarded():
+            return
 
         if path == "/api/status":
             with STATE_LOCK:
@@ -1076,6 +1206,8 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if path.startswith("/api/") and not self.guarded():
+            return
         body = self.read_json_body()
 
         if path == "/api/tabs/open":
@@ -1093,21 +1225,90 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                     "info")
             ok, error = tab.connect()
             with STATE_LOCK:
-                if ok or not STATE["tabs"]:
+                if ok:
+                    STATE["tabs"].append(tab)
+                    STATE["active_tab"] = tab.id
+                elif tab.observed_hostkey:
+                    # Park it until the user says what to do with this key.
+                    STATE["challenges"][tab.id] = tab
+                elif not STATE["tabs"]:
                     STATE["tabs"].append(tab)
                     STATE["active_tab"] = tab.id
             if ok:
                 add_log("Connected to %s" % tab.name, "success")
                 self.send_json({"success": True, "tab": tab.describe()})
-            else:
-                add_log("Connection failed: %s" % error, "error")
+                return
+            add_log("Connection failed: %s" % error, "error")
+            challenge = None
+            if tab.observed_hostkey:
+                challenge = {"tab": tab.id,
+                             "host": session.get("host"),
+                             "port": session.get("port"),
+                             "fingerprint": tab.observed_hostkey}
+                add_log("Host key offered by %s: %s" %
+                        (session.get("host"), tab.observed_hostkey), "info")
+            self.send_json({"success": False, "error": error, "challenge": challenge,
+                            "tab": tab.describe()}, status=400)
+            return
+
+        if path == "/api/tabs/verify":
+            tab_id = body.get("tab")
+            fingerprint = (body.get("fingerprint") or "").strip()
+            if not fingerprint:
+                self.send_json({"success": False, "error": "No host key given"},
+                               status=400)
+                return
+            with STATE_LOCK:
+                tab = STATE["challenges"].get(tab_id)
+                if tab is None:
+                    for candidate in STATE["tabs"]:
+                        if candidate.id == tab_id or str(candidate.id) == str(tab_id):
+                            tab = candidate
+                            break
+            if tab is None:
+                self.send_json({"success": False,
+                                "error": "That connection is no longer waiting"},
+                               status=404)
+                return
+            # Restart the core with the key pinned, so the decision is
+            # enforced by the client rather than by the interface.
+            tab.session["hostkey"] = fingerprint
+            tab.observed_hostkey = fingerprint
+            tab.terminate()
+            ok, error = tab.connect()
+            if not ok:
+                add_log("Still cannot connect: %s" % error, "error")
                 self.send_json({"success": False, "error": error,
-                                "tab": tab.describe()}, status=400)
+                                "challenge": {"tab": tab.id,
+                                              "host": tab.session.get("host"),
+                                              "port": tab.session.get("port"),
+                                              "fingerprint": tab.observed_hostkey}},
+                               status=400)
+                return
+            with STATE_LOCK:
+                STATE["challenges"].pop(tab.id, None)
+                if tab not in STATE["tabs"]:
+                    STATE["tabs"].append(tab)
+                STATE["active_tab"] = tab.id
+            add_log("Connected to %s (host key pinned)" % tab.name, "success")
+            if body.get("remember"):
+                name = (body.get("name") or tab.name or "").strip()
+                if name:
+                    ok_save, message = save_stored_session(name, tab.session)
+                    add_log("Stored the pinned host key in '%s'" % name
+                            if ok_save else message,
+                            "success" if ok_save else "error")
+            self.send_json({"success": True, "tab": tab.describe()})
             return
 
         if path == "/api/tabs/close":
             tab_id = body.get("tab")
             with STATE_LOCK:
+                # A connection that is waiting for a host-key decision lives
+                # in 'challenges', not in the tab list.
+                pending = STATE["challenges"].pop(tab_id, None)
+                if pending is not None:
+                    pending.terminate()
                 for index, tab in enumerate(STATE["tabs"]):
                     if tab.id == tab_id or str(tab.id) == str(tab_id):
                         STATE["tabs"].pop(index)
@@ -1165,23 +1366,11 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_json({"success": False, "error": "A session name is required"},
                                status=400)
                 return
-            command = "savesession %s" % quote_remote(name)
-            for key, flag in (("host", "-host"), ("port", "-port"), ("username", "-username"),
-                              ("protocol", "-protocol"), ("keyfile", "-privatekey"),
-                              ("hostkey", "-hostkey"), ("initial_dir", "-remotedir"),
-                              ("local_dir", "-localdir")):
-                value = session.get(key)
-                if value not in (None, ""):
-                    if key == "hostkey" and value == "*" and not body.get("pin_hostkey"):
-                        continue
-                    command += ' %s="%s"' % (flag, str(value).replace('"', ""))
-            code, stdout, stderr = run_linuxscp(command, session or new_session())
-            if code == 0:
-                add_log("Saved session '%s'" % name, "success")
+            ok, message = save_stored_session(name, session or new_session(),
+                                              pin_hostkey=bool(body.get("pin_hostkey")))
+            if ok:
                 self.send_json({"success": True, "sessions": read_stored_sessions()})
             else:
-                message = stderr.strip() or stdout.strip() or "Cannot save the session"
-                add_log(message, "error")
                 self.send_json({"success": False, "error": message}, status=400)
             return
 
@@ -1653,8 +1842,10 @@ def upload_remote_text(tab, remote_path, content, base_mtime=None):
 
 
 def main():
+    global PORT, HOST, API_TOKEN, REQUIRE_TOKEN, ALLOWED_HOSTS, ALLOW_ANY_HOST
     port = PORT
     host = HOST
+    fixed_token = None
     for arg in sys.argv[1:]:
         if arg.startswith("--port="):
             try:
@@ -1663,13 +1854,55 @@ def main():
                 pass
         elif arg.startswith("--host="):
             host = arg.split("=", 1)[1]
+        elif arg.startswith("--token="):
+            fixed_token = arg.split("=", 1)[1].strip()
+        elif arg == "--no-auth":
+            REQUIRE_TOKEN = False
+        elif arg.startswith("--allow-host="):
+            value = arg.split("=", 1)[1].strip().lower()
+            if value:
+                ALLOWED_HOSTS.add(value)
+        elif arg == "--allow-any-host":
+            ALLOW_ANY_HOST = True
+        elif arg in ("-h", "--help"):
+            print(__doc__)
+            print("Options:")
+            print("  --port=PORT            listen on PORT (default %d)" % PORT)
+            print("  --host=ADDRESS         bind to ADDRESS (default %s," % HOST)
+            print("                         i.e. this machine only)")
+            print("  --token=TOKEN          use TOKEN instead of a generated one")
+            print("  --no-auth              accept API calls without a token")
+            print("  --allow-host=NAME      also answer requests addressed to NAME")
+            print("  --allow-any-host       answer requests for any host name")
+            print("  --print-token          write the token to the terminal")
+            return 0
+    API_TOKEN = fixed_token or secrets.token_hex(32)
 
     server_address = (host, port)
-    httpd = ThreadingHTTPServer(server_address, LinuxScpGuiHandler)
+    try:
+        httpd = ThreadingHTTPServer(server_address, LinuxScpGuiHandler)
+    except OSError as exc:
+        print("Cannot listen on %s:%d: %s" % (host, port, exc), file=sys.stderr)
+        return 1
     print("LinuxSCP Commander GUI running at http://localhost:%d/" % port)
     print("Serving web client from: %s" % WEB_DIR)
     print("LinuxSCP core binary: %s" % LINUXSCP_BIN)
     print("Stored sessions: %s" % session_store_path())
+    if REQUIRE_TOKEN:
+        print("API calls need this run's token (X-LSCP-Token header); the")
+        print("page served below carries it, and --print-token shows it.")
+        if "--print-token" in sys.argv[1:]:
+            print("Token: %s" % API_TOKEN)
+    else:
+        print("Warning: the API is open to anything that can reach this port.")
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print("Warning: listening on %s, so every host that can reach this" % host)
+        print("machine can reach this API: use --host=127.0.0.1 unless you")
+        print("need a remote or proxied interface.")
+    if ALLOW_ANY_HOST:
+        print("Warning: the Host header is not checked (--allow-any-host).")
+    else:
+        print("Answering requests for: %s" % ", ".join(sorted(ALLOWED_HOSTS)))
     sys.stdout.flush()
 
     try:
@@ -1685,4 +1918,4 @@ def main():
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
-    main()
+    sys.exit(main() or 0)
