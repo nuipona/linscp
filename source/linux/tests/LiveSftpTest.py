@@ -64,16 +64,20 @@ class LiveSftpTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if server_module is None:
-            raise unittest.SkipTest(
-                "paramiko is not installed; the live SFTP tests are skipped. "
-                "Install it with 'pip install paramiko' to run them.")
         if os.name != "posix":
+            # First, because it is the binding reason: paramiko on a Windows
+            # box would buy nothing while curl cannot speak the protocol, and
+            # a recorded reason that names the wrong blocker is worse than no
+            # recorded reason at all.
             raise unittest.SkipTest(
                 "SFTP on Windows goes through curl, and the curl.exe built "
                 "into Windows has no SFTP support: there is no session for "
                 "these tests to open. Put a curl built with libssh2 on PATH "
                 "and this restriction goes away.")
+        if server_module is None:
+            raise unittest.SkipTest(
+                "paramiko is not installed; the live SFTP tests are skipped. "
+                "Install it with 'pip install paramiko' to run them.")
         cls.workdir = tempfile.TemporaryDirectory(prefix="linuxscp-live-")
         cls.root = pathlib.Path(cls.workdir.name) / "jail"
         cls.root.mkdir()
