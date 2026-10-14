@@ -287,8 +287,36 @@ struct ListingEntry
  * (what FTP servers and curl's own SFTP engine produce) and a names-only
  * listing are understood; the latter leaves 'typeKnown' false.
  */
+/*
+ * The curl exit codes that say the endpoint itself is unusable: it could not
+ * be reached, the transport failed, or it refused us at the protocol level.
+ * Anything else (a directory that is not listable, a file that is not there)
+ * is the server answering, which 'open' must not second-guess - the command
+ * that needs that path reports it.
+ */
+bool IsEndpointUnreachable(int code)
+{
+    switch (code)
+    {
+    case -1:              /* curl could not be run at all */
+    case 3:               /* the URL was malformed */
+    case 5:               /* could not resolve the proxy */
+    case 6:               /* could not resolve the host */
+    case 7:               /* could not connect */
+    case 28:              /* timed out */
+    case 35:              /* TLS handshake failed */
+    case 51: case 53: case 54: case 55: case 56: case 58: case 59:
+    case 60: case 64: case 66: case 67: case 77: case 80: case 82:
+    case 83: case 84: case 90: case 91: case 92: case 94: case 95:
+    case 96: case 97:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool FetchListing(const SessionOptions & options, const std::string & remotePath,
-    std::vector<ListingEntry> & entries, std::string & error)
+    std::vector<ListingEntry> & entries, std::string & error, int * codeOut = NULL)
 {
     entries.clear();
 
@@ -305,6 +333,10 @@ bool FetchListing(const SessionOptions & options, const std::string & remotePath
     std::string outStr;
     std::string errStr;
     const int rc = RunCurl(args, outStr, errStr);
+    if (codeOut != NULL)
+    {
+        *codeOut = rc;
+    }
     if (rc != 0)
     {
         error = errStr.empty() ? "Curl error " + std::to_string(rc) : errStr;
@@ -457,6 +489,30 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
     }
 
     return true;
+}
+
+bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
+    const std::string & remotePath, std::string & error)
+{
+    std::vector<ListingEntry> entries;
+    int code = 0;
+    std::string path = remotePath.empty() ? std::string("/") : remotePath;
+    if (FetchListing(options, path, entries, error, &code))
+    {
+        return true;
+    }
+    if (!IsEndpointUnreachable(code))
+    {
+        /* We reached the server: it just did not like that directory, which
+         * is the command's problem to report, not the connection's. */
+        error.clear();
+        return true;
+    }
+    if (error.empty())
+    {
+        error = "Curl error " + std::to_string(code) + ".";
+    }
+    return false;
 }
 
 int ProtocolClient::Stat(const SessionOptions & options, const std::string & remotePath,

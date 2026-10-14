@@ -460,5 +460,45 @@ class ScriptTests(unittest.TestCase):
                 self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
 
+    def test_open_fails_on_unreachable_endpoint(self):
+        """'open' has to report an endpoint that is not there.
+
+        The curl-backed protocols have no connection of their own - every
+        command runs its own transfer - so a dead port would otherwise be
+        reported as a successful open and each command would fail on its
+        own. Both engines are checked: 'sftp' goes through PuTTY where that
+        exists and through curl on Windows, 'scp' always through curl.
+        """
+        for protocol in ("sftp", "scp"):
+            with self.subTest(protocol=protocol):
+                result = self.run_commands(
+                    f"open {protocol}://user:secret@127.0.0.1:1/ ; echo SHOULD_NOT_RUN")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+                self.assertIn("Cannot open session", result.stderr)
+
+    def test_open_accepts_a_server_that_refuses_the_start_directory(self):
+        """Reaching the server is enough; a start directory it will not list
+        is the command's problem, not the connection's. Without that
+        distinction the reachability check would reject valid sessions."""
+        import functools
+        import http.server
+        import threading
+        with tempfile.TemporaryDirectory() as tmp:
+            handler = functools.partial(http.server.SimpleHTTPRequestHandler,
+                                        directory=tmp)
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+            port = server.server_address[1]
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                result = self.run_commands(
+                    f"open http://127.0.0.1:{port}/missing-dir/ ; echo CONNECTED")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("CONNECTED", result.stdout)
+            finally:
+                server.shutdown()
+                server.server_close()
+
+
 if __name__ == "__main__":
     unittest.main()
