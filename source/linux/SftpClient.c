@@ -496,8 +496,15 @@ static unsigned long long local_file_size(FILE * file)
     return (unsigned long long)st.st_size;
 }
 
-int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
-    unsigned long long resumeOffset, unsigned long long * size,
+/*
+ * One download. 'remoteOffset' is the position in the remote file to read
+ * from and 'localOffset' the position in the local file to write at; they
+ * are the same for a resume and differ for an append. 'truncateLocal' says
+ * whether an existing local file is overwritten.
+ */
+static int get_transfer(const char * remotePath, const char * localPath,
+    unsigned long long remoteOffset, unsigned long long localOffset,
+    bool truncateLocal, unsigned long long * size,
     LscpProgressFn progress, void * progressCtx)
 {
     clear_error();
@@ -508,7 +515,7 @@ int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
     struct fxp_xfer * xfer;
     FILE * file;
     unsigned long long total = 0;
-    unsigned long long transferred = resumeOffset;
+    unsigned long long transferred = localOffset;
     int result = 0;
     bool canCloseHandle = true;
     LscpAttrs attrs;
@@ -543,21 +550,22 @@ int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
         return -1;
     }
 
-    if (resumeOffset > 0)
+    if (truncateLocal)
     {
-        file = fopen(localPath, "r+b");
+        file = fopen(localPath, "wb");
+    }
+    else
+    {
+        /* Keep what is already there and write over or after it. */
+        file = fopen(localPath, localOffset > 0 ? "r+b" : "ab");
         if (file == NULL)
         {
             file = fopen(localPath, "ab");
         }
-        if (file != NULL)
+        if (file != NULL && localOffset > 0)
         {
-            fseeko(file, (off_t)resumeOffset, SEEK_SET);
+            fseeko(file, (off_t)localOffset, SEEK_SET);
         }
-    }
-    else
-    {
-        file = fopen(localPath, "wb");
     }
     if (file == NULL)
     {
@@ -566,7 +574,7 @@ int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
         return -1;
     }
 
-    xfer = xfer_download_init(handle, resumeOffset);
+    xfer = xfer_download_init(handle, remoteOffset);
     while (!xfer_done(xfer))
     {
         int got;
@@ -649,15 +657,49 @@ int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
     return 0;
 }
 
+int lscp_sftp_get_resume(const char * remotePath, const char * localPath,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * progressCtx)
+{
+    return get_transfer(remotePath, localPath, resumeOffset, resumeOffset,
+        resumeOffset == 0, size, progress, progressCtx);
+}
+
 int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx)
 {
-    return lscp_sftp_get_resume(remotePath, localPath, 0, size, progress, progressCtx);
+    return get_transfer(remotePath, localPath, 0, 0, true, size, progress,
+        progressCtx);
 }
 
-int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int permissions,
-    unsigned long long resumeOffset, unsigned long long * size,
-    LscpProgressFn progress, void * progressCtx)
+/* Size of a local path, or 0 when it does not exist. */
+static unsigned long long path_size(const char * path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0 || !S_ISREG(st.st_mode) || st.st_size < 0)
+    {
+        return 0;
+    }
+    return (unsigned long long)st.st_size;
+}
+
+int lscp_sftp_get_append(const char * remotePath, const char * localPath,
+    unsigned long long * size, LscpProgressFn progress, void * progressCtx)
+{
+    return get_transfer(remotePath, localPath, 0, path_size(localPath), false,
+        size, progress, progressCtx);
+}
+
+/*
+ * One upload, with the local read position, the remote write position and
+ * whether the remote file is truncated kept apart so that an append can
+ * start at the end of the remote file while reading the local one from its
+ * beginning.
+ */
+static int put_transfer(const char * localPath, const char * remotePath,
+    int permissions, unsigned long long localOffset,
+    unsigned long long remoteOffset, bool truncateRemote,
+    unsigned long long * size, LscpProgressFn progress, void * progressCtx)
 {
     clear_error();
     struct sftp_request * request;
@@ -669,7 +711,7 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
     FILE * file;
     char * buffer;
     unsigned long long total;
-    unsigned long long transferred = resumeOffset;
+    unsigned long long transferred = remoteOffset;
     size_t pendingWrites = 0;
     bool eof = false;
     bool canCloseHandle = true;
@@ -687,9 +729,9 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
         return -1;
     }
     total = local_file_size(file);
-    if (resumeOffset > 0)
+    if (localOffset > 0)
     {
-        fseeko(file, (off_t)resumeOffset, SEEK_SET);
+        fseeko(file, (off_t)localOffset, SEEK_SET);
     }
 
     if (permissions >= 0)
@@ -699,7 +741,7 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
     }
 
     int openFlags = SSH_FXF_WRITE | SSH_FXF_CREAT;
-    if (resumeOffset == 0)
+    if (truncateRemote)
     {
         openFlags |= SSH_FXF_TRUNC;
     }
@@ -726,7 +768,7 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
      * queued. Keep going until both are done.
      */
     buffer = snewn(TRANSFER_CHUNK, char);
-    xfer = xfer_upload_init(handle, resumeOffset);
+    xfer = xfer_upload_init(handle, remoteOffset);
     while (!eof || pendingWrites != 0)
     {
         size_t read;
@@ -839,10 +881,39 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
     return 0;
 }
 
+int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int permissions,
+    unsigned long long resumeOffset, unsigned long long * size,
+    LscpProgressFn progress, void * progressCtx)
+{
+    return put_transfer(localPath, remotePath, permissions, resumeOffset,
+        resumeOffset, resumeOffset == 0, size, progress, progressCtx);
+}
+
 int lscp_sftp_put(const char * localPath, const char * remotePath, int permissions,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx)
 {
-    return lscp_sftp_put_resume(localPath, remotePath, permissions, 0, size, progress, progressCtx);
+    return put_transfer(localPath, remotePath, permissions, 0, 0, true, size,
+        progress, progressCtx);
+}
+
+/*
+ * Appends the local file to the remote one. The remote size comes from the
+ * server, because an upload must continue where the remote file ends; a
+ * missing destination simply starts at zero.
+ */
+int lscp_sftp_put_append(const char * localPath, const char * remotePath,
+    int permissions, unsigned long long * size, LscpProgressFn progress,
+    void * progressCtx)
+{
+    LscpAttrs attrs;
+    unsigned long long remoteOffset = 0;
+    if (lscp_sftp_stat(remotePath, &attrs) == LSCP_SFTP_STAT_EXISTS &&
+        (attrs.flags & SSH_FILEXFER_ATTR_SIZE) != 0)
+    {
+        remoteOffset = attrs.size;
+    }
+    return put_transfer(localPath, remotePath, permissions, 0, remoteOffset,
+        false, size, progress, progressCtx);
 }
 
 /*

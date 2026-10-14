@@ -2,6 +2,7 @@
 
 #include "Platform.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -712,6 +713,240 @@ std::string FormatFileTime(unsigned long time)
             tmResult.tm_year + 1900);
     }
     return std::string(buffer);
+}
+
+} // namespace linuxscp
+
+/* Permission parsing, shared by 'chmod' and by '-permissions='. */
+namespace linuxscp {
+
+/*
+ * A symbolic permission expression, in the style of chmod(1): a comma
+ * separated list of '<who><op><perms>' clauses, where <who> is any of
+ * u, g, o, a (default 'a' for '=', nothing for '+' and '-'), <op> is one
+ * of '+', '-' or '=' and <perms> is any of r, w, x, X (exec only for
+ * directories and for files that are already executable), s, t and the
+ * letters u, g and o, which copy the corresponding class of the mode that
+ * the file has now.
+ *
+ * 'u=rw' leaves the group and the other bits alone. The process umask is
+ * deliberately not applied to '=': the caller states the mode it wants.
+ */
+bool ParseSymbolicPermissions(const std::string & text, unsigned long current,
+    bool isDirectory, unsigned long & result, std::string & error)
+{
+    result = current;
+    error.clear();
+
+    std::string wanted;
+    TrimString(text, wanted);
+    if (wanted.empty())
+    {
+        error = "the permission mode is empty";
+        return false;
+    }
+
+    size_t i = 0;
+    size_t clauses = 0;
+    while (i < wanted.size())
+    {
+        while (i < wanted.size() &&
+               (wanted[i] == ',' || isspace(static_cast<unsigned char>(wanted[i]))))
+        {
+            i++;
+        }
+        if (i >= wanted.size())
+        {
+            break;
+        }
+        clauses++;
+
+        /* 1 = owner, 2 = group, 4 = other */
+        unsigned int who = 0;
+        while (i < wanted.size())
+        {
+            const char c = static_cast<char>(tolower(static_cast<unsigned char>(wanted[i])));
+            if (c == 'u') { who |= 1; }
+            else if (c == 'g') { who |= 2; }
+            else if (c == 'o') { who |= 4; }
+            else if (c == 'a') { who |= 7; }
+            else
+            {
+                break;
+            }
+            i++;
+        }
+
+        if (i >= wanted.size() ||
+            (wanted[i] != '+' && wanted[i] != '-' && wanted[i] != '='))
+        {
+            error = "expected '+', '-' or '=' in '" + text + "'";
+            return false;
+        }
+        const char op = wanted[i++];
+        if (who == 0 && op == '=')
+        {
+            who = 7;
+        }
+
+        std::string perms;
+        while (i < wanted.size() && wanted[i] != ',' &&
+               !isspace(static_cast<unsigned char>(wanted[i])))
+        {
+            /* The case matters here: 'X' means something else than 'x'. */
+            perms += wanted[i];
+            i++;
+        }
+        if (perms.empty())
+        {
+            error = "expected a permission letter in '" + text + "'";
+            return false;
+        }
+        for (size_t p = 0; p < perms.size(); p++)
+        {
+            /* chmod(1) accepts these and only these; case matters. */
+            const char c = perms[p];
+            if (strchr("rwxXstuugo", c) == NULL)
+            {
+                error = "unknown permission letter '" + std::string(1, c) +
+                    "' in '" + text + "'";
+                return false;
+            }
+        }
+        /* The bits are the remote file's own; they are written out as
+         * numbers because a Windows C library has no macro for the sticky
+         * bit and because the value travels over SFTP regardless. */
+        const bool anyExec = (current & 0111) != 0;
+
+        for (unsigned int slot = 0; slot < 3; slot++)
+        {
+            if ((who & (1u << slot)) == 0)
+            {
+                continue;
+            }
+            const int shift = static_cast<int>(2 - slot) * 3;
+            const unsigned long slotMask = static_cast<unsigned long>(0x7 << shift);
+
+            unsigned long add = 0;
+            for (size_t p = 0; p < perms.size(); p++)
+            {
+                switch (perms[p])
+                {
+                case 'r': add |= static_cast<unsigned long>(0x4 << shift); break;
+                case 'w': add |= static_cast<unsigned long>(0x2 << shift); break;
+                case 'x': add |= static_cast<unsigned long>(0x1 << shift); break;
+                case 'X':
+                    if (anyExec || isDirectory)
+                    {
+                        add |= static_cast<unsigned long>(0x1 << shift);
+                    }
+                    break;
+                case 'u':
+                    add |= static_cast<unsigned long>(((current & 0700) >> 6) << shift);
+                    break;
+                case 'g':
+                    add |= static_cast<unsigned long>(((current & 0070) >> 3) << shift);
+                    break;
+                case 'o':
+                    add |= static_cast<unsigned long>((current & 0007) << shift);
+                    break;
+                default:
+                    break;
+                }
+            }
+
+            if (op == '+')
+            {
+                result = static_cast<unsigned long>(result | add);
+            }
+            else if (op == '-')
+            {
+                result = static_cast<unsigned long>(result & ~add);
+            }
+            else
+            {
+                result = static_cast<unsigned long>((result & ~slotMask) | (add & slotMask));
+            }
+
+            /* The special bits live outside the three permission classes. */
+            if (perms.find('s') != std::string::npos)
+            {
+                const unsigned long special = (slot == 0 ? 04000 :
+                    (slot == 1 ? 02000 : 0));
+                result = (op == '-' ? static_cast<unsigned long>(result & ~special)
+                                    : static_cast<unsigned long>(result | special));
+            }
+            if (perms.find('t') != std::string::npos &&
+                (who & (1u << slot)) != 0 && slot == 2)
+            {
+                result = (op == '-' ? static_cast<unsigned long>(result & ~01000)
+                                    : static_cast<unsigned long>(result | 01000));
+            }
+        }
+    }
+    if (clauses == 0)
+    {
+        error = "'" + text + "' states no permission at all";
+        return false;
+    }
+    return true;
+}
+
+bool TrimString(const std::string & text, std::string & result)
+{
+    size_t first = 0;
+    while (first < text.size() && isspace(static_cast<unsigned char>(text[first])))
+    {
+        first++;
+    }
+    size_t last = text.size();
+    while (last > first && isspace(static_cast<unsigned char>(text[last - 1])))
+    {
+        last--;
+    }
+    result = text.substr(first, last - first);
+    return !result.empty();
+}
+
+/* A WinSCP-style octal permission value: '600', '0600', '00600'. */
+bool ParseOctalMode(const std::string & text, unsigned long & result)
+{
+    std::string digits = text;
+    if (digits.size() > 1 && (digits[0] == '0' || digits[0] == 'o'))
+    {
+        digits = digits.substr(1);
+    }
+    if (digits.empty() || digits.size() > 4)
+    {
+        return false;
+    }
+    unsigned long mode = 0;
+    for (size_t i = 0; i < digits.size(); i++)
+    {
+        if (digits[i] < '0' || digits[i] > '7')
+        {
+            return false;
+        }
+        mode = static_cast<unsigned long>(mode * 8 + (digits[i] - '0'));
+    }
+    result = mode;
+    return true;
+}
+
+/* An octal mode or a symbolic expression, as accepted by 'chmod'. */
+bool ParsePermissions(const std::string & text, unsigned long current, bool isDirectory,
+    unsigned long & result, std::string & error)
+{
+    if (!text.empty() && isdigit(static_cast<unsigned char>(text[0])))
+    {
+        if (ParseOctalMode(text, result))
+        {
+            return true;
+        }
+        error = "'" + text + "' is not a valid octal mode";
+        return false;
+    }
+    return ParseSymbolicPermissions(text, current, isDirectory, result, error);
 }
 
 } // namespace linuxscp

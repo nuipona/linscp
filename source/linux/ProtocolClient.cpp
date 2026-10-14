@@ -287,8 +287,37 @@ struct ListingEntry
  * (what FTP servers and curl's own SFTP engine produce) and a names-only
  * listing are understood; the latter leaves 'typeKnown' false.
  */
+/*
+ * The curl exit codes that say the endpoint itself is unusable: it could not
+ * be reached, the transport failed, or it refused us at the protocol level.
+ * Anything else (a directory that is not listable, a file that is not there)
+ * is the server answering, which 'open' must not second-guess - the command
+ * that needs that path reports it.
+ */
+bool IsEndpointUnreachable(int code)
+{
+    switch (code)
+    {
+    case -1:              /* curl could not be run at all */
+    case 1:               /* this curl was not built with the protocol */
+    case 3:               /* the URL was malformed */
+    case 5:               /* could not resolve the proxy */
+    case 6:               /* could not resolve the host */
+    case 7:               /* could not connect */
+    case 28:              /* timed out */
+    case 35:              /* TLS handshake failed */
+    case 51: case 53: case 54: case 55: case 56: case 58: case 59:
+    case 60: case 64: case 66: case 67: case 77: case 80: case 82:
+    case 83: case 84: case 90: case 91: case 92: case 94: case 95:
+    case 96: case 97:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool FetchListing(const SessionOptions & options, const std::string & remotePath,
-    std::vector<ListingEntry> & entries, std::string & error)
+    std::vector<ListingEntry> & entries, std::string & error, int * codeOut = NULL)
 {
     entries.clear();
 
@@ -305,6 +334,10 @@ bool FetchListing(const SessionOptions & options, const std::string & remotePath
     std::string outStr;
     std::string errStr;
     const int rc = RunCurl(args, outStr, errStr);
+    if (codeOut != NULL)
+    {
+        *codeOut = rc;
+    }
     if (rc != 0)
     {
         error = errStr.empty() ? "Curl error " + std::to_string(rc) : errStr;
@@ -459,6 +492,43 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
     return true;
 }
 
+bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
+    const std::string & remotePath, std::string & error)
+{
+    std::vector<ListingEntry> entries;
+    int code = 0;
+    std::string path = remotePath.empty() ? std::string("/") : remotePath;
+    if (FetchListing(options, path, entries, error, &code))
+    {
+        return true;
+    }
+    if (!IsEndpointUnreachable(code))
+    {
+        /* We reached the server: it just did not like that directory, which
+         * is the command's problem to report, not the connection's. */
+        error.clear();
+        return true;
+    }
+    if (code == 1)
+    {
+        /*
+         * Worth saying in our own words: the curl.exe that ships with
+         * Windows 10 and 11 is built without SFTP and SCP support, so every
+         * command of such a session fails on it. A user cannot tell that
+         * apart from a broken host.
+         */
+        error += " This curl does not support the '" + options.protocol +
+            "' protocol. The curl.exe built into Windows has no SFTP or "
+            "SCP support; install a curl built with libssh2, or use a "
+            "build with the native SFTP transport.";
+    }
+    if (error.empty())
+    {
+        error = "Curl error " + std::to_string(code) + ".";
+    }
+    return false;
+}
+
 int ProtocolClient::Stat(const SessionOptions & options, const std::string & remotePath,
     LscpAttrs * attrs, std::string & error)
 {
@@ -572,7 +642,7 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
 int ProtocolClient::Get(const SessionOptions & options, const std::string & remotePath,
     const std::string & localPath, unsigned long long resumeOffset,
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
-    void * progressCtx, std::string & error)
+    void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
     (void)progress;
     (void)progressCtx;
@@ -595,6 +665,12 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
         /* Give the downloaded file the server's timestamps where the
          * protocol carries them (FTP, SFTP, SCP, HTTP Last-Modified). */
         args.push_back("-R");
+    }
+
+    if (speedKBytesPerSecond > 0)
+    {
+        args.push_back("--limit-rate");
+        args.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
     args.push_back("-o");
@@ -621,7 +697,7 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
 int ProtocolClient::Put(const SessionOptions & options, const std::string & localPath,
     const std::string & remotePath, int permissions, unsigned long long resumeOffset,
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
-    void * progressCtx, std::string & error)
+    void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
     (void)permissions;
     (void)progress;
@@ -645,6 +721,12 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
         /* -R gives the uploaded file the local file's modification
          * time where the protocol supports it (FTP MFMT, SFTP). */
         args.push_back("-R");
+    }
+
+    if (speedKBytesPerSecond > 0)
+    {
+        args.push_back("--limit-rate");
+        args.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
     args.push_back("-T");

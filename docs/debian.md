@@ -93,7 +93,10 @@ linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 | `-port=<number>` | port number |
 | `-timeout=<secs>` | connection timeout |
 | `-log=<file>` | write the session log to a file |
+| `-xmllog=<file>` | write an XML action log of every command, message and transfer, with passwords masked |
+| `-parameter <value>...` | script parameters, for `%1%` .. `%9%` in the commands |
 | `-batch` | never ask a question; fail instead |
+| `-server` | read one command per line on stdin and answer with `LSCP-RESULT` (what the GUI drives) |
 | `-gui` | launch the graphical Commander desktop interface |
 | `-verbose` | print what the connection layer does |
 | `-version`, `-help` | print the version, print the usage |
@@ -105,8 +108,12 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 ### Commands
 
 `open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lls`, `lcd`, `lpwd`, `get`,
-`put`, `synchronize`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `chmod`, `stat`,
-`terminal`, `option`, `help`, `exit`.
+`put`, `synchronize`, `keepuptodate`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `cp`,
+`ln`/`symlink`, `chmod`, `stat`, `checksum`, `copyid`, `edit`, `session`,
+`savesession`, `rmsession`, `call` (`!`), `terminal`, `option`, `help`, `exit`.
+`recv`/`mget`, `send`/`mput`, `dir`, `rename`, `del`, `md`, `sync`, `man`, `bye`,
+`quit` and `end` are the aliases upstream has, and `show` is recognised only to
+say that it is not supported.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
 transfers every match. The exit status is non-zero if any command failed. When a
@@ -118,13 +125,55 @@ and `put` support WinSCP switches:
 * `-r`: transfer directories recursively.
 * `-resume`: resume interrupted transfers at the target byte offset.
 * `-delete`: remove source files after a successful transfer.
-* `-neweronly`: only transfer files that are newer than target files.
-* `-preservetime`: preserve source file modification timestamps.
+* `-neweronly` / `-noneweronly`: transfer only files newer than the target, or
+  ignore the dates again (`-noneweronly` is the default).
+* `-preservetime` / `-nopreservetime`: preserve source timestamps;
+  `-preservetime=all` preserves them for directories as well, which is what
+  makes a recursive transfer's folder dates match.
+* `-append`: add to the end of the destination instead of replacing it. Needs
+  the native SFTP transport and cannot be combined with `-resume`.
+* `-speed=<KB/s>`: limit the transfer to that many kilobytes per second, `0`
+  for no limit. The native engine is paced between chunks, the curl paths get
+  `--limit-rate`.
+* `-resumesupport=on|off|<KB>`: whether an interrupted file is continued at an
+  offset, and from what size on; `option resume on|off` is the default.
+* `-transfer=binary|ascii|automatic` and `-filemask=<masks>`: as for
+  `synchronize`.
+An unknown switch, a value that is not one of the words above, or `-append`
+over curl is reported before anything is transferred, never ignored.
 When the destination is omitted, `get` defaults to the local working directory
 and `put` defaults to the remote working directory.
 
+`chmod <mode> <file>... [-recursive]` takes an octal mode (`644`, `0700`) or a
+symbolic one (`u+x`, `a=r,go-w`, `u+s`, and `X` for the execute bit only where
+one is already set or for a directory); `-recursive` walks a remote tree and
+leaves symbolic links alone, so it cannot follow one out of the directory.
+
+`copyid [<keyfile>]` appends the public half of the session's private key, or of
+`<keyfile>`, to `~/.ssh/authorized_keys` on the server, creating `~/.ssh` as
+`0700` and the file as `0600`, and saying so when the key is already installed.
+It needs an `sftp://` or `scp://` session, and the Windows build reports that it
+cannot read a key file rather than doing nothing.
+
 `synchronize local|remote|both [localdir [remotedir]]` compares directory
 trees and synchronizes newer and missing files in the specified direction.
+
+A command name, an `option` name and the value of an option with a fixed
+vocabulary may be abbreviated to any prefix that identifies exactly one of
+them: `synch local` is `synchronize local`, `option bat cont` is
+`option batch continue`. An abbreviation that fits several names is refused
+with the list of what it could mean, because guessing would run a different
+command than the one that was typed.
+
+In a script or interactive line, `%1%` .. `%9%` are replaced by the values of
+`-parameter`, `%TIMESTAMP%` by the current local time (`%TIMESTAMP#yyyy-mm-dd%`
+with a format, `%TIMESTAMP-1D#yyyymmdd%` with a signed relative offset of
+seconds `S`, minutes `N`, hours `H`, days `D` or years `Y`, and a trailing `S`
+to snap to the start of that unit), and `%NAME%` by an environment variable,
+left in place when it is not set. None of it happens inside single quotes, and
+a timestamp placeholder with an offset but no format is an error rather than a
+path containing a percent sign. `-server` input is not expanded, because the
+graphical client sends literal paths.
 
 Overwrite and delete confirmations are enabled by default. Interactive runs
 ask before replacing or removing data. In `-batch` or other non-interactive
@@ -149,8 +198,10 @@ feature is on the "Terminal" button of the graphical client, which asks the
 backend to run this command. On Windows the client opens PuTTY, Windows
 Terminal or `ssh.exe` instead.
 
-`call` and `show` are rejected on purpose: the connection runs the SFTP
-subsystem only, so there is no remote shell to execute a command in.
+`call` (and `!`) run a command through a one-shot SSH `exec` channel, in a
+second connection, so the SFTP session stays open; `show` is rejected on
+purpose, because the connection runs the SFTP subsystem and there is no shell
+to ask for its settings.
 
 The same text is installed as the `linuxscp(1)` manual page; its source is
 [linuxscp.1](linuxscp.1).
@@ -180,13 +231,26 @@ LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
 
 ### Compatibility limits
 
-`man`, `recv`/`mget`, and `send`/`mput` alias existing commands. `lls` lists
+`man`, `recv`/`mget`, `send`/`mput`, `dir`, `rename`, `del`, `md`, `sync`,
+`bye`, `quit` and `end` alias the commands upstream maps them to. `lls` lists
 local directory entries or a simple wildcard mask, in names-only format.
-Only binary transfers are implemented: `binary`, `option transfer binary`
-and `-transfer=binary` work; ASCII/automatic, `-filemask`, reconnect and other
-unimplemented switches fail explicitly before a transfer. `synchronize both
--delete` is rejected. This prevents ignored filters or settings from silently
-changing what a script transfers/deletes.
+
+What a transport cannot do is refused instead of approximated: `-append` and
+`-resume` need the native SFTP engine (the curl-backed paths say so),
+`-resume` with ASCII conversion is rejected, `-rawtransfersettings=` and
+transfer presets are not accepted at all, `synchronize both -delete` is
+rejected, `-mirror` is rejected with `both`, and an unknown switch or an
+option value outside its vocabulary is reported before any file is read. A
+non-octal `-permissions=`, a malformed `-filemask` and a `%TIMESTAMP%`
+placeholder with an offset but no format are errors for the same reason.
+This is deliberate: an ignored filter or setting would silently change what a
+script transfers or deletes.
+
+`keepuptodate` polls on a timer rather than watching the filesystem, so it is
+not the upstream background watcher, and there is no `stop` command. The
+`.filepart` temporary-name policy, queue priorities, S3 signing, DAV
+`PROPFIND` listing and WinSCP's `.NET` assembly are not implemented; see the
+pinned audit for the full list.
 
 ### Authentication
 
@@ -222,7 +286,20 @@ binary were checked.
 A live end-to-end run against an in-process Paramiko SFTP server passed with
 ssh-agent authentication. It covered listing, directory creation, multi-source
 and wildcard uploads/downloads, empty-file and 2 MiB round trips, and `stat`,
-`chmod`, `mv`, `rm` and `rmdir`. The OpenSSH recipe below was not run here
+`chmod`, `mv`, `rm` and `rmdir`. The same server then carried the transfer
+and key features: `-append` in both directions (a byte-exact concatenation),
+`-speed=` (120 KiB at `-speed=40` took 3.02 s against 0.07 s unlimited, with
+identical content), `-resumesupport=1024` leaving a small partial file to the
+overwrite question while `-resumesupport=64` resumed it to a byte-identical
+file, `-preservetime` both ways and `-preservetime=all` stamping the local
+directory with the remote directory time, `-permissions=600` on upload,
+`chmod` in octal, symbolic (`u+x`, `a=r,go-w`, `u=g`) and `-recursive` forms,
+and `copyid` from an OpenSSH `.pub` file and from a PEM private key (the
+installed line has that key's own fingerprint), with a second run reporting
+the key as already installed. `chmod` and the timestamp checks depend on the
+test server answering `SETSTAT`, which paramiko delivers to `chattr`, not to
+`setstat`; it also creates the `.ssh` directory and the `authorized_keys`
+file that `copyid` writes. The OpenSSH recipe below was not run here
 because `sshd` is not installed. Password authentication, pinned/mismatched
 host keys, and behavior across different OpenSSH server versions still need
 separate integration tests; the recipe's server offers public-key
@@ -298,7 +375,23 @@ LinuxSCP does not provide full WinSCP parity. See
 implementation includes:
 * Native POSIX SFTP and curl-backed transfers (protocol/build dependent;
   WebDAV and S3 are incomplete).
-* Resuming interrupted file transfers (`-resume`, `option resume on|off`).
-* Recursive directory downloads, uploads, and synchronization (`synchronize`).
+* Binary, ASCII and automatic transfers with WinSCP file masks (`-filemask=`,
+  `option include`/`exclude`, `option failonnomatch`).
+* Resuming interrupted file transfers (`-resume`, `-resumesupport=`,
+  `option resume on|off`), appending to a destination (`-append`), bandwidth
+  limiting (`-speed=`) and timestamp preservation (`-preservetime`,
+  `-preservetime=all`).
+* Recursive directory downloads, uploads, and synchronization (`synchronize`,
+  `keepuptodate`) with `-criteria=`, `-preview`, `-mirror`, `-delete`,
+  `-nonrecursive`, `-interval=` and `-count=`.
+* Remote file operations: `chmod` (octal and symbolic, `-recursive`), `cp`,
+  `mv`, `ln`, `rm`, `rmdir`, `mkdir`, `stat`, `checksum`, `edit`, `call`, and
+  `copyid` to install an authorized key.
+* Reconnection of a dropped session (`option reconnecttime`).
+* Scripting: `option`, unambiguous command and option abbreviations,
+  `-parameter` with `%1%`..`%9%`, `%TIMESTAMP%` and `%ENVIRONMENT%`
+  expansion, and an XML action log (`-xmllog=`).
+* Stored sessions shared with the GUI (`session`, `savesession`, `rmsession`,
+  export and import).
 * Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
 * Native Debian `.deb` packaging with standard menu launchers and icons.

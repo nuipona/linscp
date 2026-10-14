@@ -40,11 +40,34 @@ struct TransferFlags
     int permissions;
     /* -filemask= was given for this command. */
     bool maskGiven;
+    /*
+     * -resumesupport= : how resuming is decided. 'Smart' resumes only when
+     * the file to transfer is at least 'resumeThreshold' bytes big, like the
+     * upstream transfer setting of the same name. Unset leaves the decision
+     * to '-resume' and 'option resume'.
+     */
+    enum ResumeSupport
+    {
+        ResumeUnset,
+        ResumeOff,
+        ResumeOn,
+        ResumeSmart
+    };
+    ResumeSupport resumeSupport;
+    unsigned long long resumeThreshold;
+    /* '-speed=' in kibibytes per second; 0 transfers as fast as it can. */
+    unsigned speedKBytesPerSecond;
+    /* '-append': add to the destination instead of replacing it. */
+    bool append;
+    /* '-preservetime=all': also give the transferred directories the
+     * timestamps of their source, not just the files. */
+    bool preserveTimeDirs;
 
     TransferFlags() : deleteSource(false), deleteObsolete(false),
         newerOnly(false), preserveTime(false), recursive(true),
         resume(false), transferMode(TransferMode::Binary), permissions(-1),
-        maskGiven(false) {}
+        maskGiven(false), resumeSupport(ResumeUnset), resumeThreshold(0),
+        speedKBytesPerSecond(0), append(false), preserveTimeDirs(false) {}
 };
 
 class Script
@@ -54,6 +77,16 @@ public:
 
     /* Options that 'open' fills in when the URL does not say otherwise. */
     void SetDefaults(const SessionOptions & options) { mDefaults = options; }
+
+    /*
+     * The script parameters of this run, substituted for %1% .. %9% in every
+     * command line before it is parsed, as the upstream console does with
+     * '/parameter a b c'. The expansion is off in '-server' mode, where the
+     * commands come from a program that has no parameters to pass and where a
+     * file name may legitimately contain a percent sign.
+     */
+    void SetScriptParameters(const std::vector<std::string> & parameters)
+        { mParameters = parameters; }
 
     /* Runs a whole script file ('-' for standard input). */
     int RunFile(const std::string & path);
@@ -93,8 +126,38 @@ private:
     Script & operator=(const Script &);
 
     bool ExecuteCommand(const std::string & line);
-    bool ValidateTransferSwitches(const std::string & command,
-        const std::vector<std::string> & args);
+    /*
+     * Expands the script parameters, %TIMESTAMP% and the environment in one
+     * command line. Reports the problem and counts an error when a placeholder
+     * is malformed, because keeping it would move files to a wrong path.
+     */
+    bool ExpandParameters(const std::string & line, std::string & expanded);
+    /*
+     * Turns an abbreviated name - a command, an option name or an option
+     * value - into the full one, the way the upstream command table does: an
+     * unambiguous prefix is enough, a prefix that fits several names is
+     * refused. Returns false once that ambiguity is reported; on true,
+     * 'resolved' holds the full name or is empty when nothing matched and the
+     * caller should produce its own message.
+     */
+    bool ResolveAbbreviation(const std::vector<std::string> & names,
+        const std::string & typed, const std::string & what,
+        std::string & resolved);
+    /*
+     * Reads the switches of 'get' and 'put' into 'flags' and the file names
+     * into 'paths'. Everything it does not understand is reported before a
+     * connection is made or a file is touched, so that a switch is never
+     * silently ignored. 'uploads' selects the switches of the upload
+     * direction ('-permissions=').
+     */
+    bool ParseTransferSwitches(const std::string & command, bool uploads,
+        const std::vector<std::string> & args, TransferFlags & flags,
+        std::vector<std::string> & paths);
+    /* Whether one file of this size is resumed under 'flags'. */
+    bool Resumes(const TransferFlags & flags, unsigned long long size) const;
+    /* Reports a switch 'get' or 'put' cannot honour and counts an error;
+     * always returns false, so that a parser can 'return SwitchError(...)'. */
+    bool SwitchError(const std::string & command, const std::string & hint);
     bool ListLocal(const std::vector<std::string> & args);
     bool OpenSite(const std::vector<std::string> & args);
     void CloseSite();
@@ -155,6 +218,11 @@ private:
      * in the server's authorized_keys. */
     bool CopyPublicKey(const std::vector<std::string> & args);
     bool ChangeRemotePermissions(const std::vector<std::string> & args);
+    /* Applies an octal or symbolic mode to one remote path, and to
+     * everything below it when 'recursive' asks for that. Symbolic links
+     * are skipped, so that a recursive run cannot leave the directory tree. */
+    bool ApplyRemotePermissions(const std::string & path, const std::string & mode,
+        bool recursive, unsigned long long & changed);
     bool StatRemote(const std::vector<std::string> & args);
     bool SetOption(const std::vector<std::string> & args);
     void OpenTerminal(const std::vector<std::string> & args);
@@ -203,13 +271,21 @@ private:
     bool RemoteListDir(const std::string & path, LscpNames *& names, std::string & error);
     void RemoteFreeNames(LscpNames * names);
     int RemoteStat(const std::string & path, LscpAttrs * attrs, std::string & error);
+    /* 'append' adds the source to the end of an existing destination
+     * instead of replacing it; only the native SFTP transport can position
+     * a write, so it is refused elsewhere. */
     int RemoteGet(const std::string & remote, const std::string & local,
         unsigned long long resumeOffset, bool preserveTime, unsigned long long * size,
-        LscpProgressFn progress, void * ctx, std::string & error);
+        LscpProgressFn progress, void * ctx, std::string & error,
+        bool append = false);
     int RemotePut(const std::string & local, const std::string & remote,
         int permissions, unsigned long long resumeOffset, bool preserveTime,
         unsigned long long * size, LscpProgressFn progress, void * ctx,
-        std::string & error);
+        std::string & error, bool append = false);
+    /* Gives a remote path the timestamps of its local source (the
+     * directory half of 'put -preservetime=all'). */
+    int RemoteSetTimes(const std::string & path, unsigned long atime,
+        unsigned long mtime, std::string & error);
     /* The same transfers with ASCII line-ending conversion applied
      * around the binary transfer when the mode asks for it. */
     int RemoteGetMode(const std::string & remote, const std::string & local,
@@ -230,6 +306,8 @@ private:
 
 
     SessionOptions mDefaults;
+    /* Script parameters of this run, for the %1% .. %9% expansion. */
+    std::vector<std::string> mParameters;
     Session mSession;
     SessionStore mSessions;
     std::string mRemoteDirectory;
@@ -265,6 +343,8 @@ private:
     int mReconnectSeconds;
     /* 'option synchdelete': the default of 'synchronize -delete'. */
     bool mSyncDeleteDefault;
+    /* '-speed=' of the command being run, in kibibytes per second. */
+    unsigned mSpeedLimit;
     /* True while the -server loop of the graphical client runs: its
      * echo must stay off so the protocol stays readable. */
     bool mServerLoop;

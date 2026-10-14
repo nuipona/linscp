@@ -48,6 +48,23 @@ public:
     void LogTraffic(const void * data, size_t len, bool incoming);
     void CloseLogFile();
 
+    /*
+     * Structured action log ('-xmllog=<file>', the equivalent of the upstream
+     * '/xmllog=' switch). Where the session log above holds the text an
+     * operator reads, this one holds one XML element per event, so that a
+     * program can read back what a script did: every command, its outcome,
+     * every message and every transfer. The file is closed when the client
+     * exits, which is when the root element is written.
+     */
+    bool SetActionLogFile(const std::string & path, std::string & error);
+    void CloseActionLogFile();
+    bool IsActionLogOpen() const { return mActionLog != NULL; }
+    /* One element of the log; 'text' may be empty for a self-closing one. */
+    void LogAction(const std::string & element, const std::string & attributes,
+        const std::string & text = std::string());
+    /* Escapes one value of an attribute of 'attributes' above. */
+    static std::string EscapeActionText(const std::string & text);
+
     /* Progress display of a transfer. */
     void TransferStart(const std::string & fileName, uint64_t totalSize);
     void TransferProgress(uint64_t transferred);
@@ -62,6 +79,8 @@ private:
     bool mBatchMode;
     bool mVerbose;
     FILE * mLog;
+    FILE * mActionLog;
+    std::string mTransferName;
     uint64_t mTransferSize;
     unsigned long long mLastPermille;
 };

@@ -82,6 +82,42 @@ Positive connection timeout in seconds. The default is 15 seconds.
 Write the session log to
 .IR file .
 .TP
+.BI \-xmllog= file
+Write an XML action log of the run to
+.IR file :
+a
+.B log_session
+document holding one
+.BR command ", " result ", " message ", " session " and " transfer
+element for every line executed, its outcome, everything printed, the site
+connected to and each file transferred, in the order they happened. A password
+appearing in a site URL or in a
+.BI \-password=
+switch is masked before it is written, also under
+.BR "option echo on" .
+.TP
+.BI \-parameter " value ..."
+Script parameters of a
+.BI \-script=
+or
+.BI \-command=
+run, referred to from the commands as
+.BI %1%
+through
+.BI %9% .
+A bare
+.BI \-parameter
+takes every remaining argument;
+.BI \-parameter= value
+adds one. Parameters, the
+.BI %TIMESTAMP%
+placeholder and
+.BI %NAME%
+environment variables are expanded on script and interactive lines before the
+command is dispatched, in single quotes they are not, and input read by
+.BI \-server
+is not expanded at all.
+.TP
 .B \-batch
 Never ask a question. Operations that require an answer fail instead. To
 disable overwrite and delete confirmations in a trusted automation script,
@@ -176,6 +212,21 @@ A password is only stored when
 is given to
 .BR savesession .
 .SH COMMANDS
+A command name, an
+.B option
+name and the values of the options that have a fixed vocabulary may be
+abbreviated to any prefix that identifies one of them:
+.B synch
+is
+.BR synchronize ,
+.B "option bat cont"
+is
+.BR "option batch continue" .
+An abbreviation of
+.B option
+or of a command that fits several names is refused and answered with the list
+of what it could mean, because guessing would run a different command than the
+one that was typed.
 .TP
 .BI open " site"
 Connect to
@@ -219,8 +270,22 @@ Optional switches include
 .BR \-resume " (resume interrupted transfers at target offset),"
 .BR \-delete " (remove remote source after transfer),"
 .BR \-neweronly " (skip files that are not newer than the target),"
+.BR \-noneweronly " (copy regardless of their dates, the default),"
+.BR \-append " (add to the end of the target instead of replacing it),"
+.BR \-speed= KB " (limit the transfer to that many kilobytes per second, 0 for"
+no limit),
+.BR \-resumesupport= on|off|KB "( (whether, and from what size, an"
+interrupted file is continued instead of restarted),
 and
-.BR \-preservetime " (preserve timestamps)."
+.BR \-preservetime " / " \-preservetime=all " (keep the timestamps;"
+with
+.I =all
+those of directories too).
+.B \-append
+and
+.B \-resume
+cannot be combined, and both need the native SFTP transport: they are refused
+rather than silently turning into an overwrite.
 When omitted,
 .I local
 defaults to the current local directory.
@@ -231,9 +296,17 @@ Optional switches include
 .BR \-r " (recursive directory upload),"
 .BR \-resume " (resume interrupted transfers at target offset),"
 .BR \-delete " (remove local source after transfer),"
-.BR \-neweronly " (skip files that are not newer than the target),"
+.BR \-neweronly " and " \-noneweronly ","
+.BR \-append " (add to the end of the remote file),"
+.BR \-speed= KB ","
+.BR \-resumesupport= on|off|KB ","
+.BR \-preservetime " / " \-preservetime=all ","
 and
-.BR \-preservetime " (preserve timestamps)."
+.BR \-permissions= mode " / " \-nopermissions " (set or keep the"
+permissions of the uploaded file).
+The
+.BR \-append " and " \-resume
+switches need the native SFTP transport and exclude each other.
 When omitted,
 .I remote
 defaults to the current remote directory.
@@ -363,8 +436,37 @@ Create a remote directory.
 .BI mv " from to"
 Move or rename a remote file.
 .TP
-.BI chmod " permissions file"
-Change the permissions of a remote file, given in octal.
+.BI chmod " mode file [" file ...] [ \-recursive ]
+Change the permissions of remote files. The mode is octal
+.RB ( 644 ", " 0700 ", " 1777 )
+or symbolic
+.RB ( u+x ", " go\-w ", " a=r,go\-w " or " u+s ),
+where
+.I X
+means the execute bit only where some execute bit is already set or for a
+directory. With
+.B \-recursive
+everything below a directory is changed as well and symbolic links are left
+alone, so that a recursive run cannot leave the tree. The mode is checked
+before the connection is used, so a typo is reported even when offline.
+.TP
+.BI copyid " [keyfile]"
+Install the public half of the given key file, or of the private key the
+session authenticates with when no file is given, into
+the server's
+.B ~/.ssh/authorized_keys
+of the connected user.
+.B ~/.ssh
+is created with mode 0700 and the file with 0600, and a key that is already
+there is not added a second time. OpenSSH public and private key files and PuTTY
+.B .ppk
+files are read, an encrypted key is asked for its passphrase interactively and
+refused in batch mode, and an
+.B sftp://
+or
+.B scp://
+session is required. Reading a key file is a POSIX\-build capability; the
+Windows build says so instead of doing nothing.
 .TP
 .BI stat " file"
 Print the attributes of a remote file: path, size, permissions, modification
@@ -503,7 +605,10 @@ linuxscp \-gui
 LinuxSCP does not implement full WinSCP feature parity. Native POSIX SFTP,
 basic recursive transfers/resume, synchronization, persistent sessions, a
 remote editor and a browser-based graphical interface exist. Other protocols
-use curl and depend on its build capabilities. WebDAV listing is incomplete;
+use curl and depend on its build capabilities: the curl.exe built into Windows
+has no SFTP or SCP support, and an BopenP of such an endpoint then fails
+with that statement rather than reporting a session that cannot transfer
+anything. WebDAV listing is incomplete;
 authenticated S3 signing/listing is absent. File masks, ASCII conversion,
 retries/reconnect and the .NET API are not implemented.
 .PP

@@ -8,6 +8,7 @@
 #include <climits>
 #include <cerrno>
 #include <string>
+#include <vector>
 
 #include "Console.h"
 #include "PathUtil.h"
@@ -76,6 +77,10 @@ int main(int argc, char ** argv)
     std::string command;
     std::string url;
     std::string logFile;
+    std::string xmlLogFile;
+    /* The script parameters of this run, substituted for %1% .. %9%. */
+    std::vector<std::string> parameters;
+    bool collectingParameters = false;
     bool batch = false;
     bool launchGui = false;
     bool serverMode = false;
@@ -94,7 +99,8 @@ int main(int argc, char ** argv)
         {
             static const char * known[] = {
                 "script=", "command=", "hostkey=", "password=", "privatekey=",
-                "username=", "port=", "timeout=", "log=",
+                "username=", "port=", "timeout=", "log=", "xmllog=",
+                "parameter", "parameters",
                 "batch", "batch=on", "batch=off", "gui", "server", "verbose",
                 "version", "help", "h"
             };
@@ -113,7 +119,23 @@ int main(int argc, char ** argv)
             }
         }
 #endif
-        if (StartsWith(arg, "-script=", &value))
+        if (collectingParameters)
+        {
+            /* WinSCP takes the script parameters after a bare '/parameter';
+             * they are not the site URL, however they look. */
+            parameters.push_back(arg);
+            continue;
+        }
+        if (strcmp(arg, "-parameter") == 0 || strcmp(arg, "--parameter") == 0 ||
+            strcmp(arg, "-parameters") == 0)
+        {
+            collectingParameters = true;
+        }
+        else if (StartsWith(arg, "-parameter=", &value))
+        {
+            parameters.push_back(value);
+        }
+        else if (StartsWith(arg, "-script=", &value))
         {
             scriptSpecified = true;
             scriptFile = linuxscp::ExpandTilde(value);
@@ -160,6 +182,10 @@ int main(int argc, char ** argv)
         else if (StartsWith(arg, "-log=", &value))
         {
             logFile = linuxscp::ExpandTilde(value);
+        }
+        else if (StartsWith(arg, "-xmllog=", &value))
+        {
+            xmlLogFile = linuxscp::ExpandTilde(value);
         }
         else if (strcmp(arg, "-batch") == 0 || strcmp(arg, "-batch=on") == 0)
         {
@@ -274,6 +300,16 @@ int main(int argc, char ** argv)
             return 1;
         }
     }
+    if (!xmlLogFile.empty())
+    {
+        std::string error;
+        if (!console.SetActionLogFile(xmlLogFile, error))
+        {
+            console.Error("Cannot open the XML log file '" + xmlLogFile + "': " +
+                error);
+            return 1;
+        }
+    }
 
     console.SetBatchMode(batch);
     console.SetVerbose(options.verbose);
@@ -289,6 +325,7 @@ int main(int argc, char ** argv)
 
     linuxscp::Script script;
     script.SetDefaults(options);
+    script.SetScriptParameters(parameters);
 
     int result;
     if (serverMode)

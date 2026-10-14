@@ -147,6 +147,7 @@ APP_SRCS := \
 	ProtocolClient.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
+	ScriptParams.cpp \
 	SyncPlanner.cpp \
 	Editor.cpp \
 	Console.cpp \
@@ -209,6 +210,13 @@ $(BINDIR)/unittest: $(TEST_OBJS) $(APP_LIB_OBJS) $(PUTTY_LIB)
 
 check: $(BINDIR)/unittest
 	$(BINDIR)/unittest
+
+# Transfers against the SFTP server in tests/, which needs paramiko and skips
+# itself without it. Separate from 'check' because it starts a server and
+# takes seconds rather than milliseconds.
+check-live: $(BINDIR)/linuxscp
+	python3 tests/ScriptTest.py $(BINDIR)/linuxscp
+	python3 tests/LiveSftpTest.py $(BINDIR)/linuxscp
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)

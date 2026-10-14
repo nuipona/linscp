@@ -2,6 +2,7 @@
 
 #include "Console.h"
 #include "PathUtil.h"
+#include "ProtocolClient.h"
 #include "SftpClient.h"
 #include "Texts.h"
 
@@ -926,6 +927,18 @@ bool Session::Open(const SessionOptions & options, std::string & error)
         if (options.hostName.empty())
         {
             error = "No host name was specified.";
+            return false;
+        }
+        /*
+         * Nothing here proves the host is there, so ask it once, now: an
+         * 'open' of a dead port or a misspelled host has to fail here, as a
+         * real connection does, and not turn into a puzzle for the first
+         * command. Only an endpoint that cannot be reached counts against
+         * us; a directory the server refuses to list is the command's
+         * business.
+         */
+        if (!ProtocolClient::CheckEndpoint(options, options.initialDirectory, error))
+        {
             return false;
         }
         Close();

@@ -49,6 +49,7 @@ set(FRONTEND_SOURCES
   ${FRONTEND}/Editor.cpp
   ${FRONTEND}/ProtocolClient.cpp
   ${FRONTEND}/Script.cpp
+  ${FRONTEND}/ScriptParams.cpp
   ${FRONTEND}/Console.cpp
   ${FRONTEND}/LocalFs.cpp
   ${FRONTEND}/PathUtil.cpp
@@ -98,6 +99,11 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME script-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/ScriptTest.py
+    $<TARGET_FILE:linuxscp>)
+  # Skips itself where paramiko is not installed, so a plain C++ build is
+  # never held up by a missing Python dependency.
+  add_test(NAME live-sftp-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveSftpTest.py
     $<TARGET_FILE:linuxscp>)
   add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)

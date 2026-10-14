@@ -25,7 +25,7 @@ SSH library is required for native POSIX SFTP.
 On Windows: Windows 10 (1803) or later with CMake and Visual Studio
 2022 or MinGW-w64. The resulting `linuxscp.exe` needs a protocol-capable
 `curl.exe` at run time (plus Python 3 for the GUI). The in-box curl build
-may not provide SSH protocols. See
+has no SFTP or SCP support, so `open sftp://` reports that instead of starting a session that cannot transfer; a `curl.exe` whose `curl --version` output lists `SSH` is what makes SFTP usable there. See
 [`docs/windows.md`](docs/windows.md).
 
 ## Building
@@ -62,9 +62,12 @@ browser-based dual-pane Commander interface (`linuxscp-gui`).
 Protocol URL acceptance is not proof of complete support: WebDAV directory
 listing is incomplete, and authenticated Amazon S3 (signing and bucket/object
 listing) is not implemented. Windows SSH protocols depend on the installed
-curl build. ASCII transfers, WinSCP file masks, reconnect settings, persistent
-multi-session management, the remote editor and the .NET automation API are
-among the remaining gaps.
+curl build. Scripting covers the WinSCP transfer switches (file masks,
+`-transfer=`, `-resume`, `-append`, `-speed=`, `-resumesupport=`,
+`-preservetime`), unambiguous command and option abbreviations, script
+parameters with `%TIMESTAMP%` and environment expansion, and an XML action
+log; the .NET assembly and PowerShell automation APIs, transfer presets,
+session folder trees and encrypted stored passwords remain open gaps.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 for the pinned upstream baseline, command inventory, limitations and tests.

@@ -54,6 +54,16 @@ std::string PreparePrivateKeyFile(const std::string & keyFile,
 /* Removes the converted key file, if one was created. */
 void DiscardImportedPrivateKeyFile();
 
+/*
+ * Formats the public half of 'keyFile' as one 'authorized_keys' line
+ * ('algorithm base64-blob comment'), for the 'copyid' command. A PuTTY
+ * private or public key file, an OpenSSH public key and an OpenSSH private
+ * key are all accepted. Returns false with 'error' set when the file holds
+ * no usable SSH-2 public key.
+ */
+bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
+    std::string & error);
+
 } /* namespace linuxscp */
 
 #endif /* LINUXSCP_PUTTYCOMPAT_H */

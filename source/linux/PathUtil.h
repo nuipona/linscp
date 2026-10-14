@@ -36,6 +36,9 @@ std::string JoinRemotePath(const std::string & dir, const std::string & name);
 /* Resolves '.'/'..' components and relative paths against cwd. */
 std::string ResolveRemotePath(const std::string & cwd, const std::string & path);
 
+/* Leading and trailing whitespace removed; false when nothing is left. */
+bool TrimString(const std::string & text, std::string & result);
+
 /* Local paths. */
 std::string ExpandTilde(const std::string & path);
 /* True for '/...' on POSIX; on Windows also for drive-absolute
@@ -59,6 +62,25 @@ bool MatchesMaskInsensitive(const std::string & mask, const std::string & name);
 std::string FormatSize(uint64_t size);
 std::string FormatPermissions(unsigned long permissions);
 std::string FormatFileTime(unsigned long time);
+
+/*
+ * Permission parsing, for 'chmod' and for '-permissions='. The values are
+ * 'unsigned long' rather than mode_t on purpose: they come from and go to a
+ * server, which carries the twelve permission bits plus the file type bits,
+ * and mode_t is only sixteen bits wide on Windows.
+ */
+
+/* A WinSCP-style octal permission value: '600', '0600', '00600'. */
+bool ParseOctalMode(const std::string & text, unsigned long & result);
+
+/* A symbolic permission expression ('u+x', 'go-w', 'a=r,u+s') applied to
+ * 'current'; see the comment in PathUtil.cpp for the accepted grammar. */
+bool ParseSymbolicPermissions(const std::string & text, unsigned long current,
+    bool isDirectory, unsigned long & result, std::string & error);
+
+/* An octal mode or a symbolic expression, as 'chmod' accepts them. */
+bool ParsePermissions(const std::string & text, unsigned long current,
+    bool isDirectory, unsigned long & result, std::string & error);
 
 } // namespace linuxscp
 

@@ -11,9 +11,44 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build and run unit tests
-        run: make -C source/linux clean all check
+        run: |
+          set -o pipefail
+          make -C source/linux clean all check 2>&1 |
+            tee "$RUNNER_TEMP/unit-tests.log"
+          # The evidence line is repeated as an annotation, where the API
+          # serves it: 'checks passed' on its own does not say what was
+          # skipped, and a suite that quietly did less is the failure mode
+          # this repository is guarding against.
+          grep -E '^evidence: |checks passed' "$RUNNER_TEMP/unit-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Script compatibility regressions
-        run: python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
+        run: |
+          set -o pipefail
+          python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/script-tests.log"
+          grep '^evidence: ' "$RUNNER_TEMP/script-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
+      - name: Live SFTP regressions
+        run: |
+          # The live suite needs a server; paramiko goes in a venv because
+          # the runner's system Python is externally managed. Without it the
+          # suite skips, which is why the skip count is printed.
+          set -o pipefail
+          python3 -m venv "$RUNNER_TEMP/live-test-venv"
+          "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko
+          "$RUNNER_TEMP/live-test-venv/bin/python" \
+            -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/live-tests.log"
+          grep -E 'evidence: suite=live-sftp .*ran=[1-9]' \
+            "$RUNNER_TEMP/live-tests.log" > /dev/null || {
+            echo "::error::the live SFTP suite ran no tests"
+            exit 1
+          }
+          grep '^evidence: ' "$RUNNER_TEMP/live-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Validate upstream gap inventory (not full parity)
         run: |
           python3 tools/check_upstream_parity.py
@@ -79,14 +114,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure and build
+        shell: pwsh
         run: |
-          cmake -S . -B build-windows -A x64
-          cmake --build build-windows --config Release
+          $log = Join-Path $env:RUNNER_TEMP "msvc-build.log"
+          # Pin the interpreter CMake hands to CTest. Without this,
+          # find_package(Python3) picks another installation than the
+          # 'python' on PATH, the test dependencies land in the wrong
+          # site-packages, and the suites that need them skip themselves.
+          $python = (Get-Command python).Source
+          Write-Host "Tests will run under $python"
+          cmake -S . -B build-windows -A x64 "-DPython3_EXECUTABLE=$python" 2>&1 |
+            Tee-Object -FilePath $log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cmake --build build-windows --config Release 2>&1 |
+            Tee-Object -FilePath $log -Append
+          if ($LASTEXITCODE -ne 0) {
+            # The job log itself lives on a separate host that not every
+            # environment can read, so repeat the compiler diagnostics as
+            # check-run annotations, which the API does serve.
+            $lines = Get-Content $log |
+              Select-String -Pattern 'error', 'fatal', 'LNK[0-9]', 'C[0-9]{4}' |
+              ForEach-Object { $_.Line.Trim() } | Select-Object -Unique -First 12
+            if (-not $lines) { $lines = Get-Content $log | Select-Object -Last 10 }
+            foreach ($line in $lines) {
+              # % and ] carry meaning inside a workflow command, so a
+              # compiler message containing one would truncate the
+              # annotation; escape both.
+              $escaped = $line.Replace('%', '%25').Replace(']', '%5D')
+              Write-Host "::error::$escaped"
+            }
+            exit 1
+          }
       - name: Unit tests
         shell: pwsh
         run: |
-          $output = & ctest --test-dir build-windows -C Release --output-on-failure 2>&1 | Out-String
+          # -V rather than --output-on-failure: the evidence lines a suite
+          # prints when it passes are the point of this step, and ctest
+          # swallows the output of tests that do not fail.
+          $output = & ctest --test-dir build-windows -C Release -V 2>&1 | Out-String
           Write-Host $output
+          # What this platform actually proved, as an annotation the API
+          # serves: the skip count included, because the live suite skips the
+          # cases a POSIX host needs and a reader has to be able to tell that
+          # apart from a suite that ran everything.
+          # ctest prefixes every line it echoes with the test number, so the
+          # pattern is unanchored and the prefix is dropped again.
+          $evidence = $output -split "`r?`n" |
+            Where-Object { $_ -match 'evidence: |checks passed' } |
+            ForEach-Object { ($_ -replace '^\s*\d+: ', '').Trim() }
+          if (-not $evidence) {
+            # A run that cannot say what it executed has not established
+            # anything, so it does not get to be green.
+            Write-Host "::error::no suite reported its evidence line: the " +
+              "tests did not run, or their output is not reaching this step"
+            exit 1
+          }
+          foreach ($line in $evidence) {
+            $escaped = $line.Trim().Replace('%', '%25').Replace(']', '%5D')
+            Write-Host "::notice::$escaped"
+          }
           if ($LASTEXITCODE -ne 0) {
             # Repeat the failing checks as annotations: they stay readable in
             # the API (check-run annotations) even when the full job log is
@@ -145,8 +231,23 @@ jobs:
           sudo apt-get install -y g++-mingw-w64-x86-64
       - name: Configure and build
         run: |
-          cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=windows/toolchain-mingw64.cmake
-          cmake --build build-win -j
+          set -o pipefail
+          log="$RUNNER_TEMP/mingw-build.log"
+          {
+            cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=windows/toolchain-mingw64.cmake
+            cmake --build build-win -j
+          } 2>&1 | tee "$log"
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # Repeat the diagnostics as check-run annotations: the plain job
+            # log is hosted separately and is not readable from everywhere.
+            grep -E 'error:|error C[0-9]+|CMake Error|Error [0-9]+|undefined reference|FAILED:|fatal' "$log" |
+              tr -d '\r' | sed 's/%/%25/g' | sort -u | head -12 |
+              while IFS= read -r line; do
+                printf '::error::%s\n' "${line//]/%5D}"
+              done
+            exit "$status"
+          fi
       - name: Check artifacts
         run: |
           test -f build-win/linuxscp.exe
