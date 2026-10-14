@@ -142,11 +142,13 @@ jobs:
           # pass. It has to be installed for the interpreter CTest actually
           # runs the tests with, which is not necessarily 'python' - the
           # runner image has more than one.
-          $cached = cmake -N -LA build-windows |
-            Select-String -Pattern '^Python3_EXECUTABLE:FILEPATH=' |
-            ForEach-Object { $_.Line.Split('=', 2)[1] } | Select-Object -First 1
-          if (-not $cached) { $cached = "python" }
-          Write-Host "Installing paramiko for $cached"
+          # Read the cache itself: 'cmake -LA' prefixes every line with
+          # '-- ', which silently defeated a '^Python3_EXECUTABLE' match and
+          # installed paramiko for the wrong interpreter.
+          $found = Select-String -Path build-windows\CMakeCache.txt -Pattern
+            '^Python3_EXECUTABLE:FILEPATH=(.*)$' | Select-Object -First 1
+          $cached = if ($found) { $found.Matches[0].Groups[1].Value } else { "python" }
+          Write-Host "::notice::live tests will run under $cached"
           & $cached -m pip install --quiet paramiko
           # A non-zero exit from pip does not stop pwsh, and a suite that
           # silently skips is worse than a red step: say so here.
