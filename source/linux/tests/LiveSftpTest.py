@@ -9,6 +9,12 @@ The server is TestSftpServer.py, started per test on a port the kernel picks,
 so a run cannot collide with a server somebody else is using. paramiko is the
 only external requirement and it is optional: without it the whole module
 skips, loudly, rather than pretending to pass.
+
+What cannot be done from another platform says so per test instead of taking
+the whole suite with it, because a run that silently does less is worth more
+than one that does nothing: on Windows the SFTP server and the client both
+work, but SIGINT and read-only directories do not, and a curl-backed transfer
+has no way to set the timestamp of an upload.
 """
 import hashlib
 import importlib.util
@@ -43,9 +49,15 @@ def sha256_of(path):
     return digest.hexdigest()
 
 
+def posix_only(reason):
+    """Marks a test that only this platform can run, with the reason someone
+    reading the skip list of the other one needs."""
+    return unittest.skipIf(os.name != "posix", "POSIX only: " + reason)
+
+
 class LiveSftpTests(unittest.TestCase):
-    """Requires paramiko and a POSIX host: the server and the interrupt
-    signalling are both POSIX."""
+    """Requires paramiko; individual tests additionally require a POSIX
+    host, and say which of the two is missing when they skip."""
 
     @classmethod
     def setUpClass(cls):
@@ -53,8 +65,6 @@ class LiveSftpTests(unittest.TestCase):
             raise unittest.SkipTest(
                 "paramiko is not installed; the live SFTP tests are skipped. "
                 "Install it with 'pip install paramiko' to run them.")
-        if os.name != "posix":
-            raise unittest.SkipTest("the test server is POSIX only")
         cls.workdir = tempfile.TemporaryDirectory(prefix="linuxscp-live-")
         cls.root = pathlib.Path(cls.workdir.name) / "jail"
         cls.root.mkdir()
@@ -73,10 +83,14 @@ class LiveSftpTests(unittest.TestCase):
     # -- the server ---------------------------------------------------------
     def start_server(self):
         env = dict(os.environ, LSCP_TEST_ROOT=str(self.root), LSCP_TEST_PORT="0")
+        popen_args = dict(env=env, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, text=True)
+        if os.name == "posix":
+            # Its own process group, so that tearDown can stop the server and
+            # anything it left behind without touching the test runner.
+            popen_args["start_new_session"] = True
         self.server = subprocess.Popen(
-            [sys.executable, str(HERE / "TestSftpServer.py")], env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            start_new_session=True)
+            [sys.executable, str(HERE / "TestSftpServer.py")], **popen_args)
         self.port = None
         timer = threading.Timer(30.0, self.server.kill)
         timer.start()
@@ -91,15 +105,19 @@ class LiveSftpTests(unittest.TestCase):
             self.stop_server()
             self.fail("the test SFTP server did not start")
 
-    def stop_server(self):
+    def stop_server(self, force=False):
         server = getattr(self, "server", None)
         if server is not None:
             if server.poll() is None:
-                os.killpg(os.getpgid(server.pid), signal.SIGTERM)
+                if os.name == "posix" and not force:
+                    os.killpg(os.getpgid(server.pid), signal.SIGTERM)
+                else:
+                    (server.kill if force else server.terminate)()
                 try:
                     server.wait(timeout=10)
                 except subprocess.TimeoutExpired:
                     server.kill()
+                    server.wait(timeout=10)
             if server.stdout is not None:
                 server.stdout.close()
         self.server = None
@@ -159,6 +177,7 @@ class LiveSftpTests(unittest.TestCase):
         combined = (result.stdout + result.stderr).lower()
         self.assertIn("host key", combined)
 
+    @posix_only("write protection of a directory is not a mode bit elsewhere")
     def test_operations_the_server_refuses_are_reported(self):
         """A denied transfer or removal has to fail the command, not quietly
         produce nothing."""
@@ -185,6 +204,7 @@ class LiveSftpTests(unittest.TestCase):
         finally:
             os.chmod(locked, 0o700)
 
+    @posix_only("Ctrl-C is delivered as a signal")
     def test_interrupted_get_can_be_resumed_and_the_file_is_intact(self):
         """Ctrl-C in the middle of a download must leave a partial file that
         'get -resume' completes byte for byte - and must not touch the
@@ -204,8 +224,10 @@ class LiveSftpTests(unittest.TestCase):
         else:
             self.fail("the download never got far enough to interrupt")
         client.send_signal(signal.SIGINT)
-        client.wait(timeout=60)
-        self.assertNotEqual(client.returncode, 0)
+        # Drain the pipes rather than just waiting: an interrupt has to be
+        # reported, and the child has to be reaped with its output read.
+        self.assertNotEqual(client.wait(timeout=60), 0)
+        client.communicate(timeout=60)
         partial = target.stat().st_size
         self.assertLess(partial, source.stat().st_size)
         self.assertEqual(sha256_of(source), digest)
@@ -230,8 +252,7 @@ class LiveSftpTests(unittest.TestCase):
                 break
             time.sleep(0.05)
         # The server dies under the transfer, which is not a graceful close.
-        os.killpg(os.getpgid(self.server.pid), signal.SIGKILL)
-        self.server.wait(timeout=30)
+        self.stop_server(force=True)
         result = client.communicate(timeout=90)
         self.assertNotEqual(client.returncode, 0)
         partial = target.stat().st_size
@@ -248,6 +269,7 @@ class LiveSftpTests(unittest.TestCase):
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 
+    @posix_only("curl cannot set the modification time of an upload")
     def test_timestamps_survive_in_both_directions(self):
         """'-preservetime' means the server time and the local time agree
         after a transfer, whichever way the bytes went - which only a real

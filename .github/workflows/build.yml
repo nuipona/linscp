@@ -112,6 +112,15 @@ jobs:
             }
             exit 1
           }
+      - name: Install the live-test dependencies
+        shell: pwsh
+        run: |
+          # The live SFTP suite brings up its own paramiko server, which is
+          # the only way this job can see a transfer rather than a usage
+          # message. Without paramiko the suite skips itself; it does not
+          # pass.
+          python -m pip install --quiet paramiko
+          python -c "import paramiko; print('paramiko', paramiko.__version__)"
       - name: Unit tests
         shell: pwsh
         run: |
