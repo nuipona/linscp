@@ -29,8 +29,37 @@ are not mistaken for upstream coverage. `partial` means some implementation
 exists, not that every variant works. `missing` includes commands recognized
 only to print an unsupported error.
 
-No entry is certified `verified` yet: the checks below run on Linux only, and
-`verified` would need the same evidence on every supported platform.
+### What counts as evidence
+
+`docs/upstream-parity.json` carries a `verification` block, and it is the
+reason a status in this file means something. It lists the platforms LinuxSCP
+ships on, and for each one: the command that produces the evidence, the test
+suites that exist there and what each can see, and - for Windows - what it
+cannot see at all. An entry then records its own `verified_on`: a map from
+platform to the suites that checked it.
+
+The rules are enforced by `tools/check_upstream_parity.py`, which fails the
+build on any of them:
+
+* `verified` requires an entry in `verified_on` for **every** platform in the
+  ledger. Evidence from one host is a claim about that host.
+* A suite can only be cited on a platform that has it, so `manual` evidence -
+  the checks listed under that key, with the commands to repeat them - cannot
+  be borrowed for another platform, and cannot be cited for Windows at all.
+* A platform record without a `how`, a dated `date` and described suites is an
+  error, because evidence nobody can reproduce is not evidence.
+
+As it stands: 21 entries have evidence recorded on Linux, 14 on Windows, and
+**0 are `verified`**. The gap is not timidity - Windows has no way to test the
+native PuTTY transport, permissions on uploads, or a POSIX server's path
+semantics, and the ledger says so per entry instead of rounding the whole
+inventory down to `partial`.
+
+The count is not taken on trust either. Each test suite prints one line when
+it finishes - `evidence: suite=live-sftp platform=linux ran=6 skipped=0
+failed=0` - and the CI jobs repeat it as an annotation on the run. A suite that
+could not run because `paramiko` is missing shows up as `skipped=6`, which is
+the case a green check mark used to hide.
 
 `edit`, `savesession`, `rmsession`, `sessions`, `show` and the extra aliases
 `del`, `md`, `sync`, `quit` and `end` are in that second list. `edit` in
@@ -41,12 +70,12 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 
 | Area | Current implementation and remaining work |
 | --- | --- |
-| SFTP | Native PuTTY on POSIX, curl on Windows. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Remaining: metadata policies and Windows-side equivalence. |
+| SFTP | Native PuTTY on POSIX, curl on Windows. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Remaining: metadata policies, and the native transport, which has no Windows side to verify. |
 | SCP | curl-dependent transfer path, not WinSCP's remote-shell filesystem engine. Listing and directory operations need a real SCP implementation. |
 | FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
 | WebDAV | HTTP operations exist, but listing does not implement DAV PROPFIND/XML properties. Not a complete WebDAV filesystem. |
 | S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
-| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server. Missing: transfer presets, the `.filepart` temporary-name policy and atomic temporary-file policies in general. |
+| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py` (the resume and open cases run on Windows too, through curl). Missing: transfer presets, the `.filepart` temporary-name policy and atomic temporary-file policies in general. |
 | Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror` and ASCII conversion verified against a live server. Missing: path exclusions and a real watch mode: `keepuptodate` still repeats a full comparison on a timer. |
 | Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
 | Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
@@ -135,10 +164,16 @@ filter just to make a transfer proceed.
 ## Reproduce the checks
 
 ```sh
-make -C source/linux all check
-python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
-python3 tools/check_upstream_parity.py
+make -C source/linux all check           # the C++ checks, no I/O
+make -C source/linux check-live          # ScriptTest.py + LiveSftpTest.py
+python3 tools/check_upstream_parity.py   # the inventory and its evidence rules
 ```
+
+On Windows the same three run through CTest (`ctest --test-dir build -C
+Release` after `cmake --build build --config Release`); the live suite needs
+`python -m pip install paramiko`, and its POSIX-only cases skip themselves with
+the reason in the skip message rather than taking the whole suite down with
+them.
 
 The inventory check compares three things: every documented command has a
 dispatcher entry, every dispatched command is in the abbreviation table
@@ -146,20 +181,35 @@ dispatcher entry, every dispatched command is in the abbreviation table
 command that then reports 'Unknown command'), and every entry has a status and
 an explanation. It does not test behavior.
 
-An optional live check runs an in-process SFTP server (Python `paramiko`,
-`pip install --user paramiko`) and exercises `cd`/`ls` masks, `cp`, `ln`,
-`checksum`, `call`, `mv`, `rmdir`, `rm -onlyfile`, ASCII transfers,
-`synchronize -mirror -transfer=`, `chmod` (octal, symbolic and `-recursive`),
-`copyid`, `-speed=` (timed), `-append`, `-resumesupport=` and
-`-preservetime[=all]` against a real connection. The harness implements
-`chattr` for `SETSTAT` - paramiko routes that request there, not to
-`setstat` - which is what makes `chmod` and the timestamp handling testable
-against it at all:
+`source/linux/tests/LiveSftpTest.py` is the automated half: it starts
+`TestSftpServer.py` (Python `paramiko`, `pip install paramiko`) on a port the
+kernel picks, in a jail of its own, and covers what a server-free test cannot:
+an open with the wrong password, an open with a pinned host key that does not
+match, `put`/`rm`/`mkdir` into a directory the server will not let us write, a
+download interrupted by Ctrl-C and its `get -resume`, a transfer whose server
+dies under it and the same resume against a restarted server, and
+`-preservetime` in both directions.
+
+The server itself is a plain filesystem-backed SFTP + exec endpoint (user
+`testuser`, `LSCP_TEST_ROOT` as the visible root) that implements `chattr` for
+`SETSTAT` - paramiko routes that request there, not to `setstat`, which is what
+makes `chmod` and the timestamp handling testable against it at all. Run it by
+hand the same way when a case is not automated yet:
 
 ```sh
-python3 source/linux/tests/TestSftpServer.py &   # listens on 127.0.0.1:12765
-# testuser/testpass, /tmp/lscp-sftp-root as the visible root
+LSCP_TEST_ROOT=/tmp/lscp-sftp-root python3 source/linux/tests/TestSftpServer.py &
+# prints "READY <port>"; testuser/testpass
+source/linux/build/linuxscp -batch -hostkey='*' \
+  -command="open sftp://testuser:testpass@127.0.0.1:12765/ ; chmod 750 -recursive ptree"
 ```
+
+What only that hand-run covers so far - and is recorded as `manual` evidence in
+the ledger, on Linux only: `cd`/`ls` masks, `cp`, `ln`, `checksum`, `call`,
+`mv`, `rmdir`, `rm -onlyfile`, ASCII transfers, `synchronize -mirror
+-transfer=`, `chmod` (octal, symbolic and `-recursive`), `copyid`, `-speed=`
+(timed), `-append`, `-resumesupport=` and `-preservetime[=all]` on directories.
+Automating those is the cheapest way to turn entries in this table into entries
+with evidence.
 
 The Python CLI regression suite exercises default/explicit batch policies,
 file and command input, alias routing, local listing, binary mode, rejected
@@ -188,8 +238,10 @@ validates statuses; it does not download upstream or test behavior.
 
 `python3 tools/check_upstream_parity.py --require-full` is an opt-in release gate
 and **currently fails**, because gaps remain. A green inventory check must
-never be advertised as full parity. A future `verified` status needs reproducible
-behavioral evidence on each supported platform, not merely a dispatcher entry.
+never be advertised as full parity. `verified` is no longer a word anyone can
+add to the inventory: it needs an entry in `verified_on` for every platform,
+citing suites that exist there, and the entries it would cite have to be able
+to say what those suites proved.
 
 ## Prioritized completion plan
 
