@@ -35,6 +35,15 @@ namespace linuxscp {
 
 namespace {
 
+/* Upstream's PartialExt: the staging name a resume-capable transfer
+ * writes to until the file is complete. */
+const char * const kPartialExt = ".filepart";
+
+/* Upstream's default resume threshold (CopyParam: 100 KB): with
+ * 'option resume' at its default 'automatic', a binary file of at least
+ * this size is transferred through '.filepart' and can be continued. */
+const unsigned long long kDefaultResumeThreshold = 100ull * 1024;
+
 std::string ToLower(const std::string & text)
 {
     std::string result = text;
@@ -321,7 +330,7 @@ Script::Script() :
     mBatchMode(Console::Instance().IsBatchMode() ? BatchMode::Abort : BatchMode::Off),
     mBatchConfigured(false),
     mConfirm(true),
-    mResume(false),
+    mResumeMode(ResumeMode::Automatic),
     mExit(false),
     mErrors(0),
     mLastCommandFailed(false),
@@ -543,17 +552,41 @@ int Script::RemoteSetTimes(const std::string & path, unsigned long atime,
 
 /* Download/Upload with the plan's transfer mode: 'ascii'/'automatic'
  * convert the line endings around the binary transfer, exactly like
- * get/put do. */
+ * get/put do. The transfer stages through '.filepart' when the mode does
+ * not convert and the persistent 'option resume' setting allows it -
+ * 'on' always, 'automatic' from upstream's default 100 KB threshold. */
 int Script::RemoteGetMode(const std::string & remote, const std::string & local,
-    TransferMode mode, unsigned long long * size, std::string & error)
+    TransferMode mode, unsigned long long sourceSize,
+    unsigned long long * size, std::string & error)
 {
-    const int result = RemoteGet(remote, local, 0, true, size,
-        ProgressCallback, NULL, error);
+    const bool converts = WantsAsciiConversion(mode, RemoteFileName(remote));
+    const bool eligible = !converts &&
+        (mResumeMode == ResumeMode::On ||
+         (mResumeMode == ResumeMode::Automatic &&
+          sourceSize >= kDefaultResumeThreshold));
+    TransferStage stage;
+    if (!ResolveStage(eligible, false, local, sourceSize, stage, error))
+    {
+        return -1;
+    }
+    int result = 0;
+    if (stage.complete)
+    {
+        if (size != NULL)
+        {
+            *size = sourceSize;
+        }
+    }
+    else
+    {
+        result = RemoteGet(remote, stage.partPath, stage.resumeOffset, true, size,
+            ProgressCallback, NULL, error);
+    }
     if (result != 0)
     {
         return result;
     }
-    if (WantsAsciiConversion(mode, RemoteFileName(remote)))
+    if (converts)
     {
         unsigned long long converted = 0;
         if (!ConvertToUnixLineEndings(local, converted, error))
@@ -565,16 +598,49 @@ int Script::RemoteGetMode(const std::string & remote, const std::string & local,
             *size = converted;
         }
     }
+    if (!FinishStage(stage, error))
+    {
+        return -1;
+    }
     return 0;
 }
 
 int Script::RemotePutMode(const std::string & local, const std::string & remote,
-    TransferMode mode, unsigned long long * size, std::string & error)
+    TransferMode mode, unsigned long long sourceSize,
+    unsigned long long * size, std::string & error)
 {
     if (!WantsAsciiConversion(mode, LocalFileName(local)))
     {
-        return RemotePut(local, remote, -1, 0, true, size,
-            ProgressCallback, NULL, error);
+        const bool eligible = mResumeMode == ResumeMode::On ||
+            (mResumeMode == ResumeMode::Automatic &&
+             sourceSize >= kDefaultResumeThreshold);
+        TransferStage stage;
+        if (!ResolveStage(eligible, true, remote, sourceSize, stage, error))
+        {
+            return -1;
+        }
+        int result = 0;
+        if (stage.complete)
+        {
+            if (size != NULL)
+            {
+                *size = sourceSize;
+            }
+        }
+        else
+        {
+            result = RemotePut(local, stage.partPath, -1, stage.resumeOffset, true,
+                size, ProgressCallback, NULL, error);
+        }
+        if (result != 0)
+        {
+            return result;
+        }
+        if (!FinishStage(stage, error))
+        {
+            return -1;
+        }
+        return 0;
     }
     std::string tempPath;
     if (!MakeCRLFUploadCopy(local, tempPath, error))
@@ -1328,7 +1394,25 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             {
                 continue;
             }
-            if (mConfirm && localInfo.exists)
+            unsigned long long size = 0;
+            unsigned long long totalSize = (names->names[i].attrs.flags & LSCP_ATTR_SIZE) != 0 ?
+                names->names[i].attrs.size : 0;
+            TransferStage stage;
+            if (!ResolveStage(!flags.append && Resumes(flags, totalSize), false,
+                    childLocal, totalSize, stage, dirErr))
+            {
+                Console::Instance().Error(Texts::LocalError(
+                    "inspect the destination of", childLocal, dirErr));
+                mErrors++;
+                success = false;
+                if (AbortAfterFileError())
+                {
+                    RemoteFreeNames(names);
+                    return false;
+                }
+                continue;
+            }
+            if (mConfirm && localInfo.exists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite local file '" + childLocal + "'?");
@@ -1341,13 +1425,32 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
                     continue;
                 }
             }
+            if (!PrepareStage(stage, dirErr))
+            {
+                Console::Instance().Error(Texts::LocalError(
+                    "prepare the destination for", childLocal, dirErr));
+                mErrors++;
+                success = false;
+                if (AbortAfterFileError())
+                {
+                    RemoteFreeNames(names);
+                    return false;
+                }
+                continue;
+            }
 
-            unsigned long long size = 0;
-            unsigned long long totalSize = (names->names[i].attrs.flags & LSCP_ATTR_SIZE) != 0 ?
-                names->names[i].attrs.size : 0;
             Console::Instance().TransferStart(name, totalSize);
-            int result = RemoteGet(childRemote, childLocal, 0, flags.preserveTime,
-                &size, ProgressCallback, NULL, dirErr, flags.append);
+            int result = 0;
+            if (stage.complete)
+            {
+                size = totalSize;
+            }
+            else
+            {
+                result = RemoteGet(childRemote, stage.partPath, stage.resumeOffset,
+                    flags.preserveTime, &size, ProgressCallback, NULL, dirErr,
+                    flags.append);
+            }
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
@@ -1364,7 +1467,7 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             if (WantsAsciiConversion(flags.transferMode, name))
             {
                 unsigned long long converted = 0;
-                if (!ConvertToUnixLineEndings(childLocal, converted, dirErr))
+                if (!ConvertToUnixLineEndings(stage.partPath, converted, dirErr))
                 {
                     Console::Instance().Error(Texts::LocalError(
                         "convert the line endings of", childLocal, dirErr));
@@ -1379,13 +1482,25 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
                 }
                 size = converted;
             }
-            bytesTransferred += size;
-            Console::Instance().Status(Texts::FileTransferred(childLocal, size));
             if (flags.preserveTime && (names->names[i].attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
             {
-                SetFileTimes(childLocal, names->names[i].attrs.atime,
+                SetFileTimes(stage.partPath, names->names[i].attrs.atime,
                     names->names[i].attrs.mtime);
             }
+            if (!FinishStage(stage, dirErr))
+            {
+                Console::Instance().Error(dirErr);
+                mErrors++;
+                success = false;
+                if (AbortAfterFileError())
+                {
+                    RemoteFreeNames(names);
+                    return false;
+                }
+                continue;
+            }
+            bytesTransferred += size;
+            Console::Instance().Status(Texts::FileTransferred(childLocal, size));
             if (flags.deleteSource)
             {
                 RemoteRemove(childRemote, dirErr);
@@ -1522,7 +1637,21 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
             {
                 continue;
             }
-            if (mConfirm && remoteExists)
+            TransferStage stage;
+            if (!ResolveStage(!flags.append && Resumes(flags, info.size), true,
+                    childRemote, info.size, stage, error))
+            {
+                Console::Instance().Error(Texts::RemoteError(
+                    "inspect the destination of", childRemote, error));
+                mErrors++;
+                success = false;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (mConfirm && remoteExists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite remote file '" + childRemote + "'?");
@@ -1534,6 +1663,18 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
                     }
                     continue;
                 }
+            }
+            if (!PrepareStage(stage, error))
+            {
+                Console::Instance().Error(Texts::RemoteError(
+                    "prepare the destination for", childRemote, error));
+                mErrors++;
+                success = false;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
             }
 
             unsigned long long size = 0;
@@ -1556,9 +1697,17 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
                 uploadPath = asciiTemp;
             }
             Console::Instance().TransferStart(name, info.size);
-            int result = RemotePut(uploadPath, childRemote, flags.permissions, 0,
-                flags.preserveTime, &size, ProgressCallback, NULL, error,
-                flags.append);
+            int result = 0;
+            if (stage.complete)
+            {
+                size = info.size;
+            }
+            else
+            {
+                result = RemotePut(uploadPath, stage.partPath, flags.permissions,
+                    stage.resumeOffset, flags.preserveTime, &size,
+                    ProgressCallback, NULL, error, flags.append);
+            }
             Console::Instance().TransferEnd(result == 0);
             if (!asciiTemp.empty())
             {
@@ -1567,6 +1716,17 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
             if (result != 0)
             {
                 Console::Instance().Error(Texts::TransferFailed(childLocal, error));
+                mErrors++;
+                success = false;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (!FinishStage(stage, error))
+            {
+                Console::Instance().Error(error);
                 mErrors++;
                 success = false;
                 if (AbortAfterFileError())
@@ -1719,6 +1879,16 @@ const std::vector<std::string> & ToggleNames()
     return names;
 }
 
+/* The values of 'option resume', the persistent setting: 'automatic' is
+ * upstream's default (resume binary files from a threshold on). */
+const std::vector<std::string> & ResumeModeNames()
+{
+    static const std::vector<std::string> names = {
+        "off", "on", "automatic"
+    };
+    return names;
+}
+
 const std::vector<std::string> & BatchModeNames()
 {
     static const std::vector<std::string> names = {
@@ -1756,11 +1926,15 @@ bool ParseTransferModeName(const std::string & text, TransferMode & mode,
 } // namespace
 
 /*
- * Whether one file of this size is resumed. '-resumesupport=' is the
+ * Whether one file of this size is resumed - and therefore transferred
+ * through the '.filepart' staging name. '-resumesupport=' is the
  * authoritative switch when it is given: 'off' never resumes, 'on' always
  * does, and a size in kilobytes resumes only the files at least that big
  * (the upstream 'smart' setting). Without it, '-resume' and
- * 'option resume' decide, as before.
+ * 'option resume' decide: '-resume' always resumes, and 'option resume'
+ * is upstream's persistent setting - 'on' always, 'off' never, and the
+ * default 'automatic' resumes binary files from upstream's default
+ * threshold of 100 KB on (rsSmart).
  *
  * An ASCII transfer is never resumed by the size threshold: converting line
  * endings changes the byte count, so there is no offset to continue from.
@@ -1780,7 +1954,223 @@ bool Script::Resumes(const TransferFlags & flags, unsigned long long size) const
         default:
             break;
     }
-    return flags.resume || mResume;
+    if (flags.resume)
+    {
+        return true;
+    }
+    switch (mResumeMode)
+    {
+        case ResumeMode::On:
+            return true;
+        case ResumeMode::Off:
+            return false;
+        case ResumeMode::Automatic:
+        default:
+            break;
+    }
+    return flags.transferMode == TransferMode::Binary &&
+        size >= kDefaultResumeThreshold;
+}
+
+/*
+ * The '.filepart' staging of one transfer, the policy upstream applies
+ * whenever a transfer is resume-capable (SftpFileSystem's ResumeAllowed):
+ * the bytes go to '<final>.filepart' and are moved onto '<final>' only
+ * when the file is complete. A transfer that is interrupted therefore
+ * never leaves a truncated file under the final name, and the next
+ * resume-capable attempt continues from the staging file - never from
+ * the final file, whose existing content may be an unrelated complete
+ * version that must not be spliced with new bytes.
+ */
+bool Script::ResolveStage(bool eligible, bool upload,
+    const std::string & finalPath, unsigned long long totalSize,
+    TransferStage & stage, std::string & error)
+{
+    error.clear();
+    stage = TransferStage();
+    stage.finalPath = finalPath;
+    stage.upload = upload;
+
+    /* Upstream refuses to resume a name that could not carry the suffix
+     * (a 255-byte limit on the file name itself); such a file transfers
+     * directly instead of failing. A path that ends in a separator cannot
+     * name a file to stage either. */
+    const std::string baseName = upload ?
+        RemoteFileName(finalPath) : LocalFileName(finalPath);
+    if (baseName.size() + strlen(kPartialExt) > 255 ||
+        (!finalPath.empty() && (finalPath[finalPath.size() - 1] == '/' ||
+                                finalPath[finalPath.size() - 1] == '\\')))
+    {
+        eligible = false;
+    }
+
+    if (!eligible)
+    {
+        stage.partPath = finalPath;
+        return true;
+    }
+
+    stage.staged = true;
+    stage.partPath = finalPath + kPartialExt;
+
+    unsigned long long partSize = 0;
+    bool partExists = false;
+    bool sizeKnown = true;
+    if (upload)
+    {
+        LscpAttrs attrs = {};
+        const int statResult = RemoteStat(stage.partPath, &attrs, error);
+        if (statResult == LSCP_SFTP_STAT_ERROR)
+        {
+            return false;
+        }
+        partExists = statResult == LSCP_SFTP_STAT_EXISTS &&
+            (attrs.flags & LSCP_ATTR_PERMISSIONS) != 0 &&
+            (attrs.permissions & 0040000) == 0;
+        if (partExists)
+        {
+            sizeKnown = (attrs.flags & LSCP_ATTR_SIZE) != 0;
+            partSize = sizeKnown ? attrs.size : 0;
+        }
+    }
+    else
+    {
+        const LocalFileInfo info = StatLocal(stage.partPath);
+        if (info.exists && !info.isRegular)
+        {
+            /* Something that is not a regular file sits in the staging
+             * name; PrepareStage reports it when the transfer gets there. */
+            stage.stale = true;
+            return true;
+        }
+        if (!info.exists && info.error != ENOENT && info.error != ENOTDIR)
+        {
+            error = strerror(info.error);
+            return false;
+        }
+        partExists = info.exists;
+        partSize = info.size;
+    }
+
+    if (!partExists)
+    {
+        error.clear(); /* no staging file yet: a missing one is not an error */
+        return true; /* fresh transfer into the staging name */
+    }
+    if (!sizeKnown)
+    {
+        /* Without a size there is no offset to continue from. */
+        stage.stale = true;
+        return true;
+    }
+    if (partSize < totalSize)
+    {
+        stage.continuing = true;
+        stage.resumeOffset = partSize;
+        Console::Instance().Status(std::string("Resuming ") +
+            (upload ? "upload of '" : "download of '") + baseName +
+            "' from byte " + std::to_string(partSize));
+        return true;
+    }
+    if (partSize == totalSize)
+    {
+        /* Everything is already there; only the move is left. */
+        stage.complete = true;
+        return true;
+    }
+    /* Bigger than the source: unusable, and not something to trust. */
+    stage.stale = true;
+    return true;
+}
+
+bool Script::PrepareStage(TransferStage & stage, std::string & error)
+{
+    error.clear();
+    if (!stage.staged || !stage.stale)
+    {
+        return true;
+    }
+    int result = 0;
+    if (stage.upload)
+    {
+        result = RemoteRemove(stage.partPath, error);
+    }
+    else
+    {
+        result = remove(stage.partPath.c_str());
+        if (result != 0)
+        {
+            error = LastSystemError();
+        }
+    }
+    if (result != 0)
+    {
+        error = "Cannot remove the incomplete staging file '" +
+            stage.partPath + "': " + error;
+        return false;
+    }
+    stage.stale = false;
+    return true;
+}
+
+bool Script::FinishStage(const TransferStage & stage, std::string & error)
+{
+    error.clear();
+    if (!stage.staged || stage.partPath == stage.finalPath)
+    {
+        return true;
+    }
+
+    if (!stage.upload)
+    {
+#if defined(_WIN32)
+        /* Windows rename does not replace an existing file. */
+        remove(stage.finalPath.c_str());
+#endif
+        if (rename(stage.partPath.c_str(), stage.finalPath.c_str()) != 0)
+        {
+            error = LastSystemError();
+            error = "The transfer completed, but '" + stage.finalPath +
+                "' could not be put in place (" + error +
+                "); the complete file is at '" + stage.partPath + "'.";
+            return false;
+        }
+        return true;
+    }
+
+    /* Remote: not every protocol's rename replaces an existing
+     * destination, so the destination is removed first. The complete
+     * data stays in the staging file until this succeeds. */
+    LscpAttrs attrs = {};
+    std::string statError;
+    const int statResult = RemoteStat(stage.finalPath, &attrs, statError);
+    if (statResult == LSCP_SFTP_STAT_ERROR)
+    {
+        error = "The transfer completed, but '" + stage.finalPath +
+            "' could not be inspected for the final move (" + statError +
+            "); the complete file is at '" + stage.partPath + "'.";
+        return false;
+    }
+    if (statResult == LSCP_SFTP_STAT_EXISTS)
+    {
+        std::string removeError;
+        if (RemoteRemove(stage.finalPath, removeError) != 0)
+        {
+            error = "The transfer completed, but '" + stage.finalPath +
+                "' could not be replaced (" + removeError +
+                "); the complete file is at '" + stage.partPath + "'.";
+            return false;
+        }
+    }
+    std::string renameError;
+    if (RemoteRename(stage.partPath, stage.finalPath, renameError) != 0)
+    {
+        error = "The transfer completed, but '" + stage.finalPath +
+            "' could not be put in place (" + renameError +
+            "); the complete file is at '" + stage.partPath + "'.";
+        return false;
+    }
+    return true;
 }
 
 /*
@@ -1797,7 +2187,7 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
     /* Resuming needs stable byte offsets, so a switch that asks for it
      * outright cannot be combined with an ASCII/automatic transfer,
      * whichever way the mode was set. */
-    bool resumeForced = mResume;
+    bool resumeForced = mResumeMode == ResumeMode::On;
     TransferMode mode = mTransferMode;
 
     for (size_t i = 0; i < args.size(); i++)
@@ -2213,10 +2603,22 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             {
                 totalSize = sourceAttrs.size;
             }
-            /* Asking before overwriting is pointless when the file is only
-             * continued, and '-append' never destroys anything. */
-            const bool resumeThis = Resumes(flags, totalSize);
-            if (mConfirm && localInfo.exists && !resumeThis && !flags.append)
+            /* Resolve the '.filepart' staging: read-only, so the
+             * confirmation below still runs before anything is removed
+             * or written. */
+            TransferStage stage;
+            if (!ResolveStage(!flags.append && Resumes(flags, totalSize), false,
+                    localPath, totalSize, stage, error))
+            {
+                Console::Instance().Error(Texts::LocalError(
+                    "inspect the destination of", localPath, error));
+                mErrors++;
+                continue;
+            }
+            /* Asking before overwriting protects the complete file that is
+             * at the destination now; a continuation of this same transfer
+             * and '-append' have been through it already. */
+            if (mConfirm && localInfo.exists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite local file '" + localPath + "'?");
@@ -2229,19 +2631,31 @@ bool Script::GetFiles(const std::vector<std::string> & args)
                     continue;
                 }
             }
-
-            unsigned long long resumeOffset = 0;
-            if (resumeThis && localInfo.exists && localInfo.isRegular && localInfo.size < totalSize)
+            if (!PrepareStage(stage, error))
             {
-                resumeOffset = localInfo.size;
-                Console::Instance().Status("Resuming download of '" + RemoteFileName(sources[n]) +
-                    "' from byte " + std::to_string(resumeOffset));
+                Console::Instance().Error(Texts::LocalError(
+                    "prepare the destination for", localPath, error));
+                mErrors++;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
             }
+
             unsigned long long size = 0;
             Console::Instance().TransferStart(RemoteFileName(sources[n]), totalSize);
-            int result = RemoteGet(sources[n], localPath, resumeOffset,
-                flags.preserveTime, &size, ProgressCallback, NULL, error,
-                flags.append);
+            int result = 0;
+            if (stage.complete)
+            {
+                size = totalSize;
+            }
+            else
+            {
+                result = RemoteGet(sources[n], stage.partPath, stage.resumeOffset,
+                    flags.preserveTime, &size, ProgressCallback, NULL, error,
+                    flags.append);
+            }
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
@@ -2256,7 +2670,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             if (WantsAsciiConversion(flags.transferMode, RemoteFileName(sources[n])))
             {
                 unsigned long long converted = 0;
-                if (!ConvertToUnixLineEndings(localPath, converted, error))
+                if (!ConvertToUnixLineEndings(stage.partPath, converted, error))
                 {
                     Console::Instance().Error(Texts::LocalError(
                         "convert the line endings of", localPath, error));
@@ -2269,12 +2683,22 @@ bool Script::GetFiles(const std::vector<std::string> & args)
                 }
                 size = converted;
             }
-            any = true;
-            Console::Instance().Status(Texts::FileTransferred(localPath, size));
             if (flags.preserveTime && (sourceAttrs.flags & LSCP_ATTR_ACMODTIME) != 0)
             {
-                SetFileTimes(localPath, sourceAttrs.atime, sourceAttrs.mtime);
+                SetFileTimes(stage.partPath, sourceAttrs.atime, sourceAttrs.mtime);
             }
+            if (!FinishStage(stage, error))
+            {
+                Console::Instance().Error(error);
+                mErrors++;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
+            }
+            any = true;
+            Console::Instance().Status(Texts::FileTransferred(localPath, size));
             if (flags.deleteSource)
             {
                 RemoteRemove(sources[n], error);
@@ -2462,8 +2886,19 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             {
                 continue;
             }
-            const bool resumeThis = Resumes(flags, info.size);
-            if (mConfirm && remoteExists && !resumeThis && !flags.append)
+            /* Resolve the '.filepart' staging: read-only, so the
+             * confirmation below still runs before anything is removed
+             * or written. */
+            TransferStage stage;
+            if (!ResolveStage(!flags.append && Resumes(flags, info.size), true,
+                    remotePath, info.size, stage, error))
+            {
+                Console::Instance().Error(Texts::RemoteError(
+                    "inspect the destination of", remotePath, error));
+                mErrors++;
+                continue;
+            }
+            if (mConfirm && remoteExists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite remote file '" + remotePath + "'?");
@@ -2476,12 +2911,16 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                     continue;
                 }
             }
-            unsigned long long resumeOffset = 0;
-            if (resumeThis && remoteExists && remoteInfo.size < info.size)
+            if (!PrepareStage(stage, error))
             {
-                resumeOffset = remoteInfo.size;
-                Console::Instance().Status("Resuming upload of '" + LocalFileName(sources[n]) +
-                    "' from byte " + std::to_string(resumeOffset));
+                Console::Instance().Error(Texts::RemoteError(
+                    "prepare the destination for", remotePath, error));
+                mErrors++;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
             }
             unsigned long long size = 0;
             /* ASCII uploads convert a temporary copy, so the local file
@@ -2506,9 +2945,17 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                 uploadPath = asciiTemp;
             }
             Console::Instance().TransferStart(LocalFileName(sources[n]), info.size);
-            int result = RemotePut(uploadPath, remotePath, flags.permissions,
-                resumeOffset, flags.preserveTime, &size, ProgressCallback, NULL,
-                error, flags.append);
+            int result = 0;
+            if (stage.complete)
+            {
+                size = info.size;
+            }
+            else
+            {
+                result = RemotePut(uploadPath, stage.partPath, flags.permissions,
+                    stage.resumeOffset, flags.preserveTime, &size,
+                    ProgressCallback, NULL, error, flags.append);
+            }
             Console::Instance().TransferEnd(result == 0);
             if (!asciiTemp.empty())
             {
@@ -2517,6 +2964,16 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             if (result != 0)
             {
                 Console::Instance().Error(Texts::TransferFailed(sources[n], error));
+                mErrors++;
+                if (AbortAfterFileError())
+                {
+                    return false;
+                }
+                continue;
+            }
+            if (!FinishStage(stage, error))
+            {
+                Console::Instance().Error(error);
                 mErrors++;
                 if (AbortAfterFileError())
                 {
@@ -2997,7 +3454,7 @@ bool Script::ExecuteSynchronizationPlan(SyncPlan & plan, const SyncOptions & opt
                     console.TransferStart(item.path, item.localSize);
                     unsigned long long size = 0;
                     const int result = RemotePutMode(localPath, remotePath,
-                        options.transferMode, &size, error);
+                        options.transferMode, item.localSize, &size, error);
                     console.TransferEnd(result == 0);
                     if (result != 0)
                     {
@@ -3040,7 +3497,7 @@ bool Script::ExecuteSynchronizationPlan(SyncPlan & plan, const SyncOptions & opt
                     console.TransferStart(item.path, item.remoteSize);
                     unsigned long long size = 0;
                     const int result = RemoteGetMode(remotePath, localPath,
-                        options.transferMode, &size, error);
+                        options.transferMode, item.remoteSize, &size, error);
                     console.TransferEnd(result == 0);
                     if (result != 0)
                     {
@@ -5123,8 +5580,9 @@ bool Script::SetOption(const std::vector<std::string> & args)
         }
         if (name == "resume")
         {
-            Console::Instance().Status(std::string("resume = ") +
-                (mResume ? "on" : "off"));
+            const char * value = mResumeMode == ResumeMode::On ? "on" :
+                mResumeMode == ResumeMode::Off ? "off" : "automatic";
+            Console::Instance().Status(std::string("resume = ") + value);
             return true;
         }
         if (name == "transfer")
@@ -5220,6 +5678,10 @@ bool Script::SetOption(const std::vector<std::string> & args)
         {
             vocabulary = TransferModeNames();
         }
+        else if (name == "resume")
+        {
+            vocabulary = ResumeModeNames();
+        }
         std::string resolved;
         if (!ResolveAbbreviation(vocabulary, value,
             "value of the option '" + name + "'", resolved))
@@ -5255,9 +5717,27 @@ bool Script::SetOption(const std::vector<std::string> & args)
         mConfirm = isOn;
         return true;
     }
-    if (name == "resume" && isToggle)
+    if (name == "resume")
     {
-        mResume = isOn;
+        if (value == "on")
+        {
+            mResumeMode = ResumeMode::On;
+        }
+        else if (value == "off")
+        {
+            mResumeMode = ResumeMode::Off;
+        }
+        else if (value == "automatic")
+        {
+            mResumeMode = ResumeMode::Automatic;
+        }
+        else
+        {
+            Console::Instance().Error(Texts::WrongArguments("option",
+                "The value of 'resume' must be on, off or automatic."));
+            mErrors++;
+            return false;
+        }
         return true;
     }
     if (name == "transfer")

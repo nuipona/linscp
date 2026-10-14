@@ -173,6 +173,26 @@ class ScriptTests(unittest.TestCase):
                      "include", "exclude", "failonnomatch", "synchdelete",
                      "reconnecttime", "editor", "editmaxsize"):
             self.assertIn(name + " = ", result.stdout)
+        # The default resume mode is upstream's 'automatic' (rsSmart):
+        # binary files from a 100 KB threshold stage through .filepart.
+        self.assertIn("resume = automatic", result.stdout)
+
+    def test_option_resume_values(self):
+        for value, shown in (("on", "on"), ("off", "off"),
+                             ("automatic", "automatic"), ("aut", "automatic")):
+            with self.subTest(value=value):
+                result = self.run_commands(f"option resume {value}; option resume")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("resume = " + shown, result.stdout)
+        result = self.run_commands("option resume sometimes")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("on, off or automatic", result.stderr)
+        # 'option resume on' forces binary transfers, so an ASCII transfer
+        # is refused before any connection, like an explicit -resume.
+        result = self.run_commands("option resume on; get -transfer=ascii x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("binary only", result.stderr)
+        self.assertNotIn("Not connected", result.stderr)
 
     def test_option_echo_prints_commands(self):
         result = self.run_commands("option echo on; echo HELLO")

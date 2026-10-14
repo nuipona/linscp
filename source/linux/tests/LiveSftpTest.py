@@ -221,17 +221,58 @@ class LiveSftpTests(unittest.TestCase):
             os.chmod(locked, 0o700)
 
     @posix_only("Ctrl-C is delivered as a signal")
-    def test_interrupted_get_can_be_resumed_and_the_file_is_intact(self):
-        """Ctrl-C in the middle of a download must leave a partial file that
-        'get -resume' completes byte for byte - and must not touch the
-        source."""
+    def test_interrupted_get_stages_in_filepart_and_resumes(self):
+        """Ctrl-C in the middle of a download must leave the partial bytes
+        in '<name>.filepart' - the final name is written only when the file
+        is complete - and a retry must finish it byte for byte without
+        ever touching the source."""
         source = self.write_in_jail("big.bin", 6 << 20)
         digest = sha256_of(source)
         target = self.local / "big.bin"
+        part = self.local / "big.bin.filepart"
         client = self.start_detached("get -speed=512 /big.bin %s" % target)
         deadline = time.time() + 60
         while time.time() < deadline:
-            if target.exists() and target.stat().st_size >= (1 << 20):
+            if part.exists() and part.stat().st_size >= (1 << 20):
+                break
+            if client.poll() is not None:
+                self.fail("the download ended before it could be interrupted: " +
+                          client.stderr.read())
+            time.sleep(0.05)
+        else:
+            self.fail("the download never got far enough to interrupt")
+        # The safety property: nothing under the final name until it is whole.
+        self.assertFalse(target.exists())
+        client.send_signal(signal.SIGINT)
+        # Drain the pipes rather than just waiting: an interrupt has to be
+        # reported, and the child has to be reaped with its output read.
+        self.assertNotEqual(client.wait(timeout=60), 0)
+        client.communicate(timeout=60)
+        self.assertTrue(part.exists())
+        self.assertFalse(target.exists())
+        partial = part.stat().st_size
+        self.assertLess(partial, source.stat().st_size)
+        self.assertEqual(sha256_of(source), digest)
+
+        # The default 'option resume automatic' continues the staging file.
+        result = self.run_script("get /big.bin %s" % target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
+        self.assertEqual(target.stat().st_size, source.stat().st_size)
+        self.assertEqual(sha256_of(target), digest)
+
+    @posix_only("Ctrl-C is delivered as a signal")
+    def test_option_resume_off_transfers_without_a_staging_file(self):
+        """'option resume off' is upstream's rsOff: the file is written
+        under its final name directly, staging file or not."""
+        source = self.write_in_jail("nostage.bin", 200 << 10)
+        target = self.local / "nostage.bin"
+        part = self.local / "nostage.bin.filepart"
+        client = self.start_detached(
+            "option resume off ; get -speed=1024 /nostage.bin %s" % target)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if target.exists() and target.stat().st_size >= (32 << 10):
                 break
             if client.poll() is not None:
                 self.fail("the download ended before it could be interrupted: " +
@@ -240,29 +281,93 @@ class LiveSftpTests(unittest.TestCase):
         else:
             self.fail("the download never got far enough to interrupt")
         client.send_signal(signal.SIGINT)
-        # Drain the pipes rather than just waiting: an interrupt has to be
-        # reported, and the child has to be reaped with its output read.
         self.assertNotEqual(client.wait(timeout=60), 0)
         client.communicate(timeout=60)
-        partial = target.stat().st_size
-        self.assertLess(partial, source.stat().st_size)
-        self.assertEqual(sha256_of(source), digest)
+        self.assertFalse(part.exists())
+        self.assertTrue(target.exists())
 
-        result = self.run_script("get -resume /big.bin %s" % target)
+    def test_staged_resume_continues_the_staging_file_not_the_old_final(self):
+        """The complete file already at the destination must be replaced
+        whole, never spliced with the tail of a new download: only the
+        staging file supplies the offset."""
+        source = self.write_in_jail("fresh.bin", 2 << 20)
+        digest = sha256_of(source)
+        target = self.local / "fresh.bin"
+        part = self.local / "fresh.bin.filepart"
+        target.write_bytes(b"OLD CONTENT OF A COMPLETE FILE\n" * 4096)
+        with open(source, "rb") as src, open(part, "wb") as dst:
+            dst.write(src.read(512 << 10))
+        # A continuation needs no confirmation; a fresh overwrite would.
+        result = self.run_script("get /fresh.bin %s" % target)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 
+    def test_stale_filepart_bigger_than_the_source_is_replaced(self):
+        """A staging file that cannot have come from this source (it is
+        bigger than the source) is dropped, not resumed."""
+        source = self.write_in_jail("smallfresh.bin", 200 << 10)
+        digest = sha256_of(source)
+        target = self.local / "smallfresh.bin"
+        part = self.local / "smallfresh.bin.filepart"
+        part.write_bytes(b"\x5a" * (300 << 10))
+        result = self.run_script("get /smallfresh.bin %s" % target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
+        self.assertEqual(sha256_of(target), digest)
+
+    @posix_only("Ctrl-C is delivered as a signal")
+    def test_interrupted_put_stages_in_filepart_and_resumes(self):
+        """The upload direction stages too: an interrupted 'put' leaves
+        the remote final name alone and the retry continues the remote
+        staging file."""
+        local = self.local / "upload-big.bin"
+        block = os.urandom(1 << 16)
+        with open(local, "wb") as handle:
+            for _ in range(64):  # 4 MiB
+                handle.write(block)
+        digest = sha256_of(local)
+        remote = self.root / "upload-big.bin"
+        remote_part = self.root / "upload-big.bin.filepart"
+        client = self.start_detached(
+            "put -speed=512 %s /upload-big.bin" % local)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if remote_part.exists() and remote_part.stat().st_size >= (1 << 20):
+                break
+            if client.poll() is not None:
+                self.fail("the upload ended before it could be interrupted: " +
+                          client.stderr.read())
+            time.sleep(0.05)
+        else:
+            self.fail("the upload never got far enough to interrupt")
+        self.assertFalse(remote.exists())
+        client.send_signal(signal.SIGINT)
+        self.assertNotEqual(client.wait(timeout=60), 0)
+        client.communicate(timeout=60)
+        self.assertTrue(remote_part.exists())
+        self.assertFalse(remote.exists())
+        self.assertLess(remote_part.stat().st_size, local.stat().st_size)
+
+        result = self.run_script("put %s /upload-big.bin" % local)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(remote_part.exists())
+        self.assertEqual(remote.stat().st_size, local.stat().st_size)
+        self.assertEqual(sha256_of(remote), digest)
+
     def test_resume_across_a_connection_that_died(self):
         """The connection going away mid-transfer is the case '-resume' exists
-        for: the retry has to finish the file, not restart it or splice it."""
+        for: the retry has to finish the file, not restart it or splice it,
+        and the bytes arrive in the staging file as upstream does it."""
         source = self.write_in_jail("dying.bin", 8 << 20)
         digest = sha256_of(source)
         target = self.local / "dying.bin"
+        part = self.local / "dying.bin.filepart"
         client = self.start_detached("get -speed=256 /dying.bin %s" % target)
         deadline = time.time() + 60
         while time.time() < deadline:
-            if target.exists() and target.stat().st_size >= (1 << 20):
+            if part.exists() and part.stat().st_size >= (1 << 20):
                 break
             if client.poll() is not None:
                 break
@@ -271,9 +376,10 @@ class LiveSftpTests(unittest.TestCase):
         self.stop_server(force=True)
         result = client.communicate(timeout=90)
         self.assertNotEqual(client.returncode, 0)
-        partial = target.stat().st_size
+        partial = part.stat().st_size
         self.assertGreater(partial, 0)
         self.assertLess(partial, source.stat().st_size)
+        self.assertFalse(target.exists())
         self.assertIn("failed", (result[0] + result[1]).lower())
 
         # The port and the process are replaced together; the next 'open'
@@ -282,6 +388,7 @@ class LiveSftpTests(unittest.TestCase):
         self.start_server()
         result = self.run_script("get -resume /dying.bin %s" % target, timeout=180)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 

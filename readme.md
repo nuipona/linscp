@@ -64,7 +64,8 @@ listing is incomplete, and authenticated Amazon S3 (signing and bucket/object
 listing) is not implemented. Windows SSH protocols depend on the installed
 curl build. Scripting covers the WinSCP transfer switches (file masks,
 `-transfer=`, `-resume`, `-append`, `-speed=`, `-resumesupport=`,
-`-preservetime`), unambiguous command and option abbreviations, script
+`-preservetime`) with upstream's `.filepart` staging for resume-capable
+transfers, unambiguous command and option abbreviations, script
 parameters with `%TIMESTAMP%` and environment expansion, and an XML action
 log; the .NET assembly and PowerShell automation APIs, transfer presets,
 session folder trees and encrypted stored passwords remain open gaps.

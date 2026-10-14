@@ -75,7 +75,7 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 | FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
 | WebDAV | HTTP operations exist, but listing does not implement DAV PROPFIND/XML properties. Not a complete WebDAV filesystem. |
 | S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
-| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. That suite cannot run on Windows at all, because the `curl.exe` built into Windows has no SFTP support, so nothing about a Windows transfer is verified (`docs/windows.md`). Missing: transfer presets, the `.filepart` temporary-name policy and atomic temporary-file policies in general. |
+| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. Resume-capable transfers stage through upstream's `.filepart` name and are renamed into place only when complete - `option resume automatic` (default) from upstream's 100 KB threshold, `on` always, `off` never - so an interrupted transfer never leaves a truncated file under the final name and a continuation reads the staging file instead of splicing the existing destination; the live suite covers both directions, the stale-staging-file restart and `option resume off`. That suite cannot run on Windows at all, because the `curl.exe` built into Windows has no SFTP support, so nothing about a Windows transfer is verified (`docs/windows.md`). Missing: transfer presets and per-file progress reporting on the curl paths. |
 | Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror` and ASCII conversion verified against a live server. Missing: path exclusions and a real watch mode: `keepuptodate` still repeats a full comparison on a timer. |
 | Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
 | Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
@@ -156,6 +156,20 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
   is an equivalent record, not an upstream format; passwords in site URLs
   and in `-password=` switches are masked before anything is written, also
   under `option echo on`.
+* Resume-capable transfers stage through `<destination>.filepart` and are
+  renamed into place only when complete, which is upstream's policy
+  (`PartialExt`): `option resume` gained its upstream third value
+  `automatic` as the default (binary files from 100 KB on, rsSmart),
+  alongside `on` (rsOn) and `off` (rsOff), and `-resumesupport=` still
+  overrides all three. The continuation offset is read only from the
+  staging file - never from an existing destination, whose content may be
+  an unrelated complete version - so a destination is replaced whole and
+  never spliced. Two script-visible consequences: an interrupted transfer
+  leaves `name.filepart` instead of a truncated `name`, and a batch
+  overwrite of an existing destination now also needs `option confirm
+  off` when `-resume` finds no staging file to continue, because the
+  overwrite is confirmed before the transfer instead of being assumed
+  from the switch.
 
 These intentional fail-closed changes can break scripts that previously relied
 on silently ignored settings. Review those scripts; do not remove a safety
@@ -188,9 +202,11 @@ an explanation. It does not test behavior.
 kernel picks, in a jail of its own, and covers what a server-free test cannot:
 an open with the wrong password, an open with a pinned host key that does not
 match, `put`/`rm`/`mkdir` into a directory the server will not let us write, a
-download interrupted by Ctrl-C and its `get -resume`, a transfer whose server
-dies under it and the same resume against a restarted server, and
-`-preservetime` in both directions.
+download interrupted by Ctrl-C that stays in `.filepart` and is completed by a
+plain `get`, the same for an interrupted upload, a continuation that must not
+splice an existing destination, a transfer whose server dies under it and the
+same resume against a restarted server, `option resume off` disabling the
+staging, and `-preservetime` in both directions.
 
 The server itself is a plain filesystem-backed SFTP + exec endpoint (user
 `testuser`, `LSCP_TEST_ROOT` as the visible root) that implements `chattr` for
@@ -249,11 +265,12 @@ to say what those suites proved.
 
 1. **Safety and automation:** host keys are verified and pinned rather than
    accepted, and the GUI API is loopback-only behind a per-run token; file
-   masks, ASCII/automatic conversion, reconnect and a live-server test harness
-   are in place. What is left is a user account or encrypted credential store,
-   `copyid`'s authorized_keys editing, batch per-file semantics, parameter
-   expansion and atomic transfers, plus live-server tests for failed opens,
-   denied operations and interruption/data integrity.
+   masks, ASCII/automatic conversion, reconnect, parameter expansion,
+   `.filepart` staging (the atomic temporary-file policy) and a live-server
+   test harness - including refused opens, denied operations and
+   interruption/data integrity - are in place. What is left is a user
+   account or an encrypted credential store and upstream's batch per-file
+   error/prompt semantics.
 2. **Real protocol coverage:** replace generic listing approximations with
    protocol-specific SCP, WebDAV and signed S3 clients; expand FTP/SFTP handling.
    Test CRUD, directory enumeration, metadata, authentication and resume against

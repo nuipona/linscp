@@ -669,6 +669,8 @@ void TestScriptCommands()
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option resume off"));
     CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option resume automatic"));
+    CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option batch abort"));
     CHECK_TRUE(script.ErrorCount() == 0);
 

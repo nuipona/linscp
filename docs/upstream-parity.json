@@ -15,9 +15,9 @@
     "how": "make -C source/linux all check && make -C source/linux check-live",
     "date": "2026-10-14",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 663 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file.",
+     "unit": "source/linux/tests/UnitTest.cpp - 665 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file.",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog.",
-     "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download and its resume, a transfer that outlives the connection, and timestamps in both directions.",
+     "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server."
     }
    },
@@ -112,7 +112,7 @@
   },
   "get": {
    "status": "partial",
-   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Missing: transfer presets, -permissions on downloads and upstream's raw transfer settings.",
+   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Missing: transfer presets, -permissions on downloads and upstream's raw transfer settings. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
      "unit",
@@ -137,7 +137,7 @@
   },
   "keepuptodate": {
    "status": "partial",
-   "notes": "Takes no direction word, like upstream, and accepts -delete, -filemask=, -transfer=, -interval=, -count= and -continue (keeps watching after a failed pass). Still a scripted poll loop, not the upstream background watcher: no file-system event source and no 'stop' command.",
+   "notes": "Takes no direction word, like upstream, and accepts -delete, -filemask=, -transfer=, -interval=, -count= and -continue (keeps watching after a failed pass). Still a scripted poll loop, not the upstream background watcher: no file-system event source and no 'stop' command. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
      "unit"
@@ -194,7 +194,7 @@
   },
   "mget": {
    "status": "partial",
-   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
+   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "mkdir": {
    "status": "partial",
@@ -207,7 +207,7 @@
   },
   "mput": {
    "status": "partial",
-   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
+   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "mv": {
    "status": "partial",
@@ -242,7 +242,7 @@
   },
   "put": {
    "status": "partial",
-   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Missing: transfer presets and upstream's raw transfer settings.",
+   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Missing: transfer presets and upstream's raw transfer settings. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
      "live-sftp",
@@ -259,7 +259,7 @@
   },
   "recv": {
    "status": "partial",
-   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
+   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "rename": {
    "status": "partial",
@@ -280,7 +280,7 @@
   },
   "send": {
    "status": "partial",
-   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
+   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "session": {
    "status": "partial",
@@ -296,11 +296,12 @@
   },
   "synchronize": {
    "status": "partial",
-   "notes": "Planner with direction, -criteria=, -filemask=, -delete/-nodelete (default from option synchdelete), -mirror (rejects 'both', resolves any difference toward the source), -transfer=binary|ascii|automatic, -preview, -nonrecursive, -interval=, -count=; 'both' keeps a state record. Verified live. Missing: watch/background mode and upstream's conflict resolution UI.",
+   "notes": "Planner with direction, -criteria=, -filemask=, -delete/-nodelete (default from option synchdelete), -mirror (rejects 'both', resolves any difference toward the source), -transfer=binary|ascii|automatic, -preview, -nonrecursive, -interval=, -count=; 'both' keeps a state record. Verified live. Missing: watch/background mode and upstream's conflict resolution UI. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
      "unit",
-     "manual"
+     "manual",
+     "live-sftp"
     ]
    }
   }
@@ -344,7 +345,7 @@
   {
    "name": "Transfers",
    "status": "partial",
-   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Missing: transfer presets, the .filepart temporary-name policy and per-file progress reporting on the curl paths.",
+   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Missing: transfer presets and per-file progress reporting on the curl paths.",
    "verified_on": {
     "linux": [
      "unit",
@@ -359,7 +360,7 @@
   {
    "name": "Synchronization",
    "status": "partial",
-   "notes": "Planner with direction, -criteria=time|size|either|none, -filemask=, -delete/-nodelete (option synchdelete as the default), -mirror (any difference resolves toward the source; rejected with 'both'), -transfer=binary|ascii|automatic applied to planned transfers, -preview, -nonrecursive, -interval=, -count= and keepuptodate -continue; 'both' keeps a state record to tell changes from conflicts. Verified live. Missing: watch/background mode and upstream's conflict resolution UI.",
+   "notes": "Planner with direction, -criteria=time|size|either|none, -filemask=, -delete/-nodelete (option synchdelete as the default), -mirror (any difference resolves toward the source; rejected with 'both'), -transfer=binary|ascii|automatic applied to planned transfers, -preview, -nonrecursive, -interval=, -count= and keepuptodate -continue; 'both' keeps a state record to tell changes from conflicts. Verified live. Missing: watch/background mode and upstream's conflict resolution UI; planned transfers stage through '.filepart' like get/put when the resume setting and the transfer mode allow it.",
    "verified_on": {
     "linux": [
      "unit",
