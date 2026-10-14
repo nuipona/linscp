@@ -79,6 +79,21 @@ public:
     void PushReceivedData(const void * data, size_t len);
     bool Pump();
 
+    /* Receives the channel data (stdout) of this session instead of
+     * buffering it for the SFTP protocol layer. Used by exec sessions. */
+    typedef void (*OutputSinkFn)(void * ctx, const char * data, size_t len);
+    void SetOutputSink(OutputSinkFn sink, void * ctx);
+    /* Where the seat hands channel data over: to the output sink of an
+     * exec session, or into the SFTP receive buffer. */
+    void DeliverChannelData(const void * data, size_t len);
+
+    /* Runs 'command' on the server in a one-shot second SSH connection
+     * (the 'exec' request instead of the SFTP subsystem), printing its
+     * output as it arrives, and returns when the command ends. The
+     * current session, if any, stays connected while this runs. */
+    static bool ExecRemote(const SessionOptions & options,
+        const std::string & command, std::string & error);
+
     /* Called by the seat. */
     void NotifyRemoteExit();
     void SetConnectionError(const std::string & error);
@@ -111,6 +126,14 @@ private:
     std::vector<char> mReceived;
     size_t mReceivedStart;
     size_t mReceivedEnd;
+    OutputSinkFn mOutputSink;
+    void * mOutputSinkCtx;
+
+    /* Shared connection setup of Open() and ExecRemote(): connects and
+     * starts 'program' (subsystem or exec), optionally becoming the
+     * session the SFTP transport glue talks to. */
+    bool Connect(const SessionOptions & options, const char * program,
+        bool subsystem, bool takeCurrent, std::string & error);
 };
 
 /* The one session the console client is driving, or NULL. */

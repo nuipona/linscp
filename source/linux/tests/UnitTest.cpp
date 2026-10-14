@@ -675,9 +675,27 @@ void TestScriptCommands()
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("binary"));
     CHECK_TRUE(script.ExecuteLine("option batch continue"));
+    /* 'reconnect' (without the 'time') stays unsupported; 'reconnecttime'
+     * is a real option now. */
     CHECK_TRUE(script.ExecuteLine("option reconnect 10"));
     CHECK_TRUE(script.ErrorCount() == 1);
     CHECK_TRUE(script.ExecuteLine("option transfer ascii"));
+    CHECK_TRUE(script.ErrorCount() == 1);
+    CHECK_TRUE(script.ExecuteLine("option transfer"));
+    CHECK_TRUE(script.ExecuteLine("option transfer automatic"));
+    CHECK_TRUE(script.ExecuteLine("option transfer"));
+    CHECK_TRUE(script.ExecuteLine("ascii"));
+    CHECK_TRUE(script.ExecuteLine("binary"));
+    /* include/exclude are one WinSCP mask: setting one clears the other. */
+    CHECK_TRUE(script.ExecuteLine("option include *.txt"));
+    CHECK_TRUE(script.ExecuteLine("option exclude *.bak;*.tmp"));
+    CHECK_TRUE(script.ExecuteLine("option failonnomatch on"));
+    CHECK_TRUE(script.ExecuteLine("option failonnomatch"));
+    CHECK_TRUE(script.ExecuteLine("option echo on"));
+    CHECK_TRUE(script.ExecuteLine("option synchdelete off"));
+    CHECK_TRUE(script.ExecuteLine("option reconnecttime 30"));
+    CHECK_TRUE(script.ExecuteLine("option reconnecttime off"));
+    CHECK_TRUE(script.ExecuteLine("option reconnecttime nope"));
     CHECK_TRUE(script.ErrorCount() == 2);
     CHECK_FALSE(script.ExecuteLine("exit"));
     CHECK_TRUE(script.ExitRequested());
@@ -902,8 +920,68 @@ void TestFileMaskParsing()
     CHECK_TRUE(mask.empty());
     CHECK_EQ(mask.Describe(), "(none)");
 
-    /* A path mask is refused instead of being silently ignored. */
-    CHECK_FALSE(mask.Parse("sub/*.txt", error));
+    /* Directory masks end with '/': they match directories only. */
+    CHECK_TRUE(mask.Parse("*/build/", error));
+    CHECK_FALSE(mask.Accepts("build", false));
+    CHECK_TRUE(mask.Accepts("build", true));
+    CHECK_FALSE(mask.Accepts("docs", true));
+
+    /* Path masks match the path of a file below the transfer root;
+     * they do not address directories (use a trailing '/' for that). */
+    CHECK_TRUE(mask.Parse("sub/*.txt", error));
+    CHECK_FALSE(mask.Accepts("a.txt", false, 0, 0, "a.txt"));
+    CHECK_FALSE(mask.Accepts("a.txt", false, 0, 0, "other/a.txt"));
+    CHECK_TRUE(mask.Accepts("a.txt", false, 0, 0, "sub/a.txt"));
+    CHECK_FALSE(mask.Accepts("sub", true, 0, 0, "sub"));
+
+    /* Exclusion by directory mask prunes a subtree at any depth. */
+    CHECK_TRUE(mask.Parse("|*/node_modules/;*.tmp", error));
+    CHECK_TRUE(mask.Accepts("app", true, 0, 0, "app"));
+    CHECK_FALSE(mask.Accepts("app", true, 0, 0, "node_modules"));
+    CHECK_FALSE(mask.Accepts("app", true, 0, 0, "web/node_modules"));
+    CHECK_FALSE(mask.Accepts("a.tmp", false, 0, 0, "a.tmp"));
+
+    /* Size criteria: 1K is 1024 bytes, 1M is 1024*1024. */
+    CHECK_TRUE(mask.Parse("*.bin>1K", error));
+    CHECK_TRUE(mask.Accepts("a.bin", false, 1025, 0, "a.bin"));
+    CHECK_FALSE(mask.Accepts("a.bin", false, 1024, 0, "a.bin"));
+    CHECK_FALSE(mask.Accepts("a.bin", false, 0, 0, "a.bin"));
+    /* A mask with a size criterion never selects a directory (an
+     * include mask still never prunes one). */
+    CHECK_TRUE(mask.Accepts("a.bin", true, 5000000, 0, "a.bin"));
+    CHECK_TRUE(mask.Parse("|*.bin>1K", error));
+    CHECK_FALSE(mask.Accepts("a.bin", false, 5000000, 0, "a.bin"));
+    CHECK_TRUE(mask.Accepts("a.bin", true, 5000000, 0, "a.bin"));
+
+    CHECK_TRUE(mask.Parse("*.bin<=1M", error));
+    CHECK_TRUE(mask.Accepts("a.bin", false, 1024 * 1024, 0, "a.bin"));
+    CHECK_FALSE(mask.Accepts("a.bin", false, 1024 * 1024 + 1, 0, "a.bin"));
+
+    /* Time criteria are local dates, optionally with a time of day. */
+    CHECK_TRUE(mask.Parse("*.log>=2020-06-01", error));
+    const unsigned long juneFirst2020 = 1590969600UL; /* 2020-06-01 UTC */
+    CHECK_FALSE(mask.Accepts("a.log", false, 10, juneFirst2020 - 86400, "a.log"));
+    CHECK_TRUE(mask.Accepts("a.log", false, 10, juneFirst2020 + 86400, "a.log"));
+    CHECK_TRUE(mask.Accepts("a.log", false, 10, juneFirst2020, "a.log"));
+    CHECK_FALSE(mask.Accepts("a.log", false, 10, 0, "a.log"));
+
+    /* Criteria chain within one token. */
+    CHECK_TRUE(mask.Parse("*.dat>1K<10K", error));
+    CHECK_TRUE(mask.Accepts("a.dat", false, 4096, 0, "a.dat"));
+    CHECK_FALSE(mask.Accepts("a.dat", false, 20000, 0, "a.dat"));
+    CHECK_FALSE(mask.Accepts("a.dat", false, 100, 0, "a.dat"));
+
+    /* A token with only a criterion means '*<criterion>'. */
+    CHECK_TRUE(mask.Parse(">2K", error));
+    CHECK_TRUE(mask.Accepts("anything", false, 4096, 0, "anything"));
+    CHECK_FALSE(mask.Accepts("anything", false, 100, 0, "anything"));
+
+    /* Invalid criteria fail explicitly. */
+    CHECK_FALSE(mask.Parse("*.txt>1X", error));
+    CHECK_FALSE(error.empty());
+    CHECK_FALSE(mask.Parse("*.txt>notadate", error));
+    CHECK_FALSE(error.empty());
+    CHECK_FALSE(mask.Parse("*.txt>=2026-13-40", error));
     CHECK_FALSE(error.empty());
     CHECK_EQ(mask.Describe(), "(none)");
 }

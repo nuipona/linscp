@@ -16,6 +16,7 @@
 #include "SessionStore.h"
 #include "SftpClient.h"
 #include "SyncPlanner.h"
+#include "TextMode.h"
 
 namespace linuxscp {
 
@@ -31,10 +32,19 @@ struct TransferFlags
     bool preserveTime;
     bool recursive;
     bool resume;
+    /* The effective file mask ('-filemask=' or 'option include/exclude'). */
+    FileMask mask;
+    /* binary, ASCII or automatic line-ending conversion. */
+    TransferMode transferMode;
+    /* -permissions= for uploads, -1 to leave the server's default. */
+    int permissions;
+    /* -filemask= was given for this command. */
+    bool maskGiven;
 
     TransferFlags() : deleteSource(false), deleteObsolete(false),
         newerOnly(false), preserveTime(false), recursive(true),
-        resume(false) {}
+        resume(false), transferMode(TransferMode::Binary), permissions(-1),
+        maskGiven(false) {}
 };
 
 class Script
@@ -102,7 +112,8 @@ private:
     bool ParseSyncArguments(const std::vector<std::string> & args,
         const std::string & command, SyncOptions & options,
         std::vector<std::string> & dirs, bool & preview, int & interval,
-        int & count, std::string & error);
+        int & count, bool & continueOnError, bool modeOptional,
+        std::string & error);
     /* Compares the two trees and fills 'plan'. */
     bool BuildSynchronizationPlan(SyncOptions & options,
         const std::string & localDir, const std::string & remoteDir,
@@ -126,19 +137,40 @@ private:
     bool RemoveRemoteDirectory(const std::vector<std::string> & args);
     bool MakeRemoteDirectory(const std::vector<std::string> & args);
     bool MoveRemote(const std::vector<std::string> & args);
+    /* 'cp': remote copy, server-side when the protocol can, streamed
+     * through a local temporary file otherwise. */
+    bool CopyRemote(const std::vector<std::string> & args);
+    /* One file or tree to one exact destination. */
+    bool CopyRemoteTree(const std::string & from, const std::string & to);
+    bool CopyRemoteOneFile(const std::string & from, const std::string & to);
+    /* 'ln'/'symlink': target first, like ln(1) and WinSCP. */
+    bool LinkRemote(const std::vector<std::string> & args, const char * name);
+    /* 'checksum <algorithm> <file>': server-side when the protocol can,
+     * otherwise computed while downloading. */
+    bool ChecksumRemote(const std::vector<std::string> & args);
+    /* 'call'/'!': runs one command on the server through a second SSH
+     * connection that executes it instead of the SFTP subsystem. */
+    bool CallRemote(const std::vector<std::string> & args, const char * name);
+    /* 'copyid': installs the public half of the configured private key
+     * in the server's authorized_keys. */
+    bool CopyPublicKey(const std::vector<std::string> & args);
     bool ChangeRemotePermissions(const std::vector<std::string> & args);
     bool StatRemote(const std::vector<std::string> & args);
     bool SetOption(const std::vector<std::string> & args);
     void OpenTerminal(const std::vector<std::string> & args);
-    void PrintHelp();
+    void PrintHelp(const std::vector<std::string> & args);
+    /* Help text of one command, or NULL. */
+    static const char * CommandHelp(const std::string & command);
     void PrintStatus();
 
     bool DownloadDirectoryRecursive(const std::string & remoteDir,
         const std::string & localDir, const TransferFlags & flags,
-        unsigned long long & bytesTransferred);
+        unsigned long long & bytesTransferred,
+        const std::string & relPrefix = std::string());
     bool UploadDirectoryRecursive(const std::string & localDir,
         const std::string & remoteDir, const TransferFlags & flags,
-        unsigned long long & bytesTransferred);
+        unsigned long long & bytesTransferred,
+        const std::string & relPrefix = std::string());
     bool CreateRemoteDirectoryRecursive(const std::string & path,
         std::string & error);
 
@@ -157,6 +189,11 @@ private:
         bool isDirectory);
 
     bool RequireConnection();
+    /* True when 'batch on/abort' says a multi-file command must stop at
+     * the first failing file instead of continuing with the rest. */
+    bool AbortAfterFileError() const;
+    /* Fills flags.mask from -filemask= or 'option include/exclude'. */
+    void ResolveTransferMask(TransferFlags & flags) const;
     /* Expands a remote argument (possibly a mask) into full paths. */
     bool ExpandRemote(const std::string & pattern, std::vector<std::string> & paths,
         std::string & error);
@@ -173,17 +210,32 @@ private:
         int permissions, unsigned long long resumeOffset, bool preserveTime,
         unsigned long long * size, LscpProgressFn progress, void * ctx,
         std::string & error);
+    /* The same transfers with ASCII line-ending conversion applied
+     * around the binary transfer when the mode asks for it. */
+    int RemoteGetMode(const std::string & remote, const std::string & local,
+        TransferMode mode, unsigned long long * size, std::string & error);
+    int RemotePutMode(const std::string & local, const std::string & remote,
+        TransferMode mode, unsigned long long * size, std::string & error);
     int RemoteRemove(const std::string & path, std::string & error);
     int RemoteRemoveDir(const std::string & path, std::string & error);
     int RemoteMakeDir(const std::string & path, int permissions, std::string & error);
     int RemoteRename(const std::string & from, const std::string & to, std::string & error);
     int RemoteSetPermissions(const std::string & path, int permissions, std::string & error);
+    /* Remote copy through a local temporary file; the fallback 'cp' path
+     * and the building block of the checksum fallback. */
+    int RemoteStreamCopy(const std::string & from, const std::string & to,
+        std::string & error);
+    int RemoteSymlink(const std::string & target, const std::string & linkPath,
+        std::string & error);
 
 
     SessionOptions mDefaults;
     Session mSession;
     SessionStore mSessions;
     std::string mRemoteDirectory;
+    /* The directory the server starts the session in; 'cd' with no
+     * argument goes there. */
+    std::string mHomeDirectory;
     /* Name of the stored session that was opened, so that 'savesession'
      * keeps it and 'open' can report it. */
     std::string mStoredSessionName;
@@ -199,6 +251,23 @@ private:
      * environment. */
     std::string mEditor;
     unsigned long long mEditMaxSize;
+    /* 'option transfer' / 'ascii' / 'binary' / '-transfer='. */
+    TransferMode mTransferMode;
+    /* 'option include' / 'option exclude' (one WinSCP mask: setting one
+     * half replaces the other, like upstream). */
+    FileMask mOptionMask;
+    bool mOptionMaskUsed;
+    /* 'option failonnomatch': a mask that selects nothing is an error. */
+    bool mFailOnNoMatch;
+    /* 'option echo': print every command before running it. */
+    bool mEchoCommands;
+    /* 'option reconnecttime': reopen a dropped session, in seconds. */
+    int mReconnectSeconds;
+    /* 'option synchdelete': the default of 'synchronize -delete'. */
+    bool mSyncDeleteDefault;
+    /* True while the -server loop of the graphical client runs: its
+     * echo must stay off so the protocol stays readable. */
+    bool mServerLoop;
 };
 
 } // namespace linuxscp

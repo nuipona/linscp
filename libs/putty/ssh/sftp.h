@@ -261,6 +261,31 @@ bool fxp_write_recv(struct sftp_packet *pktin, struct sftp_request *req);
 /*
  * Read from a directory.
  */
+/* LinuxSCP additions: symlink, server-side copy-data and the
+ * check-file-name checksum extension. */
+struct sftp_request *fxp_symlink_send(const char *target,
+                                      const char *linkpath);
+bool fxp_symlink_recv(struct sftp_packet *pktin, struct sftp_request *req);
+struct sftp_request *fxp_copydata_send(struct fxp_handle *readHandle,
+                                       uint64_t readOffset, uint64_t length,
+                                       struct fxp_handle *writeHandle,
+                                       uint64_t writeOffset);
+bool fxp_copydata_recv(struct sftp_packet *pktin, struct sftp_request *req);
+/* Reply of the check-file-name extension. */
+struct fxp_checksum {
+    char *algorithm;            /* the hash algorithm the server used */
+    unsigned char *hash;        /* the digest itself */
+    size_t hash_len;
+};
+
+struct sftp_request *fxp_checkfile_name_send(const char *path,
+                                             const char *algorithms,
+                                             uint64_t offset, uint64_t length,
+                                             uint32_t block_size);
+struct fxp_checksum *fxp_checkfile_name_recv(struct sftp_packet *pktin,
+                                             struct sftp_request *req);
+void fxp_free_checksum(struct fxp_checksum *checksum);
+
 struct sftp_request *fxp_readdir_send(struct fxp_handle *handle);
 struct fxp_names *fxp_readdir_recv(struct sftp_packet *pktin,
                                    struct sftp_request *req);

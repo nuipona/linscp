@@ -54,14 +54,19 @@ set(FRONTEND_SOURCES
   ${FRONTEND}/PathUtil.cpp
   ${FRONTEND}/Platform.cpp
   ${FRONTEND}/Texts.cpp
+  ${FRONTEND}/TextMode.cpp
 )
 
 if(WIN32)
-  list(APPEND FRONTEND_SOURCES ${FRONTEND}/SftpClientStub.cpp)
+  list(APPEND FRONTEND_SOURCES
+    ${FRONTEND}/SftpClientStub.cpp
+    ${FRONTEND}/HashUtilStub.cpp
+  )
 else()
   list(APPEND FRONTEND_SOURCES
     ${FRONTEND}/PuttyGlue.cpp
     ${FRONTEND}/SftpClient.c
+    ${FRONTEND}/HashUtil.c
   )
 endif()
 

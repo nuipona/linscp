@@ -143,6 +143,7 @@ APP_SRCS := \
 	Session.cpp \
 	SessionStore.cpp \
 	SftpClient.c \
+	HashUtil.c \
 	ProtocolClient.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
@@ -153,6 +154,7 @@ APP_SRCS := \
 	PathUtil.cpp \
 	Platform.cpp \
 	Texts.cpp \
+	TextMode.cpp \
 	main.cpp
 
 app_obj = $(OBJDIR)/linux/$(patsubst %.c,%.o,$(patsubst %.cpp,%.o,$(1)))

@@ -80,7 +80,7 @@ size_t seat_output(Seat * seat, SeatOutputType type, const void * data, size_t l
         Console::Instance().Write(std::string(bytes, len));
         return 0;
     }
-    scpSeat->session->PushReceivedData(bytes, len);
+    scpSeat->session->DeliverChannelData(bytes, len);
     return 0;
 }
 
@@ -704,8 +704,28 @@ Session::Session() :
     mAlive(false),
     mPasswordUsed(false),
     mReceivedStart(0),
-    mReceivedEnd(0)
+    mReceivedEnd(0),
+    mOutputSink(NULL),
+    mOutputSinkCtx(NULL)
 {
+}
+
+void Session::SetOutputSink(OutputSinkFn sink, void * ctx)
+{
+    mOutputSink = sink;
+    mOutputSinkCtx = ctx;
+}
+
+void Session::DeliverChannelData(const void * data, size_t len)
+{
+    if (mOutputSink != NULL)
+    {
+        /* An exec session prints its command output instead of feeding
+         * the SFTP protocol layer. */
+        mOutputSink(mOutputSinkCtx, static_cast<const char *>(data), len);
+        return;
+    }
+    PushReceivedData(data, len);
 }
 
 Session::~Session()
@@ -898,6 +918,34 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
 
 bool Session::Open(const SessionOptions & options, std::string & error)
 {
+    if (!UseNativeSftp(options.protocol))
+    {
+        /* A curl-backed session has no connection of its own; it must
+         * still become the current session, because ProtocolClient
+         * reads its options for every operation. */
+        if (options.hostName.empty())
+        {
+            error = "No host name was specified.";
+            return false;
+        }
+        Close();
+        mOptions = options;
+        mUserName = options.userName;
+        mPasswordUsed = false;
+        mAlive = true;
+        mConnectionError.clear();
+        mOpen = true;
+        SetCurrentSession(this);
+        Console::Instance().LogEvent("Connected via " + mOptions.protocol +
+            " to " + mOptions.hostName);
+        return true;
+    }
+    return Connect(options, "sftp", true, true, error);
+}
+
+bool Session::Connect(const SessionOptions & options, const char * program,
+    bool subsystem, bool takeCurrent, std::string & error)
+{
     if (options.hostName.empty())
     {
         error = "No host name was specified.";
@@ -921,17 +969,6 @@ bool Session::Open(const SessionOptions & options, std::string & error)
     mPasswordUsed = false;
     mAlive = true;
     mConnectionError.clear();
-
-    if (!UseNativeSftp(mOptions.protocol))
-    {
-        /* curl-backed protocols (and every protocol on Windows, where
-         * curl.exe provides SFTP too) need no persistent connection
-         * object: ProtocolClient runs one curl process per operation. */
-        mOpen = true;
-        SetCurrentSession(this);
-        Console::Instance().LogEvent("Connected via " + mOptions.protocol + " to " + mOptions.hostName);
-        return true;
-    }
 
 #if LINUXSCP_SESSION_NATIVE
 
@@ -971,9 +1008,10 @@ bool Session::Open(const SessionOptions & options, std::string & error)
         conf_set_filename(conf, CONF_keyfile, fileName);
         filename_free(fileName);
     }
-    /* Run the SFTP subsystem, like psftp does. */
-    conf_set_bool(conf, CONF_ssh_subsys, true);
-    conf_set_str(conf, CONF_remote_cmd, "sftp");
+    /* Run the SFTP subsystem, like psftp does, or the given command
+     * through an 'exec' request. */
+    conf_set_bool(conf, CONF_ssh_subsys, subsystem);
+    conf_set_str(conf, CONF_remote_cmd, program);
     conf_set_bool(conf, CONF_ssh_simple, true);
     conf_set_bool(conf, CONF_nopty, true);
     conf_set_int(conf, CONF_connect_timeout, mOptions.timeoutSecs * 1000);
@@ -1000,10 +1038,14 @@ bool Session::Open(const SessionOptions & options, std::string & error)
     }
     sfree(realHost);
 
-    SetCurrentSession(this);
+    if (takeCurrent)
+    {
+        SetCurrentSession(this);
+    }
 
-    Console::Instance().LogEvent("Waiting for the SSH channel to open");
-    /* Wait until the SSH channel is ready to carry the SFTP protocol. */
+    Console::Instance().LogEvent(subsystem ?
+        "Waiting for the SSH channel to open" :
+        "Waiting for the command to start");
     while (mAlive && !backend_sendok(static_cast<Backend *>(mBackend)))
     {
         Pump();
@@ -1066,6 +1108,56 @@ void Session::Close()
     mReceivedEnd = 0;
     mOpen = false;
     mAlive = false;
+}
+
+namespace {
+
+void ExecOutputSink(void * ctx, const char * data, size_t len)
+{
+    (void)ctx;
+    Console::Instance().Write(std::string(data, len));
+}
+
+} // namespace
+
+bool Session::ExecRemote(const SessionOptions & options,
+    const std::string & command, std::string & error)
+{
+#if !LINUXSCP_SESSION_NATIVE
+    (void)options;
+    (void)command;
+    error = "The native SSH transport is not available in this build.";
+    return false;
+#else
+    if (!UseNativeSftp(options.protocol))
+    {
+        error = "Remote command execution needs an SSH (sftp://) session.";
+        return false;
+    }
+    /* A one-shot session of its own: it never becomes the session the
+     * SFTP transport glue addresses, so the open session of the script
+     * stays connected and buffered while the command runs. */
+    Session exec;
+    exec.SetOutputSink(ExecOutputSink, NULL);
+    if (!exec.Connect(options, command.c_str(), false, false, error))
+    {
+        return false;
+    }
+    while (exec.IsAlive())
+    {
+        if (!exec.Pump())
+        {
+            break;
+        }
+    }
+    exec.Close();
+    if (!exec.ConnectionError().empty())
+    {
+        error = exec.ConnectionError();
+        return false;
+    }
+    return true;
+#endif
 }
 
 Session * CurrentSession()
