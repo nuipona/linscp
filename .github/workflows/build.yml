@@ -142,7 +142,10 @@ jobs:
       - name: Unit tests
         shell: pwsh
         run: |
-          $output = & ctest --test-dir build-windows -C Release --output-on-failure 2>&1 | Out-String
+          # -V rather than --output-on-failure: the evidence lines a suite
+          # prints when it passes are the point of this step, and ctest
+          # swallows the output of tests that do not fail.
+          $output = & ctest --test-dir build-windows -C Release -V 2>&1 | Out-String
           Write-Host $output
           # What this platform actually proved, as an annotation the API
           # serves: the skip count included, because the live suite skips the
@@ -150,6 +153,13 @@ jobs:
           # apart from a suite that ran everything.
           $evidence = $output -split "`r?`n" |
             Where-Object { $_ -match '^evidence: |checks passed' }
+          if (-not $evidence) {
+            # A run that cannot say what it executed has not established
+            # anything, so it does not get to be green.
+            Write-Host "::error::no suite reported its evidence line: the " +
+              "tests did not run, or their output is not reaching this step"
+            exit 1
+          }
           foreach ($line in $evidence) { Write-Host "::notice::$($line.Trim())" }
           if ($LASTEXITCODE -ne 0) {
             # Repeat the failing checks as annotations: they stay readable in
