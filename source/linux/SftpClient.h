@@ -118,6 +118,15 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
     unsigned long long resumeOffset, unsigned long long * size,
     LscpProgressFn progress, void * progressCtx);
 
+/* Appends the source file to the destination instead of replacing it. A
+ * missing destination is created. These two have no counterpart on the curl
+ * backends, which cannot position a write in a remote file. */
+int lscp_sftp_get_append(const char * remotePath, const char * localPath,
+    unsigned long long * size, LscpProgressFn progress, void * progressCtx);
+int lscp_sftp_put_append(const char * localPath, const char * remotePath,
+    int permissions, unsigned long long * size, LscpProgressFn progress,
+    void * progressCtx);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

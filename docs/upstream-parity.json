@@ -2,7 +2,7 @@
  "upstream": {
   "repository": "winscp/winscp",
   "commit": "69edabbe2dc2c62661a7d3fc7e2396b5f42d504d",
-  "audited_on": "2026-10-13",
+  "audited_on": "2026-10-14",
   "command_sources": [
    "source/core/Script.cpp",
    "source/core/Script.h"
@@ -39,7 +39,7 @@
   },
   "chmod": {
    "status": "partial",
-   "notes": "Octal permissions; no full upstream permission syntax or recursion."
+   "notes": "Octal and symbolic modes ('u+x', 'a=r,go-w', 'u+s', 'X') and -recursive over a directory tree, symbolic links skipped; the mode is checked before the connection so a typo is reported even when offline. Upstream's script command passes an octal string only, so the symbolic forms and the recursion are an extension; verified against a live server that implements SETSTAT. Missing: owner and group changes, and upstream's per-site permission defaults."
   },
   "close": {
    "status": "partial",
@@ -47,7 +47,7 @@
   },
   "copyid": {
    "status": "partial",
-   "notes": "Fails explicitly with instructions instead of silently doing nothing: it cannot yet append the public half of the private key to ~/.ssh/authorized_keys."
+   "notes": "Reads the session's private key (or the given key file: an OpenSSH public key, an OpenSSH private key or a PuTTY .ppk, foreign formats imported through the bundled PuTTY core) and appends its authorized_keys line to ~/.ssh/authorized_keys, creating the directory 0700 and the file 0600 and leaving an already installed key alone. Needs an sftp:// or scp:// session; an encrypted key asks for its passphrase in an interactive session and is refused in batch mode. The Windows build says it cannot read key files instead of doing nothing. Verified live for .pub, PEM private and duplicate input; the upstream command takes exactly one argument, ours also accepts none."
   },
   "cp": {
    "status": "partial",
@@ -59,7 +59,7 @@
   },
   "echo": {
    "status": "partial",
-   "notes": "Plain token output; no full upstream switch/parameter/environment expansion semantics."
+   "notes": "Plain token output. The line has already been through the upstream expansions - script parameters, %TIMESTAMP% and environment variables - because they are applied before dispatch; text in single quotes is left alone."
   },
   "exit": {
    "status": "partial",
@@ -67,11 +67,11 @@
   },
   "get": {
    "status": "partial",
-   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch and resume (binary only, rejected with ASCII). Missing: speed limits, transfer presets, -permissions on downloads."
+   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Missing: transfer presets, -permissions on downloads and upstream's raw transfer settings."
   },
   "help": {
    "status": "partial",
-   "notes": "Per-command 'help <command>'/'man <command>' with upstream syntax lines and a general listing. No abbreviation resolution."
+   "notes": "Per-command 'help <command> / 'man <command>' with syntax lines and a general listing. Command names, including those in help, may be given as an unambiguous abbreviation."
   },
   "keepuptodate": {
    "status": "partial",
@@ -99,11 +99,11 @@
   },
   "man": {
    "status": "partial",
-   "notes": "Same as 'help': per-command syntax and a general listing. No abbreviation resolution."
+   "notes": "Same as 'help': per-command syntax and a general listing, with unambiguous abbreviations accepted."
   },
   "mget": {
    "status": "partial",
-   "notes": "Same implementation as 'get': binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, include/exclude, failonnomatch, resume (binary only). Missing: speed limits and transfer presets."
+   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
   },
   "mkdir": {
    "status": "partial",
@@ -111,7 +111,7 @@
   },
   "mput": {
    "status": "partial",
-   "notes": "Same implementation as 'put': binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, include/exclude, failonnomatch, -permissions=. Missing: speed limits and transfer presets."
+   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
   },
   "mv": {
    "status": "partial",
@@ -123,11 +123,11 @@
   },
   "option": {
    "status": "partial",
-   "notes": "echo, batch (on/off/abort/continue), confirm, resume, transfer (binary/ascii/automatic), include/exclude (one mask, setting either clears the other, 'clear' resets), synchdelete, failonnomatch, reconnecttime (seconds or off, with automatic reconnect), editor, editmaxsize, and a listing when called with no name. Missing: transfer presets and per-site persistence of script options."
+   "notes": "echo, batch (on/off/abort/continue), confirm, resume, transfer (binary/ascii/automatic), include/exclude (one mask, setting either clears the other, 'clear' resets), synchdelete, failonnomatch, reconnecttime (seconds or off, with automatic reconnect), editor, editmaxsize, and a listing when called with no name. Option and value names may be abbreviated when the abbreviation is unambiguous; masks, programs and numbers are never abbreviated. Missing: transfer presets and per-site persistence of script options."
   },
   "put": {
    "status": "partial",
-   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions. Missing: speed limits and transfer presets."
+   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Missing: transfer presets and upstream's raw transfer settings."
   },
   "pwd": {
    "status": "partial",
@@ -135,7 +135,7 @@
   },
   "recv": {
    "status": "partial",
-   "notes": "Same implementation as 'get'. Missing: speed limits and transfer presets."
+   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
   },
   "rename": {
    "status": "partial",
@@ -151,7 +151,7 @@
   },
   "send": {
    "status": "partial",
-   "notes": "Same implementation as 'put'. Missing: speed limits and transfer presets."
+   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets."
   },
   "session": {
    "status": "partial",
@@ -168,10 +168,6 @@
   "synchronize": {
    "status": "partial",
    "notes": "Planner with direction, -criteria=, -filemask=, -delete/-nodelete (default from option synchdelete), -mirror (rejects 'both', resolves any difference toward the source), -transfer=binary|ascii|automatic, -preview, -nonrecursive, -interval=, -count=; 'both' keeps a state record. Verified live. Missing: watch/background mode and upstream's conflict resolution UI."
-  },
-  "edit": {
-   "status": "partial",
-   "notes": "Downloads the remote file, runs $LINUXSCP_EDITOR/$EDITOR or option editor, and uploads it back when it changed, refusing files over option editmaxsize and refusing to overwrite a file modified since the download. No local-side edit, no editor fallback chain or encoding handling beyond the installed editor."
   }
  },
  "features": [
@@ -203,7 +199,7 @@
   {
    "name": "Transfers",
    "status": "partial",
-   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume (binary only), reconnecttime with automatic reconnect; ASCII conversion verified byte-exact against a live server. Missing: bandwidth limits, transfer presets and atomic-rename policies."
+   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Missing: transfer presets, the .filepart temporary-name policy and per-file progress reporting on the curl paths."
   },
   {
    "name": "Synchronization",
@@ -233,7 +229,7 @@
   {
    "name": "Automation",
    "status": "partial",
-   "notes": "Subset console scripting; no WinSCP .NET assembly/PowerShell API or structured XML action log and full parameter expansion."
+   "notes": "Console scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters (%1%..%9% via -parameter), %TIMESTAMP% with relative offsets and formats, %NAME% environment expansion, and an XML action log (-xmllog=) recording every command, result, message and transfer with passwords masked. Missing: the WinSCP .NET assembly and PowerShell APIs, and equivalence with upstream's log format, which our log mirrors in structure but does not copy; the expansions are not applied to -server input, where the graphical client quotes literal paths."
   },
   {
    "name": "Desktop integration",
@@ -249,6 +245,33 @@
    "name": "Packaging/platforms",
    "status": "partial",
    "notes": "Make/CMake and Debian/Windows builds exist; Windows curl may lack SSH protocols. Native builds do not establish functional parity."
+  }
+ ],
+ "linuxscp_additions": [
+  {
+   "name": "edit",
+   "status": "partial",
+   "notes": "Downloads the remote file, runs $LINUXSCP_EDITOR/$EDITOR or option editor, and uploads it back when it changed, refusing files over option editmaxsize and refusing to overwrite a file modified since the download. No local-side edit, no editor fallback chain or encoding handling beyond the installed editor. Upstream's script interpreter has no 'edit' command at the pinned commit, so this is a LinuxSCP command rather than parity work."
+  },
+  {
+   "name": "savesession / rmsession",
+   "status": "partial",
+   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly."
+  },
+  {
+   "name": "sessions",
+   "status": "partial",
+   "notes": "Plural alias of 'session' with no argument, listing the stored sites. Not an upstream command name."
+  },
+  {
+   "name": "show",
+   "status": "missing",
+   "notes": "Recognised only to report that it is unsupported: the connection runs the SFTP subsystem, so there is no shell state to show. Not an upstream script command either."
+  },
+  {
+   "name": "del, md, sync, quit, end",
+   "status": "partial",
+   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage."
   }
  ]
 }

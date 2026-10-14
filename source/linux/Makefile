@@ -147,6 +147,7 @@ APP_SRCS := \
 	ProtocolClient.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
+	ScriptParams.cpp \
 	SyncPlanner.cpp \
 	Editor.cpp \
 	Console.cpp \

@@ -19,15 +19,17 @@ public:
     static int Stat(const SessionOptions & options, const std::string & remotePath,
         LscpAttrs * attrs, std::string & error);
 
+    /* speedKBytesPerSecond limits the transfer rate (0 is unlimited); it
+     * corresponds to the '-speed=' switch of get and put. */
     static int Get(const SessionOptions & options, const std::string & remotePath,
         const std::string & localPath, unsigned long long resumeOffset,
         bool preserveTime, unsigned long long * size, LscpProgressFn progress,
-        void * progressCtx, std::string & error);
+        void * progressCtx, std::string & error, unsigned speedKBytesPerSecond = 0);
 
     static int Put(const SessionOptions & options, const std::string & localPath,
         const std::string & remotePath, int permissions, unsigned long long resumeOffset,
         bool preserveTime, unsigned long long * size, LscpProgressFn progress,
-        void * progressCtx, std::string & error);
+        void * progressCtx, std::string & error, unsigned speedKBytesPerSecond = 0);
 
     static int Remove(const SessionOptions & options, const std::string & remotePath,
         std::string & error);

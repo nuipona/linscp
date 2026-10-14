@@ -135,7 +135,9 @@ class SftpSI(paramiko.SFTPServerInterface):
         except OSError:
             return _err()
 
-    def setstat(self, path, attr):
+    def chattr(self, path, attr):
+        # paramiko routes SSH_FXP_SETSTAT here (older releases called it
+        # 'setstat', which is why the alias below exists).
         try:
             mpath = self._map(path)
             if getattr(attr, "st_mode", None) is not None:
@@ -154,6 +156,8 @@ class SftpSI(paramiko.SFTPServerInterface):
             return paramiko.SFTP_OK
         except OSError:
             return _err()
+
+    setstat = chattr  # older paramiko releases
 
 
 class Server(paramiko.ServerInterface):

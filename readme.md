@@ -62,9 +62,12 @@ browser-based dual-pane Commander interface (`linuxscp-gui`).
 Protocol URL acceptance is not proof of complete support: WebDAV directory
 listing is incomplete, and authenticated Amazon S3 (signing and bucket/object
 listing) is not implemented. Windows SSH protocols depend on the installed
-curl build. ASCII transfers, WinSCP file masks, reconnect settings, persistent
-multi-session management, the remote editor and the .NET automation API are
-among the remaining gaps.
+curl build. Scripting covers the WinSCP transfer switches (file masks,
+`-transfer=`, `-resume`, `-append`, `-speed=`, `-resumesupport=`,
+`-preservetime`), unambiguous command and option abbreviations, script
+parameters with `%TIMESTAMP%` and environment expansion, and an XML action
+log; the .NET assembly and PowerShell automation APIs, transfer presets,
+session folder trees and encrypted stored passwords remain open gaps.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 for the pinned upstream baseline, command inventory, limitations and tests.

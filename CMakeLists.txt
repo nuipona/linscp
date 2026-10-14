@@ -49,6 +49,7 @@ set(FRONTEND_SOURCES
   ${FRONTEND}/Editor.cpp
   ${FRONTEND}/ProtocolClient.cpp
   ${FRONTEND}/Script.cpp
+  ${FRONTEND}/ScriptParams.cpp
   ${FRONTEND}/Console.cpp
   ${FRONTEND}/LocalFs.cpp
   ${FRONTEND}/PathUtil.cpp

@@ -21,6 +21,8 @@
  */
 
 #include "Console.h"
+#include "LocalFs.h"
+#include "PathUtil.h"
 #include "Session.h"
 #include "Texts.h"
 
@@ -344,6 +346,33 @@ void DeleteStaleImportedKeyFiles()
     closedir(handle);
 }
 
+/* Strips the surrounding white space and any line break of a key comment. */
+std::string Trimmed(const char * text)
+{
+    if (text == NULL)
+    {
+        return std::string();
+    }
+    std::string result = text;
+    while (!result.empty() &&
+        (result[result.size() - 1] == '\n' || result[result.size() - 1] == '\r' ||
+         result[result.size() - 1] == ' ' || result[result.size() - 1] == '\t'))
+    {
+        result.erase(result.size() - 1);
+    }
+    size_t start = result.find_first_not_of(" \t");
+    return start == std::string::npos ? std::string() : result.substr(start);
+}
+
+/* Base64 of a key blob on one line, as authorized_keys wants it. */
+std::string Base64OneLine(ptrlen data)
+{
+    strbuf * encoded = base64_encode_sb(data, 0);
+    const std::string result(encoded->s, encoded->len);
+    strbuf_free(encoded);
+    return result;
+}
+
 } // namespace
 
 std::string PreparePrivateKeyFile(const std::string & keyFile, std::string & error)
@@ -460,6 +489,176 @@ std::string PreparePrivateKeyFile(const std::string & keyFile, std::string & err
 void DiscardImportedPrivateKeyFile()
 {
     DeleteImportedKeyFile();
+}
+
+/*
+ * Reads the public half of 'keyFile' and formats it the way an OpenSSH
+ * authorized_keys line looks ('algorithm base64 comment'). 'copyid' installs
+ * exactly this text on the server, so the answer must not depend on the key
+ * file format: a PuTTY private or public key file, an OpenSSH public key and
+ * an OpenSSH private key (old PEM or the new format) all work, the last one
+ * through the same importer the SSH core needs.
+ */
+bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
+    std::string & error)
+{
+    line.clear();
+    error.clear();
+
+    const std::string path = ExpandTilde(keyFile);
+    if (path.empty())
+    {
+        error = "No private key file was given.";
+        return false;
+    }
+
+    Filename * fileName = filename_from_str(path.c_str());
+    const int type = key_type(fileName);
+    bool ok = false;
+
+    if (type == SSH_KEYTYPE_SSH2_PUBLIC_OPENSSH)
+    {
+        /* Already a line of the right shape; take the first non-empty one. */
+        FILE * file = fopen(path.c_str(), "rb");
+        if (file == NULL)
+        {
+            error = "Cannot read the public key file '" + path + "': " +
+                LastSystemError();
+            filename_free(fileName);
+            return false;
+        }
+        char buffer[8192];
+        while (fgets(buffer, sizeof(buffer), file) != NULL)
+        {
+            std::string text = Trimmed(buffer);
+            if (text.empty())
+            {
+                continue;
+            }
+            const size_t firstSpace = text.find(' ');
+            const bool looksLikeKey = text.compare(0, 4, "ssh-") == 0 ||
+                text.compare(0, 6, "ecdsa-") == 0 ||
+                text.compare(0, 7, "sk-ssh-") == 0 ||
+                text.compare(0, 9, "sk-ecdsa-") == 0;
+            if (firstSpace == std::string::npos || !looksLikeKey)
+            {
+                error = "'" + path + "' is not an OpenSSH public key line.";
+                break;
+            }
+            line = text;
+            ok = true;
+            break;
+        }
+        fclose(file);
+        if (!ok && error.empty())
+        {
+            error = "No public key found in '" + path + "'.";
+        }
+        filename_free(fileName);
+        return ok;
+    }
+
+    if (type == SSH_KEYTYPE_SSH2)
+    {
+        /* A PuTTY key file, with or without the private half. */
+        char * algorithm = NULL;
+        char * comment = NULL;
+        const char * loadError = NULL;
+        strbuf * blob = strbuf_new();
+        if (ppk_loadpub_f(fileName, &algorithm, BinarySink_UPCAST(blob),
+            &comment, &loadError))
+        {
+            line = std::string(algorithm != NULL ? algorithm : "") + " " +
+                Base64OneLine(ptrlen_from_strbuf(blob));
+            const std::string text = Trimmed(comment != NULL ? comment : "");
+            if (!text.empty())
+            {
+                line += " " + text;
+            }
+            ok = true;
+        }
+        else
+        {
+            error = "Cannot read the public half of the key file '" + path +
+                "': " + (loadError != NULL ? loadError : "unusable key file") + ".";
+        }
+        strbuf_free(blob);
+        sfree(algorithm);
+        sfree(comment);
+        filename_free(fileName);
+        return ok;
+    }
+
+    if (type == SSH_KEYTYPE_SSH1 || type == SSH_KEYTYPE_SSH1_PUBLIC ||
+        !import_possible(type))
+    {
+        error = "Cannot use the key file '" + path + "': " +
+            key_type_to_str(type) + ". Only SSH-2 keys can be installed.";
+        filename_free(fileName);
+        return false;
+    }
+
+    /*
+     * A foreign private key. An encrypted one needs its passphrase first,
+     * exactly as PreparePrivateKeyFile() requires, and a passphrase prompt
+     * needs a terminal.
+     */
+    std::string passphrase;
+    char * keyComment = NULL;
+    const bool encrypted = import_encrypted(fileName, type, &keyComment);
+    sfree(keyComment);
+    if (encrypted)
+    {
+        if (!Console::Instance().IsInteractive())
+        {
+            error = "The private key file '" + path + "' is encrypted; run "
+                "interactively to enter its passphrase.";
+            filename_free(fileName);
+            return false;
+        }
+        if (!Console::Instance().ReadPassword(
+                "Passphrase for key file '" + path + "': ", passphrase) ||
+            passphrase.empty())
+        {
+            error = "No passphrase given for the private key file '" + path + "'.";
+            filename_free(fileName);
+            return false;
+        }
+    }
+
+    random_ref();
+    const char * importError = NULL;
+    ssh2_userkey * key = import_ssh2(fileName, type,
+        passphrase.empty() ? NULL : &passphrase[0], &importError);
+    if (!passphrase.empty())
+    {
+        smemclr(&passphrase[0], passphrase.size());
+    }
+    filename_free(fileName);
+    if (key == NULL || key == SSH2_WRONG_PASSPHRASE)
+    {
+        random_unref();
+        error = "Cannot read the private key file '" + path + "'";
+        error += (key == SSH2_WRONG_PASSPHRASE) ? ": wrong passphrase." :
+            (importError != NULL ? std::string(": ") + importError : ".");
+        return false;
+    }
+
+    strbuf * blob = strbuf_new();
+    ssh_key_public_blob(key->key, BinarySink_UPCAST(blob));
+    line = std::string(ssh_key_ssh_id(key->key)) + " " +
+        Base64OneLine(ptrlen_from_strbuf(blob));
+    strbuf_free(blob);
+    const std::string text = Trimmed(key->comment != NULL ? key->comment : "");
+    if (!text.empty())
+    {
+        line += " " + text;
+    }
+    random_unref();
+    ssh_key_free(key->key);
+    sfree(key->comment);
+    sfree(key);
+    return true;
 }
 
 } // namespace linuxscp

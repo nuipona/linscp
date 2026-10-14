@@ -61,13 +61,95 @@ class ScriptTests(unittest.TestCase):
                 self.assertIn("batch = " + mode, result.stdout)
 
     def test_reject_noop_options(self):
-        for command in ("option reconnect 10", "option batch garbage",
+        for command in ("option reconnecttime2 10", "option batch garbage",
                         "option transfer nonsense", "option reconnecttime nope",
                         "option include *.txt|bad|mask"):
             with self.subTest(command=command):
                 result = self.run_commands(command + "; echo SHOULD_NOT_RUN")
                 self.assertEqual(result.returncode, 1)
                 self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+    def test_option_abbreviations(self):
+        # An unambiguous abbreviation names one option, like the upstream
+        # command table; an ambiguous one is refused instead of guessing.
+        result = self.run_commands("option synchdel on; option synchdelete")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("synchdelete = on", result.stdout)
+        result = self.run_commands("option transfer asc; option transfer")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("transfer = ascii", result.stdout)
+        # 'e' could be echo, editor, editmaxsize or exclude; the client must
+        # not guess which one a script meant.
+        for command in ("option e on", "option ed nano", "option re 10"):
+            with self.subTest(command=command):
+                result = self.run_commands(command + "; echo SHOULD_NOT_RUN")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("ambiguous", result.stderr)
+                self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+        # An unambiguous abbreviation of both name and value is accepted.
+        result = self.run_commands("option bat cont; option batch")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("batch = continue", result.stdout)
+
+    def test_command_abbreviations(self):
+        result = self.run_commands("opt bat cont; echo AFTER")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("AFTER", result.stdout)
+        # 'se' could be session or sessions, and 'l' lcd, lls, ln, lpwd or
+        # ls; guessing is refused, while 'co' unambiguously means copyid.
+        for command in ("se", "s", "l"):
+            with self.subTest(command=command):
+                result = self.run_commands(command)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("ambiguous", result.stderr)
+        # An unambiguous abbreviation reaches the command itself.
+        result = self.run_commands("synch local")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("ambiguous", result.stderr)
+        self.assertNotIn("Unknown command", result.stderr)
+        # A name that matches nothing is still an unknown command.
+        result = self.run_commands("nosuchcommand")
+        self.assertIn("Unknown command", result.stderr)
+
+    def test_script_parameters(self):
+        # %1% .. %9%, environment variables and %TIMESTAMP% are expanded
+        # before the command is parsed, as the upstream console does.
+        env = {"LSCP_TEST_PARAM": "from-env"}
+        with tempfile.TemporaryDirectory() as tmp:
+            script = pathlib.Path(tmp) / "s.txt"
+            script.write_text("echo %1%-%2%-end\n", encoding="utf-8")
+            result = subprocess.run(
+                [BINARY, "-script=" + str(script), "-parameter", "one", "two"],
+                capture_output=True, text=True, timeout=10,
+                env=self.environment(env))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("one-two-end", result.stdout)
+        result = subprocess.run(
+            [BINARY, "-command=echo [%LSCP_TEST_PARAM%]", "-parameter", "x"],
+            capture_output=True, text=True, timeout=10, env=self.environment(env))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("[from-env]", result.stdout)
+        # An unset variable is left alone rather than turned into nothing,
+        # and so is a parameter that was not given.
+        result = self.run_commands("echo [%NO_SUCH_VAR%] [%3%]")
+        self.assertIn("[%NO_SUCH_VAR%] [%3%]", result.stdout)
+        # A malformed timestamp offset fails instead of transferring to a
+        # path that still contains the placeholder.
+        result = self.run_commands("echo %TIMESTAMP-1Q#yyyymmdd%")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not valid", result.stderr)
+        result = self.run_commands("echo %TIMESTAMP#yyyymmdd%")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout.strip(), r"^[0-9]{8}$")
+
+    def test_parameters_are_not_expanded_in_server_mode(self):
+        # The GUI talks to -server and may send a file name that holds a
+        # percent sign; those lines are commands, not templates.
+        result = subprocess.run([BINARY, "-server"], input="echo %1%\n",
+                                capture_output=True, text=True, timeout=10,
+                                env=self.environment())
+        self.assertIn("LSCP-RESULT 0", result.stdout)
+        self.assertIn("%1%", result.stdout)
 
     def test_transfer_modes_are_real_options(self):
         # ascii/automatic and reconnecttime used to be rejected; they are
@@ -110,10 +192,12 @@ class ScriptTests(unittest.TestCase):
         # the switch check and stop at the connection; the rest is refused
         # up front instead of being silently ignored.
         for command in ("get", "recv", "mget", "put", "send", "mput"):
-            for switch in ("-resumegarbage", "-resume=off", "-speed=10",
+            for switch in ("-resumegarbage", "-resume=off", "-speed=x", "-speed=1K",
                            "-unknown", "-latest", "-criteria=time",
                            "-transfer=garbage", "-filemask=",
-                           "-filemask=*.txt|*.a|*.b", "-permissions=999"):
+                           "-filemask=*.txt|*.a|*.b", "-permissions=999",
+                           "-preservetime=hours", "-resumesupport=maybe",
+                           "-append -resume"):
                 with self.subTest(command=command, switch=switch):
                     result = self.run_commands(f"{command} {switch} source destination")
                     self.assertEqual(result.returncode, 1)
@@ -127,7 +211,11 @@ class ScriptTests(unittest.TestCase):
             for switch in ("-filemask=*.txt|*.bak",
                            "-filemask=*.jpg>1K<1M",
                            "-transfer=binary", "-transfer=ascii",
-                           "-transfer=automatic"):
+                           "-transfer=asc", "-transfer=automatic",
+                           "-speed=10", "-speed=0", "-resumesupport=on",
+                           "-resumesupport=off", "-resumesupport=1024",
+                           "-preservetime=all", "-noneweronly", "-append",
+                           "-nopreservetime", "-neweronly"):
                 with self.subTest(command=command, switch=switch):
                     result = self.run_commands(f"{command} {switch} source destination")
                     self.assertEqual(result.returncode, 1)
@@ -291,6 +379,85 @@ class ScriptTests(unittest.TestCase):
         result = self.run_commands("man")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Commands:", result.stdout)
+
+
+    def test_xml_action_log(self):
+        """'-xmllog=' writes a parseable log of what the script did."""
+        import xml.etree.ElementTree as ET
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "actions.xml"
+            # 'batch continue' keeps the run going past the two failures, so
+            # that the log holds several commands of each kind.
+            result = subprocess.run(
+                [BINARY, "-xmllog=" + str(log), "-batch",
+                 "-command=option batch continue ; echo text ; "
+                 "no-such-command ; open sftp://user:secret@127.0.0.1:1/"],
+                capture_output=True, text=True, timeout=30,
+                env=self.environment())
+            self.assertTrue(log.exists(), result.stderr)
+            root = ET.parse(log).getroot()
+            self.assertEqual(root.tag, "log_session")
+            self.assertIn("LinuxSCP", root.get("client", ""))
+            self.assertTrue(root.get("created"))
+            elements = [element.tag for element in root]
+            self.assertIn("command", elements)
+            self.assertIn("result", elements)
+            lines = [element.get("line", "").strip() for element in root
+                     if element.tag == "command"]
+            self.assertEqual(len(lines), 4, lines)
+            self.assertEqual(lines[1], "echo text")
+            self.assertEqual(lines[2], "no-such-command")
+            statuses = [element.get("status") for element in root
+                        if element.tag == "result"]
+            self.assertEqual(statuses, ["ok", "ok", "error", "error"])
+            kinds = dict((element.get("type"), 0) for element in root
+                         if element.tag == "message")
+            self.assertEqual(sorted(kinds), ["error", "output"])
+            messages = [element.text or "" for element in root
+                        if element.tag == "message"]
+            self.assertIn("text", "".join(messages))
+            self.assertIn("Unknown command", "".join(messages))
+            # A password must not be written to a file the user keeps.
+            self.assertNotIn("secret", log.read_text(encoding="utf-8"))
+
+    def test_xml_action_log_is_closed(self):
+        """The log ends in one complete document, not in a half element."""
+        import xml.etree.ElementTree as ET
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "closed.xml"
+            subprocess.run([BINARY, "-xmllog=" + str(log), "-batch",
+                            "-command=echo one"],
+                           capture_output=True, text=True, timeout=30,
+                           env=self.environment())
+            root = ET.parse(log).getroot()
+            self.assertEqual([element.tag for element in root][-1], "result")
+
+    def test_copyid_arguments(self):
+        result = self.run_commands("copyid one two; echo SHOULD_NOT_RUN")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Syntax: copyid", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+    def test_chmod_modes_are_parsed(self):
+        # A symbolic mode is a mode: only the missing connection may be
+        # complained about, and that happens after the arguments are checked.
+        for command in ("chmod u+x file", "chmod a=r,go-w file",
+                        "chmod 640 file -recursive", "chmod -recursive 700 file",
+                        "chmod a+r file +x", "chmod a+r file +q"):
+            with self.subTest(command=command):
+                result = self.run_commands(command)
+                self.assertEqual(result.returncode, 1)
+                self.assertNotIn("Wrong arguments", result.stderr)
+                self.assertIn("Not connected", result.stderr)
+        for command in ("chmod 999 file", "chmod u?q file", "chmod a+r",
+                        "chmod , file", "chmod -recursive", "chmod 12345 file"):
+            # Everything after the mode is a file name, so a stray '+q' is
+            # not a syntax error; that case is in the accepted list above.
+            with self.subTest(rejected=command):
+                result = self.run_commands(command + "; echo SHOULD_NOT_RUN")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Wrong arguments", result.stderr)
+                self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
 
 if __name__ == "__main__":

@@ -572,7 +572,7 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
 int ProtocolClient::Get(const SessionOptions & options, const std::string & remotePath,
     const std::string & localPath, unsigned long long resumeOffset,
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
-    void * progressCtx, std::string & error)
+    void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
     (void)progress;
     (void)progressCtx;
@@ -595,6 +595,12 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
         /* Give the downloaded file the server's timestamps where the
          * protocol carries them (FTP, SFTP, SCP, HTTP Last-Modified). */
         args.push_back("-R");
+    }
+
+    if (speedKBytesPerSecond > 0)
+    {
+        args.push_back("--limit-rate");
+        args.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
     args.push_back("-o");
@@ -621,7 +627,7 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
 int ProtocolClient::Put(const SessionOptions & options, const std::string & localPath,
     const std::string & remotePath, int permissions, unsigned long long resumeOffset,
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
-    void * progressCtx, std::string & error)
+    void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
     (void)permissions;
     (void)progress;
@@ -645,6 +651,12 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
         /* -R gives the uploaded file the local file's modification
          * time where the protocol supports it (FTP MFMT, SFTP). */
         args.push_back("-R");
+    }
+
+    if (speedKBytesPerSecond > 0)
+    {
+        args.push_back("--limit-rate");
+        args.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
     args.push_back("-T");

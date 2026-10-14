@@ -1,6 +1,7 @@
 #include "Console.h"
 
 #include "Platform.h"
+#include "Texts.h"
 
 #include <cerrno>
 #include <cstdio>
@@ -15,10 +16,59 @@ Console & Console::Instance()
     return console;
 }
 
+namespace {
+
+/*
+ * Text of the log, with the characters that would end an element early
+ * replaced by their entity. Control characters other than a tab cannot
+ * appear in XML at all, so they are dropped: a server may put them in a file
+ * name and the log must stay readable by an XML parser.
+ */
+std::string EscapeXml(const std::string & text)
+{
+    std::string result;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        const unsigned char c = static_cast<unsigned char>(text[i]);
+        switch (c)
+        {
+            case '&': result += "&amp;"; break;
+            case '<': result += "&lt;"; break;
+            case '>': result += "&gt;"; break;
+            case '"': result += "&quot;"; break;
+            case '\'': result += "&apos;"; break;
+            case '\t': result += "\t"; break;
+            default:
+                if (c >= 0x20 || c == 0x0a)
+                {
+                    result += static_cast<char>(c);
+                }
+                break;
+        }
+    }
+    return result;
+}
+
+std::string Timestamp()
+{
+    char buffer[64];
+    const std::time_t now = std::time(NULL);
+    struct tm tmResult;
+    if (!LocalTime(now, tmResult))
+    {
+        return "unknown";
+    }
+    strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%S", &tmResult);
+    return buffer;
+}
+
+} // namespace
+
 Console::Console() :
     mBatchMode(false),
     mVerbose(false),
     mLog(NULL),
+    mActionLog(NULL),
     mTransferSize(0),
     mLastPermille(0)
 {
@@ -27,6 +77,7 @@ Console::Console() :
 Console::~Console()
 {
     CloseLogFile();
+    CloseActionLogFile();
 }
 
 bool Console::IsInteractive() const
@@ -45,6 +96,10 @@ void Console::WriteLine(const std::string & text)
     fputs(text.c_str(), stdout);
     fputc('\n', stdout);
     fflush(stdout);
+    if (mActionLog != NULL)
+    {
+        LogAction("message", "type=\"output\"", text);
+    }
 }
 
 void Console::Status(const std::string & text)
@@ -57,6 +112,10 @@ void Console::Error(const std::string & text)
     fputs(text.c_str(), stderr);
     fputc('\n', stderr);
     fflush(stderr);
+    if (mActionLog != NULL)
+    {
+        LogAction("message", "type=\"error\"", text);
+    }
 }
 
 void Console::Fatal(const std::string & text)
@@ -200,6 +259,59 @@ void Console::LogTraffic(const void * data, size_t len, bool incoming)
     fflush(mLog);
 }
 
+bool Console::SetActionLogFile(const std::string & path, std::string & error)
+{
+    CloseActionLogFile();
+    mActionLog = fopen(path.c_str(), "wb");
+    if (mActionLog == NULL)
+    {
+        error = std::strerror(errno);
+        return false;
+    }
+    fprintf(mActionLog, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    fprintf(mActionLog, "<log_session client=\"%s\" created=\"%s\">\n",
+        EscapeXml(linuxscp::Texts::VersionLine()).c_str(), Timestamp().c_str());
+    fflush(mActionLog);
+    return true;
+}
+
+std::string Console::EscapeActionText(const std::string & text)
+{
+    return EscapeXml(text);
+}
+
+void Console::LogAction(const std::string & element,
+    const std::string & attributes, const std::string & text)
+{
+    if (mActionLog == NULL)
+    {
+        return;
+    }
+    fprintf(mActionLog, "  <%s time=\"%s\"%s", element.c_str(),
+        Timestamp().c_str(), attributes.empty() ? "" : (" " + attributes).c_str());
+    if (text.empty())
+    {
+        fputs("/>\n", mActionLog);
+    }
+    else
+    {
+        fputs(">", mActionLog);
+        fputs(EscapeXml(text).c_str(), mActionLog);
+        fprintf(mActionLog, "</%s>\n", element.c_str());
+    }
+    fflush(mActionLog);
+}
+
+void Console::CloseActionLogFile()
+{
+    if (mActionLog != NULL)
+    {
+        fprintf(mActionLog, "</log_session>\n");
+        fclose(mActionLog);
+        mActionLog = NULL;
+    }
+}
+
 void Console::CloseLogFile()
 {
     if (mLog != NULL)
@@ -213,6 +325,7 @@ void Console::CloseLogFile()
 void Console::TransferStart(const std::string & fileName, uint64_t totalSize)
 {
     mTransferSize = totalSize;
+    mTransferName = fileName;
     mLastPermille = 0;
     if (mBatchMode || !StdOutIsTerminal())
     {
@@ -257,6 +370,12 @@ void Console::TransferProgress(uint64_t transferred)
 
 void Console::TransferEnd(bool success)
 {
+    if (mActionLog != NULL)
+    {
+        LogAction("transfer", "file=\"" + EscapeXml(mTransferName) + "\" status=\"" +
+            std::string(success ? "ok" : "failed") + "\"", std::string());
+    }
+    mTransferName.clear();
     if (mBatchMode || !StdOutIsTerminal() || mTransferSize == 0)
     {
         return;

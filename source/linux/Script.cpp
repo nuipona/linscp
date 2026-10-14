@@ -1,5 +1,6 @@
 #include "Script.h"
 #include "ProtocolClient.h"
+#include "ScriptParams.h"
 
 #include <cctype>
 #include <cerrno>
@@ -8,6 +9,13 @@
 #include <cstring>
 
 #include <algorithm>
+#include <chrono>
+
+#if !defined(_WIN32)
+/* The public half of a key file, which only the bundled PuTTY core can
+ * read on POSIX. */
+#include "PuttyCompat.h"
+#endif
 
 #if defined(_WIN32)
 #include <process.h>
@@ -40,10 +48,188 @@ std::string ToLower(const std::string & text)
     return result;
 }
 
+/*
+ * The command names the interpreter knows, in the order 'help' lists them.
+ * Upstream keeps the same list in its command table and lets an unambiguous
+ * prefix stand for a whole name; tools/check_upstream_parity.py fails when
+ * the dispatcher grows a command that is not listed here.
+ */
+const char * const kCommandNames[] = {
+    "!", "ascii", "binary", "bye", "call", "cd", "checksum", "chmod",
+    "close", "copyid", "cp", "del", "delsession", "dir", "echo", "edit",
+    "end", "exit", "get", "help", "keepuptodate", "lcd", "lls", "ln",
+    "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv", "open",
+    "option", "pwd", "put", "quit", "recv", "rename", "rm", "rmdir",
+    "rmsession", "send", "session", "sessions", "stat", "savesession",
+    "show", "symlink", "sync", "synchronize", "terminal", "?"
+};
+
+std::vector<std::string> CommandNames()
+{
+    return std::vector<std::string>(kCommandNames,
+        kCommandNames + sizeof(kCommandNames) / sizeof(kCommandNames[0]));
+}
+
+/*
+ * A command line as it may be written to a log file. A password can reach a
+ * log in two ways - inside a site URL and as the value of a '-password='
+ * switch - and both are masked here, because an action log is kept, shipped
+ * and archived more readily than a terminal. Upstream masks the sensitive
+ * parameters of its log the same way.
+ */
+std::string CensoredForLog(const std::string & line)
+{
+    std::string result = line;
+
+    /* 'scheme://user:password@host' -> 'scheme://user:***@host' */
+    size_t from = 0;
+    while (true)
+    {
+        const size_t scheme = result.find("://", from);
+        if (scheme == std::string::npos)
+        {
+            break;
+        }
+        const size_t tokenEnd = result.find_first_of(" \t\"'", scheme + 3);
+        const size_t at = result.find('@', scheme + 3);
+        from = tokenEnd == std::string::npos ? result.size() : tokenEnd;
+        if (at == std::string::npos || (tokenEnd != std::string::npos && at > tokenEnd))
+        {
+            continue;
+        }
+        const size_t colon = result.find(':', scheme + 3);
+        if (colon == std::string::npos || colon > at)
+        {
+            continue;
+        }
+        result.replace(colon + 1, at - colon - 1, "***");
+        from = colon + 4;
+    }
+
+    /* '-password=value' -> '-password=***' (also quoted values). */
+    const std::string lowered = ToLower(result);
+    size_t switchAt = 0;
+    while ((switchAt = lowered.find("-password=", switchAt)) != std::string::npos)
+    {
+        const size_t value = switchAt + strlen("-password=");
+        if (value < result.size() && result[value] == '"')
+        {
+            const size_t quote = result.find('"', value + 1);
+            if (quote != std::string::npos)
+            {
+                result.replace(value + 1, quote - value - 1, "***");
+                switchAt = quote + 1;
+                continue;
+            }
+        }
+        size_t end = result.find(' ', value);
+        if (end == std::string::npos)
+        {
+            end = result.size();
+        }
+        result.replace(value, end - value, "***");
+        switchAt = value + 3;
+    }
+    return result;
+}
+
+bool IsKnownCommand(const std::string & name)
+{
+    for (size_t i = 0; i < sizeof(kCommandNames) / sizeof(kCommandNames[0]); i++)
+    {
+        if (name == kCommandNames[i])
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/*
+ * The '-speed=' limit. It is applied here rather than in a backend: the
+ * progress callback runs after every chunk of every transfer, so pausing in
+ * it paces the native SFTP engine, the curl path and the ASCII conversion
+ * alike, without either of them knowing about bandwidth.
+ */
+unsigned long long gSpeedLimitBytes = 0;
+std::chrono::steady_clock::time_point gSpeedStarted;
+unsigned long long gSpeedSeen = 0;
+
+void SetSpeedLimit(unsigned long long bytesPerSecond)
+{
+    gSpeedLimitBytes = bytesPerSecond;
+    gSpeedSeen = 0;
+    gSpeedStarted = std::chrono::steady_clock::now();
+}
+
+void PaceTransfer(unsigned long long transferred)
+{
+    if (gSpeedLimitBytes == 0)
+    {
+        return;
+    }
+    if (transferred < gSpeedSeen)
+    {
+        /* A new file started: the schedule restarts with it. */
+        gSpeedStarted = std::chrono::steady_clock::now();
+    }
+    gSpeedSeen = transferred;
+
+    const unsigned long long microseconds =
+        transferred * 1000000ULL / gSpeedLimitBytes;
+    const std::chrono::steady_clock::time_point due =
+        gSpeedStarted + std::chrono::microseconds(microseconds);
+    while (due > std::chrono::steady_clock::now())
+    {
+        /* Short sleeps, so that Ctrl-C still stops a paced transfer. */
+        const long long wait = std::chrono::duration_cast<std::chrono::milliseconds>(
+            due - std::chrono::steady_clock::now()).count();
+        SleepMilliseconds(wait > 100 ? 100u : static_cast<unsigned>(wait > 0 ? wait : 1));
+        if (Interrupted())
+        {
+            return;
+        }
+    }
+}
+
+/*
+ * Keeps the limit of one command in force while its files transfer and clears
+ * it afterwards, on every return path. 'member' mirrors the value for the
+ * curl backends, which ask curl itself to pace the connection.
+ */
+class SpeedLimitForThisCommand
+{
+public:
+    SpeedLimitForThisCommand(unsigned kBytesPerSecond, unsigned * member) :
+        mMember(member)
+    {
+        SetSpeedLimit(kBytesPerSecond * 1024ULL);
+        if (mMember != NULL)
+        {
+            *mMember = kBytesPerSecond;
+        }
+    }
+    ~SpeedLimitForThisCommand()
+    {
+        SetSpeedLimit(0);
+        if (mMember != NULL)
+        {
+            *mMember = 0;
+        }
+    }
+
+private:
+    SpeedLimitForThisCommand(const SpeedLimitForThisCommand &);
+    SpeedLimitForThisCommand & operator=(const SpeedLimitForThisCommand &);
+
+    unsigned * mMember;
+};
+
 void ProgressCallback(unsigned long long transferred, unsigned long long total, void * ctx)
 {
     (void)total;
     (void)ctx;
+    PaceTransfer(transferred);
     Console::Instance().TransferProgress(transferred);
 }
 
@@ -146,6 +332,7 @@ Script::Script() :
     mEchoCommands(false),
     mReconnectSeconds(0),
     mSyncDeleteDefault(false),
+    mSpeedLimit(0),
     mServerLoop(false)
 {
 }
@@ -264,13 +451,15 @@ int Script::RemoteStat(const std::string & path, LscpAttrs * attrs, std::string 
 int Script::RemoteGet(const std::string & remote, const std::string & local,
     unsigned long long resumeOffset, bool preserveTime,
     unsigned long long * size, LscpProgressFn progress, void * ctx,
-    std::string & error)
+    std::string & error, bool append)
 {
     error.clear();
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_get_resume(remote.c_str(), local.c_str(), resumeOffset, size,
-            progress, ctx);
+        int res = append ?
+            lscp_sftp_get_append(remote.c_str(), local.c_str(), size, progress, ctx) :
+            lscp_sftp_get_resume(remote.c_str(), local.c_str(), resumeOffset, size,
+                progress, ctx);
         if (res != 0)
         {
             error = lscp_sftp_error();
@@ -291,24 +480,28 @@ int Script::RemoteGet(const std::string & remote, const std::string & local,
         return res;
     }
     return ProtocolClient::Get(mSession.Options(), remote, local, resumeOffset,
-        preserveTime, size, progress, ctx, error);
+        preserveTime, size, progress, ctx, error, mSpeedLimit);
 }
 
 int Script::RemotePut(const std::string & local, const std::string & remote,
     int permissions, unsigned long long resumeOffset, bool preserveTime,
     unsigned long long * size, LscpProgressFn progress, void * ctx,
-    std::string & error)
+    std::string & error, bool append)
 {
     error.clear();
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_put_resume(local.c_str(), remote.c_str(), permissions,
-            resumeOffset, size, progress, ctx);
+        int res = append ?
+            lscp_sftp_put_append(local.c_str(), remote.c_str(), permissions, size,
+                progress, ctx) :
+            lscp_sftp_put_resume(local.c_str(), remote.c_str(), permissions,
+                resumeOffset, size, progress, ctx);
         if (res != 0)
         {
             error = lscp_sftp_error();
             return res;
         }
+
         if (preserveTime)
         {
             /* The SFTP protocol has no way to carry the timestamps in the
@@ -325,7 +518,27 @@ int Script::RemotePut(const std::string & local, const std::string & remote,
         return res;
     }
     return ProtocolClient::Put(mSession.Options(), local, remote, permissions,
-        resumeOffset, preserveTime, size, progress, ctx, error);
+        resumeOffset, preserveTime, size, progress, ctx, error, mSpeedLimit);
+}
+
+/* The timestamps of a local file onto a remote path, used when a transfer
+ * preserves the time of a directory as well as of its files. */
+int Script::RemoteSetTimes(const std::string & path, unsigned long atime,
+    unsigned long mtime, std::string & error)
+{
+    error.clear();
+    if (!UseNativeSftp(mSession.Options().protocol))
+    {
+        error = "Setting the timestamps of a directory needs the native "
+            "SFTP transport.";
+        return -1;
+    }
+    const int res = lscp_sftp_set_times(path.c_str(), atime, mtime);
+    if (res != 0)
+    {
+        error = lscp_sftp_error();
+    }
+    return res;
 }
 
 /* Download/Upload with the plan's transfer mode: 'ascii'/'automatic'
@@ -596,6 +809,15 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         }
     }
 
+    /* The log records where the session went, never how it was
+     * authenticated: the password is simply not part of the element. */
+    Console::Instance().LogAction("session",
+        "action=\"open\" protocol=\"" + Console::EscapeActionText(options.protocol) +
+        "\" host=\"" + Console::EscapeActionText(options.hostName) +
+        "\" port=\"" + std::to_string(options.portNumber) +
+        "\" user=\"" + Console::EscapeActionText(options.userName) +
+        "\" directory=\"" + Console::EscapeActionText(mRemoteDirectory) + "\"");
+
     Console::Instance().Status("Connected, the remote directory is " + mRemoteDirectory);
     return true;
 }
@@ -611,6 +833,7 @@ void Script::CloseSite()
     mSession.Close();
     mRemoteDirectory.clear();
     mHomeDirectory.clear();
+    Console::Instance().LogAction("session", "action=\"close\"");
 }
 
 bool Script::ChangeRemoteDirectory(const std::vector<std::string> & args)
@@ -1124,7 +1347,7 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
                 names->names[i].attrs.size : 0;
             Console::Instance().TransferStart(name, totalSize);
             int result = RemoteGet(childRemote, childLocal, 0, flags.preserveTime,
-                &size, ProgressCallback, NULL, dirErr);
+                &size, ProgressCallback, NULL, dirErr, flags.append);
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
@@ -1203,6 +1426,24 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             {
                 success = false;
             }
+        }
+    }
+
+    /*
+     * '-preservetime=all': the directory itself gets the time of its remote
+     * source once, after everything inside it was written (writing a file
+     * updates the parent directory again, which is why this happens here and
+     * not while the entries are copied).
+     */
+    if (success && flags.preserveTimeDirs && flags.preserveTime)
+    {
+        LscpAttrs attrs = {};
+        std::string timeError;
+        if (RemoteStat(remoteDir, &attrs, timeError) == LSCP_SFTP_STAT_EXISTS &&
+            (attrs.flags & LSCP_ATTR_ACMODTIME) != 0 && attrs.mtime != 0)
+        {
+            SetFileTimes(localDir, attrs.atime != 0 ? attrs.atime : attrs.mtime,
+                attrs.mtime);
         }
     }
 
@@ -1316,7 +1557,8 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
             }
             Console::Instance().TransferStart(name, info.size);
             int result = RemotePut(uploadPath, childRemote, flags.permissions, 0,
-                flags.preserveTime, &size, ProgressCallback, NULL, error);
+                flags.preserveTime, &size, ProgressCallback, NULL, error,
+                flags.append);
             Console::Instance().TransferEnd(result == 0);
             if (!asciiTemp.empty())
             {
@@ -1386,97 +1628,349 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
         }
         RemoteFreeNames(remoteNames);
     }
+
+    /* '-preservetime=all' on an upload: see the download for the why. */
+    if (success && flags.preserveTimeDirs && flags.preserveTime)
+    {
+        const LocalFileInfo info = StatLocal(localDir);
+        if (info.exists && info.mtime != 0)
+        {
+            std::string timeError;
+            if (RemoteSetTimes(remoteDir, info.atime != 0 ? info.atime : info.mtime,
+                info.mtime, timeError) != 0 && !timeError.empty())
+            {
+                Console::Instance().Status("Could not set the timestamps of '" +
+                    remoteDir + "': " + timeError);
+            }
+        }
+    }
     return success;
 }
 
-bool Script::ValidateTransferSwitches(const std::string & command,
-    const std::vector<std::string> & args)
+/* Every rejection of a transfer switch says the same thing in the same
+ * place, so that no path forgets to count the error. */
+bool Script::SwitchError(const std::string & command, const std::string & hint)
 {
-    /* Resuming needs stable byte offsets, so it cannot be combined with
-     * an ASCII/automatic transfer, whatever way the two were set. */
+    Console::Instance().Error(Texts::WrongArguments(command, hint));
+    mErrors++;
+    return false;
+}
+
+/*
+ * The parameters of this run, expanded exactly as the upstream console
+ * expands them, before the line is split into words.
+ */
+bool Script::ExpandParameters(const std::string & line, std::string & expanded)
+{
+    std::string error;
+    if (ExpandScriptParameters(line, mParameters, expanded, error))
     {
-        bool resumeGiven = mResume;
-        bool modeGiven = false;
-        TransferMode mode = mTransferMode;
-        for (const std::string & arg : args)
-        {
-            if (arg == "-resume")
-            {
-                resumeGiven = true;
-            }
-            else if (StartsWith(arg, "-transfer="))
-            {
-                if (ParseTransferMode(arg.substr(strlen("-transfer=")), mode))
-                {
-                    modeGiven = true;
-                }
-            }
-        }
-        if (resumeGiven && modeGiven && mode != TransferMode::Binary)
-        {
-            Console::Instance().Error(Texts::WrongArguments(command,
-                "Resuming a transfer is binary only: an ASCII transfer "
-                "converts line endings, so byte offsets do not survive."));
-            mErrors++;
-            return false;
-        }
+        return true;
     }
-    for (const std::string & arg : args)
+    Console::Instance().Error(error);
+    mErrors++;
+    return false;
+}
+
+/*
+ * 'synch' means 'synchronize' upstream; 'co' is refused because it could be
+ * 'close' or 'command'. A name that matches nothing is reported by the
+ * caller, which knows whether an unknown command or an unknown option is
+ * the worse mistake.
+ */
+bool Script::ResolveAbbreviation(const std::vector<std::string> & names,
+    const std::string & typed, const std::string & what,
+    std::string & resolved)
+{
+    resolved.clear();
+    std::string matches;
+    const int index = FindPrefixedName(names, typed, matches);
+    if (index == kNameAmbiguous)
     {
-        if (arg.empty() || arg[0] != '-')
-        {
-            continue;
-        }
-        if (arg == "-delete" || arg == "-neweronly" ||
-            arg == "-preservetime" || arg == "-nopreservetime" ||
-            arg == "-r" || arg == "-resume" || arg == "-nopermissions")
-        {
-            continue;
-        }
-        if (StartsWith(arg, "-transfer="))
-        {
-            TransferMode mode;
-            if (!ParseTransferMode(arg.substr(strlen("-transfer=")), mode))
-            {
-                Console::Instance().Error(Texts::WrongArguments(command,
-                    "The value of '-transfer' must be binary, ascii or automatic."));
-                mErrors++;
-                return false;
-            }
-            continue;
-        }
-        if (StartsWith(arg, "-filemask="))
-        {
-            FileMask mask;
-            std::string maskError;
-            if (!mask.Parse(arg.substr(strlen("-filemask=")), maskError))
-            {
-                Console::Instance().Error(Texts::WrongArguments(command,
-                    maskError));
-                mErrors++;
-                return false;
-            }
-            continue;
-        }
-        if (StartsWith(arg, "-permissions="))
-        {
-            unsigned long permissions = 0;
-            if (!ParseOctalPermissions(arg.substr(strlen("-permissions=")),
-                permissions))
-            {
-                Console::Instance().Error(Texts::WrongArguments(command,
-                    "The value of '-permissions' must be an octal number "
-                    "from 0 through 7777."));
-                mErrors++;
-                return false;
-            }
-            continue;
-        }
-        Console::Instance().Error(Texts::WrongArguments(command,
-            "Unsupported switch '" + arg + "'; it will not be ignored. " +
-            "Prefix a filename beginning with '-' with './'."));
+        Console::Instance().Error(Texts::WrongArguments(typed,
+            "The " + what + " '" + typed + "' is ambiguous: it matches " +
+            matches + ". Type them out in full."));
         mErrors++;
         return false;
+    }
+    if (index >= 0)
+    {
+        resolved = names[static_cast<size_t>(index)];
+    }
+    return true;
+}
+
+namespace {
+
+/* The vocabularies an abbreviated name is resolved against. */
+const std::vector<std::string> & OptionNames()
+{
+    static const std::vector<std::string> names = {
+        "echo", "batch", "confirm", "resume", "transfer", "include",
+        "exclude", "failonnomatch", "synchdelete", "reconnecttime",
+        "editor", "editmaxsize"
+    };
+    return names;
+}
+
+const std::vector<std::string> & ToggleNames()
+{
+    static const std::vector<std::string> names = { "off", "on" };
+    return names;
+}
+
+const std::vector<std::string> & BatchModeNames()
+{
+    static const std::vector<std::string> names = {
+        "off", "on", "abort", "continue"
+    };
+    return names;
+}
+
+const std::vector<std::string> & TransferModeNames()
+{
+    static const std::vector<std::string> names = {
+        "binary", "ascii", "automatic"
+    };
+    return names;
+}
+
+/*
+ * A transfer mode, abbreviated the way upstream abbreviates everything else.
+ * 'matches' receives the candidates when the text fits more than one mode, so
+ * that the caller can say which ones it could have meant.
+ */
+bool ParseTransferModeName(const std::string & text, TransferMode & mode,
+    std::string & matches)
+{
+    matches.clear();
+    const std::string resolved = ResolvePrefixedName(TransferModeNames(),
+        ToLower(text), matches);
+    if (!matches.empty() || resolved.empty())
+    {
+        return false;
+    }
+    return ParseTransferMode(resolved, mode);
+}
+
+} // namespace
+
+/*
+ * Whether one file of this size is resumed. '-resumesupport=' is the
+ * authoritative switch when it is given: 'off' never resumes, 'on' always
+ * does, and a size in kilobytes resumes only the files at least that big
+ * (the upstream 'smart' setting). Without it, '-resume' and
+ * 'option resume' decide, as before.
+ *
+ * An ASCII transfer is never resumed by the size threshold: converting line
+ * endings changes the byte count, so there is no offset to continue from.
+ */
+bool Script::Resumes(const TransferFlags & flags, unsigned long long size) const
+{
+    switch (flags.resumeSupport)
+    {
+        case TransferFlags::ResumeOff:
+            return false;
+        case TransferFlags::ResumeOn:
+            return true;
+        case TransferFlags::ResumeSmart:
+            return flags.transferMode == TransferMode::Binary &&
+                size >= flags.resumeThreshold;
+        case TransferFlags::ResumeUnset:
+        default:
+            break;
+    }
+    return flags.resume || mResume;
+}
+
+/*
+ * Reads the switches of 'get' and 'put' into 'flags' and collects the file
+ * names in 'paths'. Anything it does not understand is reported here, before
+ * a connection is opened or a file is touched, so that a switch is never
+ * silently ignored: a script that asks for a setting this client cannot
+ * honour must fail rather than transfer something else.
+ */
+bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
+    const std::vector<std::string> & args, TransferFlags & flags,
+    std::vector<std::string> & paths)
+{
+    /* Resuming needs stable byte offsets, so a switch that asks for it
+     * outright cannot be combined with an ASCII/automatic transfer,
+     * whichever way the mode was set. */
+    bool resumeForced = mResume;
+    TransferMode mode = mTransferMode;
+
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        const std::string & a = args[i];
+        if (a.empty() || a[0] != '-')
+        {
+            paths.push_back(a);
+            continue;
+        }
+        if (a == "-delete" || a == "-r" || a == "-resume" ||
+            a == "-neweronly" || a == "-noneweronly" || a == "-preservetime" ||
+            a == "-nopreservetime" || a == "-append" || a == "-nopermissions")
+        {
+            if (a == "-delete")
+            {
+                flags.deleteSource = true;
+            }
+            else if (a == "-neweronly")
+            {
+                flags.newerOnly = true;
+            }
+            else if (a == "-noneweronly")
+            {
+                flags.newerOnly = false;
+            }
+            else if (a == "-preservetime")
+            {
+                flags.preserveTime = true;
+            }
+            else if (a == "-nopreservetime")
+            {
+                flags.preserveTime = false;
+                flags.preserveTimeDirs = false;
+            }
+            else if (a == "-append")
+            {
+                flags.append = true;
+            }
+            else if (a == "-resume")
+            {
+                flags.resume = true;
+                resumeForced = true;
+            }
+            else if (a == "-nopermissions")
+            {
+                if (!uploads)
+                {
+                    return SwitchError(command,
+                        "The '-nopermissions' switch applies to uploads only.");
+                }
+                flags.permissions = -1;
+            }
+            continue;
+        }
+        if (StartsWith(a, "-preservetime="))
+        {
+            /* Upstream takes 'all' to preserve the time of the transferred
+             * directories as well as of their files. */
+            const std::string value = ToLower(a.substr(strlen("-preservetime=")));
+            if (value != "all")
+            {
+                return SwitchError(command, "The only value of "
+                    "'-preservetime' is 'all' (directories are timed too); "
+                    "use '-nopreservetime' to keep no timestamps.");
+            }
+            flags.preserveTime = true;
+            flags.preserveTimeDirs = true;
+            continue;
+        }
+        if (StartsWith(a, "-transfer="))
+        {
+            std::string matches;
+            if (!ParseTransferModeName(a.substr(strlen("-transfer=")), mode,
+                matches))
+            {
+                return SwitchError(command, matches.empty() ?
+                    "The value of '-transfer' must be binary, ascii or "
+                    "automatic." :
+                    "The value '" + a.substr(strlen("-transfer=")) + "' of "
+                    "'-transfer' is ambiguous: it matches " + matches + ".");
+            }
+            flags.transferMode = mode;
+            continue;
+        }
+        if (StartsWith(a, "-filemask="))
+        {
+            std::string maskError;
+            if (!flags.mask.Parse(a.substr(strlen("-filemask=")), maskError))
+            {
+                return SwitchError(command, maskError);
+            }
+            flags.maskGiven = true;
+            continue;
+        }
+        if (StartsWith(a, "-permissions="))
+        {
+            if (!uploads)
+            {
+                return SwitchError(command, "The '-permissions' switch applies "
+                    "to uploads only.");
+            }
+            unsigned long permissions = 0;
+            if (!ParseOctalPermissions(a.substr(strlen("-permissions=")),
+                permissions))
+            {
+                return SwitchError(command, "The value of '-permissions' must "
+                    "be an octal number from 0 through 7777.");
+            }
+            flags.permissions = static_cast<int>(permissions);
+            continue;
+        }
+        if (StartsWith(a, "-speed="))
+        {
+            /* Like upstream, the value is a number of kibibytes per second
+             * and an empty or negative one means no limit at all. */
+            const std::string value = a.substr(strlen("-speed="));
+            if (value.empty())
+            {
+                flags.speedKBytesPerSecond = 0;
+                continue;
+            }
+            char * end = NULL;
+            const long limit = strtol(value.c_str(), &end, 10);
+            if (end == NULL || *end != '\0' || limit < 0)
+            {
+                return SwitchError(command, "The value of '-speed' must be a "
+                    "whole number of kilobytes per second (0 removes the "
+                    "limit).");
+            }
+            flags.speedKBytesPerSecond = static_cast<unsigned>(limit);
+            continue;
+        }
+        if (StartsWith(a, "-resumesupport="))
+        {
+            const std::string value = ToLower(a.substr(strlen("-resumesupport=")));
+            if (value == "off" || value == "on")
+            {
+                flags.resumeSupport = value == "off" ? TransferFlags::ResumeOff :
+                    TransferFlags::ResumeOn;
+            }
+            else
+            {
+                char * end = NULL;
+                const long threshold = strtol(value.c_str(), &end, 10);
+                if (end == NULL || *end != '\0' || threshold < 0)
+                {
+                    return SwitchError(command, "The value of "
+                        "'-resumesupport' must be on, off or a number of "
+                        "kilobytes a file must reach to be resumed.");
+                }
+                flags.resumeSupport = TransferFlags::ResumeSmart;
+                flags.resumeThreshold =
+                    static_cast<unsigned long long>(threshold) * 1024ULL;
+            }
+            resumeForced = flags.resumeSupport == TransferFlags::ResumeOn;
+            continue;
+        }
+        return SwitchError(command, "Unsupported switch '" + a + "'; it will "
+            "not be ignored. Prefix a filename beginning with '-' with './'.");
+    }
+
+    if (flags.append && flags.resume)
+    {
+        return SwitchError(command, "'-append' and '-resume' cannot be used "
+            "together: one continues at the end of the destination, the "
+            "other at a shared offset in it.");
+    }
+    if (resumeForced && mode != TransferMode::Binary)
+    {
+        return SwitchError(command, "Resuming a transfer is binary only: an "
+            "ASCII transfer converts line endings, so byte offsets do not "
+            "survive.");
     }
     return true;
 }
@@ -1540,80 +2034,16 @@ bool Script::ListLocal(const std::vector<std::string> & args)
 
 bool Script::GetFiles(const std::vector<std::string> & args)
 {
-    if (!ValidateTransferSwitches("get", args))
+    TransferFlags flags;
+    flags.transferMode = mTransferMode;
+    std::vector<std::string> paths;
+    if (!ParseTransferSwitches("get", false, args, flags, paths))
     {
         return false;
     }
     if (!RequireConnection())
     {
         return false;
-    }
-
-    TransferFlags flags;
-    flags.transferMode = mTransferMode;
-    std::vector<std::string> paths;
-    for (size_t i = 0; i < args.size(); i++)
-    {
-        const std::string & a = args[i];
-        if (a == "-delete")
-        {
-            flags.deleteSource = true;
-        }
-        else if (a == "-neweronly")
-        {
-            flags.newerOnly = true;
-        }
-        else if (a == "-preservetime")
-        {
-            flags.preserveTime = true;
-        }
-        else if (a == "-nopreservetime")
-        {
-            flags.preserveTime = false;
-        }
-        else if (a == "-r")
-        {
-            flags.recursive = true;
-        }
-        else if (a == "-resume")
-        {
-            flags.resume = true;
-        }
-        else if (StartsWith(a, "-transfer="))
-        {
-            TransferMode mode;
-            if (!ParseTransferMode(a.substr(strlen("-transfer=")), mode))
-            {
-                Console::Instance().Error(Texts::WrongArguments("get",
-                    "The value of '-transfer' must be binary, ascii or automatic."));
-                mErrors++;
-                return false;
-            }
-            flags.transferMode = mode;
-        }
-        else if (StartsWith(a, "-filemask="))
-        {
-            std::string maskError;
-            if (!flags.mask.Parse(a.substr(strlen("-filemask=")), maskError))
-            {
-                Console::Instance().Error(Texts::WrongArguments("get", maskError));
-                mErrors++;
-                return false;
-            }
-            flags.maskGiven = true;
-        }
-        else if (a == "-nopermissions" || StartsWith(a, "-permissions="))
-        {
-            /* A download takes the permissions of the local target. */
-            Console::Instance().Error(Texts::WrongArguments("get",
-                "The '-permissions' switch applies to uploads only."));
-            mErrors++;
-            return false;
-        }
-        else
-        {
-            paths.push_back(a);
-        }
     }
 
     if (paths.empty())
@@ -1624,15 +2054,15 @@ bool Script::GetFiles(const std::vector<std::string> & args)
         return false;
     }
 
-    if ((flags.resume || mResume) && flags.transferMode != TransferMode::Binary)
+    /* Only the native transport can write at a position of the local file
+     * that is not the offset it read on the remote one. */
+    if (flags.append && !UseNativeSftp(mSession.Options().protocol))
     {
-        Console::Instance().Error(Texts::WrongArguments("get",
-            "Resuming a transfer is binary only: an ASCII transfer "
-            "converts line endings, so byte offsets do not survive."));
-        mErrors++;
-        return false;
+        return SwitchError("get", "'-append' needs the native SFTP "
+            "transport; the transfer backends cannot position a write.");
     }
     ResolveTransferMask(flags);
+    SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
 
     std::string destination = paths.size() >= 2 ? paths.back() : ".";
     std::vector<std::string> sourcePatterns = paths.size() >= 2 ?
@@ -1777,7 +2207,16 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             {
                 continue;
             }
-            if (mConfirm && localInfo.exists && !(flags.resume || mResume))
+
+            unsigned long long totalSize = 0;
+            if ((sourceAttrs.flags & LSCP_ATTR_SIZE) != 0)
+            {
+                totalSize = sourceAttrs.size;
+            }
+            /* Asking before overwriting is pointless when the file is only
+             * continued, and '-append' never destroys anything. */
+            const bool resumeThis = Resumes(flags, totalSize);
+            if (mConfirm && localInfo.exists && !resumeThis && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite local file '" + localPath + "'?");
@@ -1791,13 +2230,8 @@ bool Script::GetFiles(const std::vector<std::string> & args)
                 }
             }
 
-            unsigned long long totalSize = 0;
-            if ((sourceAttrs.flags & LSCP_ATTR_SIZE) != 0)
-            {
-                totalSize = sourceAttrs.size;
-            }
             unsigned long long resumeOffset = 0;
-            if ((flags.resume || mResume) && localInfo.exists && localInfo.isRegular && localInfo.size < totalSize)
+            if (resumeThis && localInfo.exists && localInfo.isRegular && localInfo.size < totalSize)
             {
                 resumeOffset = localInfo.size;
                 Console::Instance().Status("Resuming download of '" + RemoteFileName(sources[n]) +
@@ -1806,7 +2240,8 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             unsigned long long size = 0;
             Console::Instance().TransferStart(RemoteFileName(sources[n]), totalSize);
             int result = RemoteGet(sources[n], localPath, resumeOffset,
-                flags.preserveTime, &size, ProgressCallback, NULL, error);
+                flags.preserveTime, &size, ProgressCallback, NULL, error,
+                flags.append);
             Console::Instance().TransferEnd(result == 0);
             if (result != 0)
             {
@@ -1851,90 +2286,16 @@ bool Script::GetFiles(const std::vector<std::string> & args)
 
 bool Script::PutFiles(const std::vector<std::string> & args)
 {
-    if (!ValidateTransferSwitches("put", args))
+    TransferFlags flags;
+    flags.transferMode = mTransferMode;
+    std::vector<std::string> paths;
+    if (!ParseTransferSwitches("put", true, args, flags, paths))
     {
         return false;
     }
     if (!RequireConnection())
     {
         return false;
-    }
-
-    TransferFlags flags;
-    flags.transferMode = mTransferMode;
-    std::vector<std::string> paths;
-    for (size_t i = 0; i < args.size(); i++)
-    {
-        const std::string & a = args[i];
-        if (a == "-delete")
-        {
-            flags.deleteSource = true;
-        }
-        else if (a == "-neweronly")
-        {
-            flags.newerOnly = true;
-        }
-        else if (a == "-preservetime")
-        {
-            flags.preserveTime = true;
-        }
-        else if (a == "-nopreservetime")
-        {
-            flags.preserveTime = false;
-        }
-        else if (a == "-r")
-        {
-            flags.recursive = true;
-        }
-        else if (a == "-resume")
-        {
-            flags.resume = true;
-        }
-        else if (StartsWith(a, "-transfer="))
-        {
-            TransferMode mode;
-            if (!ParseTransferMode(a.substr(strlen("-transfer=")), mode))
-            {
-                Console::Instance().Error(Texts::WrongArguments("put",
-                    "The value of '-transfer' must be binary, ascii or automatic."));
-                mErrors++;
-                return false;
-            }
-            flags.transferMode = mode;
-        }
-        else if (StartsWith(a, "-filemask="))
-        {
-            std::string maskError;
-            if (!flags.mask.Parse(a.substr(strlen("-filemask=")), maskError))
-            {
-                Console::Instance().Error(Texts::WrongArguments("put", maskError));
-                mErrors++;
-                return false;
-            }
-            flags.maskGiven = true;
-        }
-        else if (a == "-nopermissions")
-        {
-            flags.permissions = -1;
-        }
-        else if (StartsWith(a, "-permissions="))
-        {
-            unsigned long permissions = 0;
-            if (!ParseOctalPermissions(a.substr(strlen("-permissions=")),
-                permissions))
-            {
-                Console::Instance().Error(Texts::WrongArguments("put",
-                    "The value of '-permissions' must be an octal number "
-                    "from 0 through 7777."));
-                mErrors++;
-                return false;
-            }
-            flags.permissions = static_cast<int>(permissions);
-        }
-        else
-        {
-            paths.push_back(a);
-        }
     }
 
     if (paths.empty())
@@ -1945,15 +2306,13 @@ bool Script::PutFiles(const std::vector<std::string> & args)
         return false;
     }
 
-    if ((flags.resume || mResume) && flags.transferMode != TransferMode::Binary)
+    if (flags.append && !UseNativeSftp(mSession.Options().protocol))
     {
-        Console::Instance().Error(Texts::WrongArguments("put",
-            "Resuming a transfer is binary only: an ASCII transfer "
-            "converts line endings, so byte offsets do not survive."));
-        mErrors++;
-        return false;
+        return SwitchError("put", "'-append' needs the native SFTP "
+            "transport; the transfer backends cannot position a write.");
     }
     ResolveTransferMask(flags);
+    SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
 
     std::string destinationArg = paths.size() >= 2 ? paths.back() : ".";
     std::vector<std::string> sourcePatterns = paths.size() >= 2 ?
@@ -2103,7 +2462,8 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             {
                 continue;
             }
-            if (mConfirm && remoteExists && !(flags.resume || mResume))
+            const bool resumeThis = Resumes(flags, info.size);
+            if (mConfirm && remoteExists && !resumeThis && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
                     "Overwrite remote file '" + remotePath + "'?");
@@ -2117,7 +2477,7 @@ bool Script::PutFiles(const std::vector<std::string> & args)
                 }
             }
             unsigned long long resumeOffset = 0;
-            if ((flags.resume || mResume) && remoteExists && remoteInfo.size < info.size)
+            if (resumeThis && remoteExists && remoteInfo.size < info.size)
             {
                 resumeOffset = remoteInfo.size;
                 Console::Instance().Status("Resuming upload of '" + LocalFileName(sources[n]) +
@@ -2148,7 +2508,7 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             Console::Instance().TransferStart(LocalFileName(sources[n]), info.size);
             int result = RemotePut(uploadPath, remotePath, flags.permissions,
                 resumeOffset, flags.preserveTime, &size, ProgressCallback, NULL,
-                error);
+                error, flags.append);
             Console::Instance().TransferEnd(result == 0);
             if (!asciiTemp.empty())
             {
@@ -4245,79 +4605,329 @@ bool Script::CallRemote(const std::vector<std::string> & args, const char * name
     return true;
 }
 
+#if !defined(_WIN32)
+namespace {
+
+/* The part of an authorized_keys line that says which key it is: the
+ * algorithm and the base64 blob, without the trailing comment. Two lines
+ * with the same identity are the same key, however differently they are
+ * commented. */
+std::string KeyIdentity(const std::string & line)
+{
+    size_t end = 0;
+    for (int field = 0; field < 2; field++)
+    {
+        while (end < line.size() && line[end] == ' ')
+        {
+            end++;
+        }
+        while (end < line.size() && line[end] != ' ')
+        {
+            end++;
+        }
+    }
+    return line.substr(0, end);
+}
+
+} // namespace
+#endif
+
+/*
+ * 'copyid [<privatekey>]': installs the public half of a key on the server,
+ * which is upstream's 'copyid'. The key is read with the bundled PuTTY core,
+ * so a PuTTY .ppk, an OpenSSH public key and an OpenSSH private key all work;
+ * the line is appended to ~/.ssh/authorized_keys unless that file already
+ * holds the key. The permissions matter to sshd, which ignores a key under a
+ * group-writable directory, so both are set as the server expects.
+ */
 bool Script::CopyPublicKey(const std::vector<std::string> & args)
 {
+    if (args.size() > 1)
+    {
+        return SwitchError("copyid", "Syntax: copyid [<keyfile>]; without a "
+            "file the private key of the session is used.");
+    }
+#if defined(_WIN32)
+    (void)args;
+    /* Say so before connecting, rather than after the user has typed a
+     * passphrase. */
+    return SwitchError("copyid", "Reading a key file needs the POSIX build, "
+        "where the bundled PuTTY core can decode one.");
+#else
     if (!RequireConnection())
     {
         return false;
     }
-    if (!args.empty())
-    {
-        Console::Instance().Error(Texts::WrongArguments("copyid",
-            "The command takes no arguments; it installs the public half "
-            "of the configured private key."));
-        mErrors++;
-        return false;
-    }
     const SessionOptions & options = mSession.Options();
-    if (!UseNativeSftp(options.protocol))
+    if (options.protocol != "sftp" && options.protocol != "scp")
     {
-        Console::Instance().Error(Texts::WrongArguments("copyid",
-            "Installing a public key needs an SSH (sftp://) session."));
+        return SwitchError("copyid", "Installing a public key needs an SSH "
+            "(sftp:// or scp://) session, not '" + options.protocol + "'.");
+    }
+    std::string keyFile = args.empty() ? options.privateKeyFile : args[0];
+    if (keyFile.empty())
+    {
+        return SwitchError("copyid", "There is no private key: connect with "
+            "-privatekey=<file>, or give the key file to the command.");
+    }
+    std::string keyLine;
+    std::string error;
+    if (!PublicKeyAuthorizedLine(ExpandTilde(keyFile), keyLine, error))
+    {
+        return SwitchError("copyid", error);
+    }
+    if (mHomeDirectory.empty())
+    {
+        return SwitchError("copyid", "The home directory of the session is "
+            "not known, so ~/.ssh/authorized_keys cannot be located.");
+    }
+
+    const std::string sshDirectory = JoinRemotePath(mHomeDirectory, ".ssh");
+    const std::string authorizedKeys = JoinRemotePath(sshDirectory, "authorized_keys");
+
+    /* Create the directory when the server has none yet. */
+    LscpAttrs attrs = {};
+    std::string statError;
+    if (RemoteStat(sshDirectory, &attrs, statError) != LSCP_SFTP_STAT_EXISTS)
+    {
+        std::string makeError;
+        if (RemoteMakeDir(sshDirectory, 0700, makeError) != 0)
+        {
+            mErrors++;
+            return SwitchError("copyid", "Cannot create '" + sshDirectory +
+                "': " + makeError);
+        }
+        Console::Instance().Status("Created '" + sshDirectory + "'.");
+    }
+
+    /* Keep the keys that are installed already; a repeated 'copyid' must not
+     * grow the file, and a server with a full authorized_keys is a common
+     * leftover of a previous WinSCP run. */
+    const std::string temp = MakeTempPath("authkeys");
+    if (temp.empty())
+    {
+        return SwitchError("copyid", "Cannot create a temporary file for the "
+            "authorized keys.");
+    }
+    bool installed = false;
+    bool failed = false;
+    std::vector<std::string> kept;
+    statError.clear();
+    if (RemoteStat(authorizedKeys, &attrs, statError) == LSCP_SFTP_STAT_EXISTS)
+    {
+        std::string getError;
+        if (RemoteGet(authorizedKeys, temp, 0, false, NULL, NULL, NULL, getError) != 0)
+        {
+            remove(temp.c_str());
+            mErrors++;
+            return SwitchError("copyid", "Cannot read '" + authorizedKeys +
+                "': " + getError);
+        }
+        FILE * file = fopen(temp.c_str(), "rb");
+        if (file != NULL)
+        {
+            char buffer[16384];
+            while (fgets(buffer, sizeof(buffer), file) != NULL)
+            {
+                std::string line = buffer;
+                while (!line.empty() && (line[line.size() - 1] == '\n' ||
+                    line[line.size() - 1] == '\r'))
+                {
+                    line.erase(line.size() - 1);
+                }
+                if (line.empty())
+                {
+                    continue;
+                }
+                kept.push_back(line);
+                if (KeyIdentity(line) == KeyIdentity(keyLine))
+                {
+                    installed = true;
+                }
+            }
+            fclose(file);
+        }
+    }
+
+    if (installed)
+    {
+        remove(temp.c_str());
+        Console::Instance().Status("The key is already installed in '" +
+            authorizedKeys + "'.");
+        return true;
+    }
+
+    FILE * file = fopen(temp.c_str(), "wb");
+    if (file == NULL)
+    {
+        return SwitchError("copyid", "Cannot write a temporary file for the "
+            "authorized keys.");
+    }
+    for (size_t i = 0; i < kept.size(); i++)
+    {
+        fprintf(file, "%s\n", kept[i].c_str());
+    }
+    fprintf(file, "%s\n", keyLine.c_str());
+    fclose(file);
+
+    std::string putError;
+    if (RemotePut(temp, authorizedKeys, 0600, 0, false, NULL, NULL, NULL,
+        putError) != 0)
+    {
+        failed = true;
+        Console::Instance().Error(Texts::TransferFailed(authorizedKeys, putError));
+    }
+    remove(temp.c_str());
+    if (failed)
+    {
         mErrors++;
         return false;
     }
-    if (options.privateKeyFile.empty())
+    Console::Instance().Status("Installed the public key of '" + keyFile +
+        "' in '" + authorizedKeys + "'.");
+    return true;
+#endif
+}
+
+bool Script::ApplyRemotePermissions(const std::string & path, const std::string & mode,
+    bool recursive, unsigned long long & changed)
+{
+    LscpAttrs attrs = {};
+    std::string error;
+    if (RemoteStat(path, &attrs, error) != LSCP_SFTP_STAT_EXISTS)
     {
-        Console::Instance().Error(Texts::WrongArguments("copyid",
-            "There is no private key: connect with -privatekey=<file> "
-            "first."));
+        Console::Instance().Error(Texts::RemoteError("read the attributes of", path, error));
         mErrors++;
         return false;
     }
-    Console::Instance().Error(Texts::WrongArguments("copyid",
-        "Installing a public key needs the server's authorized_keys "
-        "file, which this build cannot edit yet."));
-    mErrors++;
-    return false;
+    const bool hasPermissions = (attrs.flags & LSCP_ATTR_PERMISSIONS) != 0;
+    const bool isDirectory = hasPermissions && (attrs.permissions & 0040000) != 0;
+    const mode_t current = hasPermissions ? static_cast<mode_t>(attrs.permissions & 07777) : 0;
+
+    mode_t wanted = 0;
+    std::string modeError;
+    if (!ParsePermissions(mode, current, isDirectory, wanted, modeError))
+    {
+        Console::Instance().Error("'" + path + "': " + modeError);
+        mErrors++;
+        return false;
+    }
+    /* Only the permission bits change; the file type and the set-id bits
+     * that the mode does not mention stay as they are. */
+    const unsigned long result = hasPermissions ?
+        ((attrs.permissions & ~07777UL) | (wanted & 07777)) : (wanted & 07777);
+
+    bool ok = true;
+    if (RemoteSetPermissions(path, (int)result, error) != 0)
+    {
+        Console::Instance().Error(Texts::RemoteError("change the permissions of",
+            path, error));
+        mErrors++;
+        ok = false;
+    }
+    else
+    {
+        changed++;
+    }
+
+    if (ok && recursive && isDirectory)
+    {
+        LscpNames * names = NULL;
+        std::string dirError;
+        if (!RemoteListDir(path, names, dirError))
+        {
+            Console::Instance().Error(Texts::RemoteError("read directory", path, dirError));
+            mErrors++;
+            return false;
+        }
+        for (int i = 0; i < names->count; i++)
+        {
+            const char * rawName = names->names[i].filename;
+            if (rawName == NULL)
+            {
+                continue;
+            }
+            const std::string name(rawName);
+            if (name == "." || name == "..")
+            {
+                continue;
+            }
+            const unsigned long type = names->names[i].attrs.permissions & 0170000;
+            if (type == 0120000)
+            {
+                continue;   /* a symbolic link is left alone */
+            }
+            if (!ApplyRemotePermissions(JoinRemotePath(path, name), mode, true, changed))
+            {
+                ok = false;
+            }
+        }
+        RemoteFreeNames(names);
+    }
+    return ok;
 }
 
 bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
 {
+    /* The mode is checked before the connection, so that a typo is reported
+     * even when nothing can be changed, and no half-parsed command reaches
+     * the server. */
+    /* The switch may come before or after the mode. */
+    bool recursive = false;
+    std::vector<std::string> rest;
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        if (args[i] == "-recursive" || args[i] == "-r")
+        {
+            recursive = true;
+        }
+        else
+        {
+            rest.push_back(args[i]);
+        }
+    }
+    if (rest.size() < 2)
+    {
+        Console::Instance().Error(Texts::WrongArguments("chmod",
+            "Syntax: chmod <permissions> <file(s)> [-recursive]"));
+        mErrors++;
+        return false;
+    }
+    const std::string mode = rest[0];
+
+    /* Check the mode before anything is touched, so that a typo cannot
+     * change the first file and then fail on the second. */
+    mode_t probe = 0;
+    std::string modeError;
+    if (!ParsePermissions(mode, 0644, false, probe, modeError))
+    {
+        Console::Instance().Error(Texts::WrongArguments("chmod",
+            "'" + mode + "' is not a valid mode: " + modeError +
+            ". Use an octal number such as 644 or an expression such as u+x."));
+        mErrors++;
+        return false;
+    }
     if (!RequireConnection())
     {
         return false;
     }
-    if (args.size() < 2)
-    {
-        Console::Instance().Error(Texts::WrongArguments("chmod",
-            "Syntax: chmod <permissions> <file(s)>"));
-        mErrors++;
-        return false;
-    }
-    unsigned long permissions = 0;
-    if (!ParseOctalPermissions(args[0], permissions))
-    {
-        Console::Instance().Error(Texts::WrongArguments("chmod",
-            "Permissions must be an octal number from 0 through 7777, for example 644."));
-        mErrors++;
-        return false;
-    }
+
     bool ok = true;
-    for (size_t i = 1; i < args.size(); i++)
+    unsigned long long changed = 0;
+    for (size_t i = 1; i < rest.size(); i++)
     {
         std::vector<std::string> paths;
         std::string error;
-        if (!ExpandRemote(args[i], paths, error))
+        if (!ExpandRemote(rest[i], paths, error))
         {
-            Console::Instance().Error(Texts::RemoteError("read", args[i], error));
+            Console::Instance().Error(Texts::RemoteError("read", rest[i], error));
             mErrors++;
             ok = false;
             continue;
         }
         if (paths.empty())
         {
-            Console::Instance().Error(Texts::RemoteError("find", args[i],
+            Console::Instance().Error(Texts::RemoteError("find", rest[i],
                 "No matching files."));
             mErrors++;
             ok = false;
@@ -4325,15 +4935,16 @@ bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
         }
         for (size_t n = 0; n < paths.size(); n++)
         {
-            std::string permError;
-            if (RemoteSetPermissions(paths[n], (int)permissions, permError) != 0)
+            if (!ApplyRemotePermissions(paths[n], mode, recursive, changed))
             {
-                Console::Instance().Error(Texts::RemoteError("change the permissions of",
-                    paths[n], permError));
-                mErrors++;
                 ok = false;
             }
         }
+    }
+    if (recursive)
+    {
+        Console::Instance().WriteLine(std::to_string(changed) +
+            (changed == 1 ? " file changed." : " files changed."));
     }
     return ok;
 }
@@ -4373,9 +4984,6 @@ bool Script::StatRemote(const std::vector<std::string> & args)
         /* Seconds since the epoch, for a script or the graphical client
          * that wants to compare timestamps rather than read them. */
         Console::Instance().WriteLine("ModifiedEpoch: " + std::to_string(attrs.mtime));
-    }
-    if ((attrs.flags & LSCP_ATTR_ACMODTIME) != 0)
-    {
         Console::Instance().WriteLine("AccessedEpoch: " + std::to_string(attrs.atime));
     }
     Console::Instance().WriteLine("Owner:       " + std::string(
@@ -4473,6 +5081,24 @@ bool Script::SetOption(const std::vector<std::string> & args)
         return true;
     }
     std::string name = ToLower(args[0]);
+    /*
+     * Upstream looks an option name up in the same table as the commands,
+     * so 'option synchdel on' and 'option e off' are as good as the full
+     * names. An unknown name is left alone, so that the message at the end
+     * of this function still says which option this build does not have.
+     */
+    if (name != "clear")
+    {
+        std::string resolved;
+        if (!ResolveAbbreviation(OptionNames(), name, "option name", resolved))
+        {
+            return false;
+        }
+        if (!resolved.empty())
+        {
+            name = resolved;
+        }
+    }
     if (args.size() == 1)
     {
         if (name == "echo")
@@ -4576,6 +5202,35 @@ bool Script::SetOption(const std::vector<std::string> & args)
         return false;
     }
     std::string value = ToLower(args[1]);
+    /*
+     * The value of an option that comes from a fixed vocabulary is resolved
+     * the same way ('option batch cont'), but only for those options: a file
+     * mask, an editor command and a size are free text and must never be
+     * second-guessed.
+     */
+    if (name != "include" && name != "exclude" && name != "editor" &&
+        name != "editmaxsize" && name != "reconnecttime")
+    {
+        std::vector<std::string> vocabulary = ToggleNames();
+        if (name == "batch")
+        {
+            vocabulary = BatchModeNames();
+        }
+        else if (name == "transfer")
+        {
+            vocabulary = TransferModeNames();
+        }
+        std::string resolved;
+        if (!ResolveAbbreviation(vocabulary, value,
+            "value of the option '" + name + "'", resolved))
+        {
+            return false;
+        }
+        if (!resolved.empty())
+        {
+            value = resolved;
+        }
+    }
     const bool isOn = value == "on";
     const bool isToggle = isOn || value == "off";
     if ((name == "echo" || name == "failonnomatch" || name == "synchdelete") &&
@@ -4777,10 +5432,18 @@ const char * Script::CommandHelp(const std::string & command)
         { "checksum", "checksum <algorithm> <file>\n"
             "  Calculates a checksum (sha-256, sha-1, md5 or crc32) of a\n"
             "  remote file, on the server when it can, locally otherwise." },
-        { "chmod", "chmod <mode> <file> [ <file>... ] [-recursive]\n"
-            "  Changes permissions of remote files; <mode> is octal." },
+        { "chmod", "chmod <mode> <file> [ <file>... ] [ -recursive ]\n"
+            "  Changes permissions of remote files. <mode> is octal\n"
+            "  (644, 0700) or symbolic (u+x, go-w, a=r,go-w, u+s); with\n"
+            "  -recursive everything below a directory is changed too,\n"
+            "  symbolic links excepted." },
         { "close", "close\n"
             "  Closes the session." },
+        { "copyid", "copyid [ <keyfile> ]\n"
+            "  Installs the public key of the private key in use (or of\n"
+            "  <keyfile>) into ~/.ssh/authorized_keys on the server, so\n"
+            "  that later connections need no password. Requires a SFTP\n"
+            "  or SCP session and a key this build can read." },
         { "cp", "cp <source> [ <source>... ] <target>\n"
             "  Copies files on the server, server-side when it can,\n"
             "  streamed through this client otherwise." },
@@ -4792,9 +5455,11 @@ const char * Script::CommandHelp(const std::string & command)
         { "exit", "exit\n"
             "  Ends the session and exits." },
         { "get", "get [ <switches> ] <file> [ <file>... ] [ <target> ]\n"
-            "  Downloads files. Switches: -delete, -resume, -neweronly,\n"
-            "  -preservetime, -nopreservetime, -r, -transfer=binary|ascii|\n"
-            "  automatic, -filemask=<mask>." },
+            "  Downloads files. Switches: -delete, -resume, -append,\n"
+            "  -resumesupport=on|off|<KB>, -speed=<KB/s>, -neweronly,\n"
+            "  -noneweronly, -preservetime, -preservetime=all,\n"
+            "  -nopreservetime, -r, -transfer=binary|ascii|automatic,\n"
+            "  -filemask=<mask>." },
         { "help", "help [ <command> ]\n"
             "  Prints the list of commands, or the help of one command." },
         { "keepuptodate", "keepuptodate [ <localdir> [ <remotedir> ] ]\n"
@@ -4822,10 +5487,14 @@ const char * Script::CommandHelp(const std::string & command)
         { "option", "option [ <name> [ <value> ] ]\n"
             "  Shows or changes a setting: echo, batch, confirm, resume,\n"
             "  transfer, include, exclude, failonnomatch, synchdelete,\n"
-            "  reconnecttime, editor, editmaxsize." },
+            "  reconnecttime, editor, editmaxsize. Without a name it\n"
+            "  prints every setting; a name or a value may be abbreviated\n"
+            "  as long as the abbreviation is unambiguous." },
         { "put", "put [ <switches> ] <file> [ <file>... ] [ <target> ]\n"
             "  Uploads files; the switches of 'get' plus -permissions=\n"
-            "  and -nopermissions." },
+            "  and -nopermissions; -append adds to the remote file\n"
+            "  instead of replacing it (native SFTP only, and not\n"
+            "  together with -resume)." },
         { "pwd", "pwd\n"
             "  Prints the remote working directory." },
         { "rm", "rm [ -onlyfile ] <file> [ <file>... ]\n"
@@ -4860,7 +5529,6 @@ void Script::PrintHelp(const std::vector<std::string> & args)
 {
     if (!args.empty())
     {
-        bool ok = true;
         for (size_t i = 0; i < args.size(); i++)
         {
             const char * help = CommandHelp(ToLower(args[i]));
@@ -4868,7 +5536,6 @@ void Script::PrintHelp(const std::vector<std::string> & args)
             {
                 Console::Instance().Error(Texts::UnknownCommand(args[i]));
                 mErrors++;
-                ok = false;
                 continue;
             }
             Console::Instance().WriteLine(help);
@@ -4888,11 +5555,23 @@ bool Script::ExecuteLine(const std::string & line)
      * file shows what a script did. The -server loop must stay silent. */
     if (mEchoCommands && !mServerLoop)
     {
-        Console::Instance().WriteLine(line);
+        Console::Instance().WriteLine(CensoredForLog(line));
     }
     const int before = mErrors;
+    /* The action log records what was asked and, afterwards, how it ended;
+     * the messages in between belong to this command. */
+    if (Console::Instance().IsActionLogOpen())
+    {
+        Console::Instance().LogAction("command",
+            "line=\"" + Console::EscapeActionText(CensoredForLog(line)) + "\"");
+    }
     const bool keepRunning = ExecuteCommand(line);
     mLastCommandFailed = mErrors != before;
+    if (Console::Instance().IsActionLogOpen())
+    {
+        Console::Instance().LogAction("result",
+            "status=\"" + std::string(mLastCommandFailed ? "error" : "ok") + "\"");
+    }
     if (mErrors != before && (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On))
     {
         mExit = true;
@@ -4917,6 +5596,29 @@ bool Script::ExecuteCommand(const std::string & line)
     }
     std::string command = ToLower(words[0]);
     std::vector<std::string> args(words.begin() + 1, words.end());
+
+    /*
+     * Upstream keeps the commands in a table and runs the single command an
+     * abbreviation can only mean, so 'synch local remote' works. An
+     * abbreviation of several commands is refused instead of guessing; 'x'
+     * would be 'exit' or nothing at all, and 'get' versus 'g' is a typo
+     * waiting to move files.
+     */
+    if (!IsKnownCommand(command))
+    {
+        std::string resolved;
+        if (ResolveAbbreviation(CommandNames(), command, "command", resolved))
+        {
+            if (!resolved.empty())
+            {
+                command = resolved;
+            }
+        }
+        else
+        {
+            return true;
+        }
+    }
 
     if (command == "exit" || command == "bye" || command == "quit" || command == "end")
     {
@@ -5171,7 +5873,20 @@ int Script::RunFile(const std::string & path)
         {
             break;
         }
-        ExecuteLine(line);
+        std::string expanded;
+        if (ExpandParameters(line, expanded))
+        {
+            ExecuteLine(expanded);
+        }
+        else
+        {
+            /* A broken placeholder stops this line only; 'batch on' and
+             * 'continue' still decide whether the run goes on. */
+            if (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On)
+            {
+                mExit = true;
+            }
+        }
         if (c == EOF)
         {
             break;
@@ -5198,13 +5913,21 @@ int Script::RunCommand(const std::string & line)
         Console::Instance().SetBatchMode(true);
     }
 
-    /* '-command=' may carry several commands separated by ';'. */
+    /* '-command=' may carry several commands separated by ';'. Each is
+     * expanded on its own, so a parameter value that holds a ';' cannot
+     * start a command of its own. */
     std::vector<std::string> commands = SplitCommands(line);
     for (size_t i = 0; i < commands.size(); i++)
     {
-        if (!commands[i].empty())
+        std::string expanded;
+        if (!commands[i].empty() && ExpandParameters(commands[i], expanded))
         {
-            ExecuteLine(commands[i]);
+            ExecuteLine(expanded);
+        }
+        else if (!commands[i].empty() &&
+            (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On))
+        {
+            mExit = true;
         }
         if (mExit)
         {
@@ -5230,7 +5953,11 @@ int Script::RunInteractive(const std::string & initialUrl)
         {
             break;
         }
-        ExecuteLine(line);
+        std::string expanded;
+        if (ExpandParameters(line, expanded))
+        {
+            ExecuteLine(expanded);
+        }
     }
     return mErrors != 0 ? 1 : 0;
 }

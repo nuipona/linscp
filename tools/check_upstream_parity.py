@@ -23,6 +23,15 @@ def upstream_commands(script, header):
             for token in tokens}
 
 
+def command_table(source):
+    """The names the interpreter can abbreviate to, in Script.cpp."""
+    block = re.search(r"const char \* const kCommandNames\[\] = \{(.*?)\};",
+                      source, re.S)
+    if not block:
+        raise ValueError("No kCommandNames table in source/linux/Script.cpp")
+    return set(re.findall(r'"([^"]+)"', block.group(1)))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream-script", type=pathlib.Path)
@@ -31,7 +40,8 @@ def main():
     args = parser.parse_args()
     inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
     commands = inventory["commands"]
-    entries = list(commands.values()) + inventory["features"]
+    entries = (list(commands.values()) + inventory["features"] +
+               inventory.get("linuxscp_additions", []))
     errors = []
     for entry in entries:
         if entry["status"] not in {"partial", "missing", "verified"} or not entry["notes"]:
@@ -41,6 +51,14 @@ def main():
     for command, entry in commands.items():
         if entry["status"] != "missing" and command not in dispatched:
             errors.append(f"Documented command has no dispatcher: {command}")
+    # Abbreviations are resolved against kCommandNames, so that list and the
+    # dispatcher have to agree: an unlisted command cannot be abbreviated to,
+    # and a listed one that is not dispatched resolves to an error message.
+    table = command_table(source)
+    for name in sorted(table - dispatched):
+        errors.append(f"Abbreviatable command is not dispatched: {name}")
+    for name in sorted(dispatched - table):
+        errors.append(f"Dispatched command is not in kCommandNames: {name}")
     if bool(args.upstream_script) != bool(args.upstream_header):
         errors.append("Supply both --upstream-script and --upstream-header")
     elif args.upstream_script:
@@ -50,9 +68,11 @@ def main():
         for command in sorted(commands.keys() - actual):
             errors.append(f"Command no longer registered upstream: {command}")
     gaps = sum(entry["status"] != "verified" for entry in entries)
+    additions = len(inventory.get("linuxscp_additions", []))
     print(f"Upstream {inventory['upstream']['commit']}: "
-          f"{len(commands)} commands, {len(inventory['features'])} feature areas, "
-          f"{gaps} tracked gaps. Inventory validation is not a parity certification.")
+          f"{len(commands)} commands, {additions} LinuxSCP-specific entries, "
+          f"{len(inventory['features'])} feature areas, {gaps} tracked gaps. "
+          "Inventory validation is not a parity certification.")
     if args.require_full and gaps:
         errors.append("Full parity gate failed: tracked gaps remain")
     for error in errors:

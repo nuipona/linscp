@@ -149,3 +149,27 @@ int lscp_sftp_put_resume(const char * localPath, const char * remotePath, int pe
     (void)progressCtx;
     return -1;
 }
+
+int lscp_sftp_get_append(const char * remotePath, const char * localPath,
+    unsigned long long * size, LscpProgressFn progress, void * progressCtx)
+{
+    (void)remotePath;
+    (void)localPath;
+    (void)size;
+    (void)progress;
+    (void)progressCtx;
+    return -1;
+}
+
+int lscp_sftp_put_append(const char * localPath, const char * remotePath,
+    int permissions, unsigned long long * size, LscpProgressFn progress,
+    void * progressCtx)
+{
+    (void)localPath;
+    (void)remotePath;
+    (void)permissions;
+    (void)size;
+    (void)progress;
+    (void)progressCtx;
+    return -1;
+}

@@ -20,6 +20,7 @@
 #include <map>
 
 #include "PathUtil.h"
+#include "ScriptParams.h"
 #include "LocalFs.h"
 #include "Platform.h"
 #include "Session.h"
@@ -675,9 +676,11 @@ void TestScriptCommands()
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("binary"));
     CHECK_TRUE(script.ExecuteLine("option batch continue"));
-    /* 'reconnect' (without the 'time') stays unsupported; 'reconnecttime'
-     * is a real option now. */
+    /* 'reconnect' is an unambiguous prefix of 'reconnecttime', so it is
+     * accepted; a name that matches no option at all is still refused. */
     CHECK_TRUE(script.ExecuteLine("option reconnect 10"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option reconnectxyz 10"));
     CHECK_TRUE(script.ErrorCount() == 1);
     CHECK_TRUE(script.ExecuteLine("option transfer ascii"));
     CHECK_TRUE(script.ErrorCount() == 1);
@@ -1551,6 +1554,289 @@ void TestNewScriptCommands()
     RemoveTreeQuiet(temporary);
 }
 
+
+std::string ModeString(mode_t mode)
+{
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%04lo", static_cast<unsigned long>(mode));
+    return std::string(buffer);
+}
+
+/* 'chmod' understands octal numbers and symbolic expressions alike. */
+void TestPermissionModes()
+{
+    mode_t mode = 0;
+    std::string error;
+
+    CHECK_TRUE(ParseOctalMode("644", mode));
+    CHECK_EQ(ModeString(mode), std::string("0644"));
+    CHECK_TRUE(ParseOctalMode("0600", mode));
+    CHECK_EQ(ModeString(mode), std::string("0600"));
+    CHECK_TRUE(ParseOctalMode("1777", mode));
+    CHECK_EQ(ModeString(mode), std::string("1777"));
+    CHECK_FALSE(ParseOctalMode("999", mode));
+    CHECK_FALSE(ParseOctalMode("", mode));
+    CHECK_FALSE(ParseOctalMode("12345", mode));
+    CHECK_FALSE(ParseOctalMode("64x", mode));
+
+    /* symbolic clauses, applied to a mode the file already has */
+    CHECK_TRUE(ParsePermissions("u+x", 0644, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0744"));
+    CHECK_TRUE(ParsePermissions("go-w", 0666, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0644"));
+    CHECK_TRUE(ParsePermissions("a=r,go-w", 0644, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0444"));
+    CHECK_TRUE(ParsePermissions("u=rw", 0755, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0655"));
+    CHECK_TRUE(ParsePermissions("a=rwx", 0644, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0777"));
+    /* copying one class from another */
+    CHECK_TRUE(ParsePermissions("u=g", 0644, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0444"));
+    CHECK_TRUE(ParsePermissions("g=o,u=r", 0604, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0444"));
+    /* the special bits */
+    CHECK_TRUE(ParsePermissions("u+s", 0755, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("4755"));
+    CHECK_TRUE(ParsePermissions("g-s", 02644, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0644"));
+    CHECK_TRUE(ParsePermissions("a-s", 06755, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0755"));
+    CHECK_TRUE(ParsePermissions("a+t", 0755, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("1755"));
+    CHECK_TRUE(ParsePermissions("a-t", 01755, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0755"));
+
+    /* 'X' means exec where there already is exec, and always for a
+     * directory. */
+    CHECK_TRUE(ParsePermissions("a+X", 0644, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0644"));
+    CHECK_TRUE(ParsePermissions("a+X", 0744, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0755"));
+    CHECK_TRUE(ParsePermissions("a+X", 0644, true, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0755"));
+
+    /* a bad expression is refused, and the mode is left alone */
+    mode = 0600;
+    CHECK_FALSE(ParsePermissions("u?x", 0644, false, mode, error));
+    CHECK_TRUE(!error.empty());
+    CHECK_FALSE(ParsePermissions("u", 0644, false, mode, error));
+    CHECK_FALSE(ParsePermissions("zzz", 0644, false, mode, error));
+    CHECK_FALSE(ParsePermissions("u+q", 0644, false, mode, error));
+    CHECK_FALSE(ParsePermissions("", 0644, false, mode, error));
+    CHECK_FALSE(ParsePermissions(",", 0644, false, mode, error));
+    CHECK_FALSE(ParsePermissions(",,", 0644, false, mode, error));
+    CHECK_FALSE(ParsePermissions("999", 0644, false, mode, error));
+    /* clauses separated by blanks as well as by commas */
+    CHECK_TRUE(ParsePermissions("u=rw g=r o=r", 0777, false, mode, error));
+    CHECK_EQ(ModeString(mode), std::string("0644"));
+}
+
+/* The command, option and value tables resolve unambiguous prefixes. */
+void TestNameAbbreviations()
+{
+    std::vector<std::string> names;
+    names.push_back("close");
+    names.push_back("copyid");
+    names.push_back("cp");
+    names.push_back("cd");
+
+    std::string matches;
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "cp", matches)), std::string("2"));
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "CLOSE", matches)), std::string("0"));
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "cl", matches)), std::string("0"));
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "co", matches)), std::string("1"));
+    /* 'c' could be close, copyid, cp or cd */
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "c", matches)),
+        std::to_string(kNameAmbiguous));
+    CHECK_EQ(matches, std::string("close, copyid, cp, cd"));
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "z", matches)),
+        std::to_string(kNameNoMatch));
+    CHECK_EQ(matches, std::string(""));
+    /* an empty name never resolves, and a prefix longer than a name is no
+     * match either */
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "", matches)),
+        std::to_string(kNameNoMatch));
+    CHECK_EQ(std::to_string(FindPrefixedName(names, "closer", matches)),
+        std::to_string(kNameNoMatch));
+
+    std::string ambiguous;
+    CHECK_EQ(ResolvePrefixedName(names, "co", ambiguous), std::string("copyid"));
+    CHECK_TRUE(ambiguous.empty());
+    CHECK_EQ(ResolvePrefixedName(names, "c", ambiguous), std::string(""));
+    CHECK_EQ(ambiguous, std::string("close, copyid, cp, cd"));
+    CHECK_EQ(ResolvePrefixedName(names, "unknown", ambiguous), std::string(""));
+    CHECK_TRUE(ambiguous.empty());
+}
+
+/* A local wall-clock time, for the relative-time tests. */
+std::time_t MakeLocalTime(int year, int month, int day, int hour)
+{
+    std::tm tm = {};
+    tm.tm_year = year - 1900;
+    tm.tm_mon = month - 1;
+    tm.tm_mday = day;
+    tm.tm_hour = hour;
+    return std::mktime(&tm);
+}
+
+std::time_t StartOfDay(std::time_t when)
+{
+    std::tm tm = {};
+    if (!LocalTime(when, tm))
+    {
+        return 0;
+    }
+    tm.tm_hour = 0;
+    tm.tm_min = 0;
+    tm.tm_sec = 0;
+    return std::mktime(&tm);
+}
+
+std::tm NowBrokenDown()
+{
+    std::tm tm = {};
+    const std::time_t now = std::time(NULL);
+    LocalTime(now, tm);
+    return tm;
+}
+
+void TestScriptParameterExpansion()
+{
+    std::vector<std::string> parameters;
+    parameters.push_back("first");
+    parameters.push_back("second");
+    std::string expanded;
+    std::string error;
+
+    CHECK_TRUE(ExpandScriptParameters("get %1% /tmp/%2%", parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("get first /tmp/second"));
+    /* a parameter that was not given stays in the text, so that the command
+     * fails visibly instead of copying to an empty path */
+    CHECK_TRUE(ExpandScriptParameters("put %3%", parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("put %3%"));
+    CHECK_TRUE(ExpandScriptParameters("echo %" , parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("echo %"));
+    CHECK_TRUE(ExpandScriptParameters("echo 100%", parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("echo 100%"));
+    /* expansion is not recursive */
+    parameters.push_back("%2%");
+    CHECK_TRUE(ExpandScriptParameters("echo %3%", parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("echo %2%"));
+    parameters.pop_back();
+
+    /* an unset variable is left alone, a set one is substituted */
+    SetEnvVar("LINUXSCP_TEST_VARIABLE", "a value");
+    CHECK_TRUE(ExpandScriptParameters("echo %LINUXSCP_TEST_VARIABLE%", parameters,
+        expanded, error));
+    CHECK_EQ(expanded, std::string("echo a value"));
+    SetEnvVar("LINUXSCP_TEST_VARIABLE", NULL);
+    CHECK_TRUE(ExpandScriptParameters("echo %LINUXSCP_TEST_VARIABLE%", parameters,
+        expanded, error));
+    CHECK_EQ(expanded, std::string("echo %LINUXSCP_TEST_VARIABLE%"));
+
+    /* %TIMESTAMP% is yyyymmddhhnnss unless the variable is set */
+    CHECK_TRUE(ExpandScriptParameters("echo %TIMESTAMP%", parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("echo ") + FormatTimestamp(NowBrokenDown(),
+        "yyyymmddhhnnss"));
+    SetEnvVar("TIMESTAMP", "fixed");
+    CHECK_TRUE(ExpandScriptParameters("echo %TIMESTAMP%", parameters, expanded, error));
+    CHECK_EQ(expanded, std::string("echo fixed"));
+    SetEnvVar("TIMESTAMP", NULL);
+
+    /* an offset and a format */
+    const std::time_t now = std::time(NULL) + 86400;
+    std::tm tomorrow = {};
+    CHECK_TRUE(LocalTime(now, tomorrow));
+    CHECK_TRUE(ExpandScriptParameters("echo %TIMESTAMP+1D#yyyy%", parameters,
+        expanded, error));
+    CHECK_EQ(expanded, std::string("echo ") + std::to_string(1900 + tomorrow.tm_year));
+    /* a placeholder with an offset but no format is a mistake, not text to
+     * send to the server */
+    CHECK_FALSE(ExpandScriptParameters("echo %TIMESTAMP+1Q%#", parameters, expanded,
+        error));
+    CHECK_TRUE(!error.empty());
+    CHECK_FALSE(ExpandScriptParameters("echo %TIMESTAMP+1Q%", parameters, expanded,
+        error));
+    CHECK_TRUE(!error.empty());
+    /* a variable that only starts with the name is a variable, not a
+     * timestamp placeholder */
+    SetEnvVar("TIMESTAMP_DIR", "/tmp/stamps");
+    CHECK_TRUE(ExpandScriptParameters("echo %TIMESTAMP_DIR%", parameters, expanded,
+        error));
+    CHECK_EQ(expanded, std::string("echo /tmp/stamps"));
+    SetEnvVar("TIMESTAMP_DIR", NULL);
+}
+
+void TestTimestampFormatting()
+{
+    std::tm tm = {};
+    tm.tm_year = 2024 - 1900;
+    tm.tm_mon = 2;      /* March */
+    tm.tm_mday = 7;     /* a Thursday */
+    tm.tm_wday = 4;    /* 2024-03-07 was a Thursday */
+    tm.tm_hour = 15;
+    tm.tm_min = 4;
+    tm.tm_sec = 9;
+
+    CHECK_EQ(FormatTimestamp(tm, "yyyymmddhhnnss"), std::string("20240307150409"));
+    CHECK_EQ(FormatTimestamp(tm, "yyyy-mm-dd"), std::string("2024-03-07"));
+    CHECK_EQ(FormatTimestamp(tm, "yy/d/m"), std::string("24/7/3"));
+    CHECK_EQ(FormatTimestamp(tm, "hh:nn"), std::string("15:04"));
+    /* without an AM/PM marker 'h' is the 24-hour clock, as in Delphi */
+    CHECK_EQ(FormatTimestamp(tm, "h:n:s"), std::string("15:4:9"));
+    /* quoted text is literal */
+    CHECK_EQ(FormatTimestamp(tm, "hh\"am\""), std::string("15am"));
+    CHECK_EQ(FormatTimestamp(tm, "am/pm"), std::string("PM"));
+    CHECK_EQ(FormatTimestamp(tm, "a/p"), std::string("P"));
+    CHECK_EQ(FormatTimestamp(tm, "h:nn am/pm"), std::string("3:04 PM"));
+    tm.tm_hour = 9;
+    CHECK_EQ(FormatTimestamp(tm, "am/pm"), std::string("AM"));
+    CHECK_EQ(FormatTimestamp(tm, "dddd d mmmm mm mmm"),
+        std::string("Thursday 7 March 03 Mar"));
+    /* an unknown token is kept, because it may be literal text */
+    CHECK_EQ(FormatTimestamp(tm, "yyyyQQ"), std::string("2024QQ"));
+}
+
+void TestRelativeTime()
+{
+    /* The day arithmetic below assumes no DST shift; UTC makes that true. */
+#if defined(_WIN32)
+    _putenv_s("TZ", "UTC");
+    _tzset();
+#else
+    setenv("TZ", "UTC", 1);
+    tzset();
+#endif
+    const std::time_t base = MakeLocalTime(2020, 6, 15, 12);   /* noon */
+    std::time_t result = 0;
+    std::string error;
+
+    CHECK_TRUE(TryRelativeTime("1D", base, false, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(base - 86400));
+    CHECK_TRUE(TryRelativeTime("2H", base, true, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(base + 2 * 3600));
+    CHECK_TRUE(TryRelativeTime("30N", base, true, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(base + 30 * 60));
+    CHECK_TRUE(TryRelativeTime("15S", base, false, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(base - 15));
+    /* 'today' and 'yesterday' snap to the start of the day */
+    CHECK_TRUE(TryRelativeTime("today", base, false, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(StartOfDay(base)));
+    CHECK_TRUE(TryRelativeTime("yesterday", base, false, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(StartOfDay(base) - 86400));
+    /* a unit followed by 'S' starts the period instead of counting on */
+    CHECK_TRUE(TryRelativeTime("1DS", base, false, result, error));
+    CHECK_EQ(std::to_string(result), std::to_string(StartOfDay(base - 86400)));
+    /* months and weeks are deliberately not units: upstream reserves 'M'
+     * and 'K'/'G' for sizes, and supports S, N, H, D and Y only. */
+    CHECK_FALSE(TryRelativeTime("1WS", base, false, result, error));
+    CHECK_FALSE(TryRelativeTime("1M", base, false, result, error));
+    CHECK_FALSE(TryRelativeTime("1Q", base, false, result, error));
+    CHECK_FALSE(TryRelativeTime("many", base, false, result, error));
+    CHECK_FALSE(TryRelativeTime("", base, false, result, error));
+}
+
 } // namespace
 
 int main()
@@ -1579,6 +1865,11 @@ int main()
     TestSessionStore();
     TestEditorHelpers();
     TestNewScriptCommands();
+    TestPermissionModes();
+    TestNameAbbreviations();
+    TestScriptParameterExpansion();
+    TestTimestampFormatting();
+    TestRelativeTime();
 
     if (gFailures != 0)
     {
