@@ -447,7 +447,7 @@ class LiveSftpTests(unittest.TestCase):
             self.assertIn("OPENED", result.stdout)
 
             # Listing the sessions never prints the password either.
-            result = self.run_stored("session")
+            result = self.run_stored("sessions")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn(PASSWORD, result.stdout + result.stderr)
         finally:

@@ -1802,9 +1802,11 @@ void TestNewScriptCommands()
     Console::Instance().SetBatchMode(false);
 
     /* The store is reachable through the script engine, and an empty one
-     * is reported instead of failing. */
+     * is reported instead of failing. 'sessions' is the stored-site
+     * listing; bare 'session' now follows upstream and needs a
+     * connection. */
     Script script;
-    CHECK_TRUE(script.ExecuteLine("session"));
+    CHECK_TRUE(script.ExecuteLine("sessions"));
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.Sessions().Empty());
 

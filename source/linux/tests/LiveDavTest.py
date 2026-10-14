@@ -160,8 +160,17 @@ class LiveDavTests(unittest.TestCase):
 
         result = self.run_script("stat /docs/sized.bin ; echo STAT_OK")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("SizeBytes:   4321", result.stdout)
+        # One listing line like upstream's, carrying the size in its
+        # column; the key/value breakdown is what 'attr' prints now.
+        stat_lines = [line for line in result.stdout.splitlines()
+                      if line.rstrip().endswith("sized.bin")]
+        self.assertEqual(len(stat_lines), 1, result.stdout)
+        self.assertIn("4321", stat_lines[0])
+        self.assertNotIn("SizeBytes:", result.stdout)
         self.assertIn("STAT_OK", result.stdout)
+        result = self.run_script("attr /docs/sized.bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("SizeBytes:   4321", result.stdout)
 
         result = self.run_script("stat /docs/no-such-file ; echo NOPE")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
@@ -243,6 +252,101 @@ class LiveDavTests(unittest.TestCase):
             "echo SHOULD_NOT_SEE")
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("No such file or directory", result.stderr)
+
+
+    def test_session_stat_close_and_no_match_follow_upstream(self):
+        """The console outputs that need a live session, checked against
+        the shapes upstream produces: the open-session listing of
+        'session', the single listing line of 'stat', the line 'close'
+        prints, and the no-match sentence of a mask that matched
+        nothing - with and without failonnomatch."""
+        source = self.root / "hello.txt"
+        source.write_bytes(b"hello dav world\n")
+        # stat in its own run, so its one listing line is unambiguous.
+        result = self.run_script(
+            "mkdir /docs ; put %s /docs/hello.txt ; stat /docs/hello.txt" %
+            source)
+        self.assertEqual(result.returncode, 0,
+                         result.stdout + result.stderr)
+        stat_lines = [line for line in result.stdout.splitlines()
+                      if line.startswith("-")
+                      and line.rstrip().endswith("hello.txt")]
+        self.assertEqual(len(stat_lines), 1, result.stdout)
+        self.assertNotIn("SizeBytes:", result.stdout)
+
+        # cd, pwd, dir, session and close in a second run against it.
+        result = self.run_script(
+            "cd /docs ; pwd ; dir ; session ; session 1 ; "
+            "close ; echo AFTER_CLOSE")
+        self.assertEqual(result.returncode, 0,
+                         result.stdout + result.stderr)
+        # cd and pwd print the directory, like upstream, and dir is ls.
+        self.assertRegex(result.stdout, r"(?m)^/docs$")
+        self.assertIn("hello.txt", result.stdout.split("Active session")[0])
+        # session: '%3d  name' for every open session plus the active line.
+        self.assertRegex(result.stdout, r"(?m)^\s*1  127\.0\.0\.1$")
+        self.assertIn("Active session: 1 (127.0.0.1)", result.stdout)
+        # close: the closed session named, and the script carried on.
+        self.assertIn("Session '127.0.0.1' closed.", result.stdout)
+        self.assertIn("AFTER_CLOSE", result.stdout)
+
+        # An index that does not exist is refused while connected.
+        result = self.run_script("session 5 ; echo SHOULD_NOT_RUN")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Invalid session index", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+        # After close the session is gone and the next command says so.
+        result = self.run_script("close ; pwd ; echo SHOULD_NOT_RUN")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("Session '127.0.0.1' closed.", result.stdout)
+        self.assertIn("Not connected", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+        # An empty mask prints the no-match sentence instead of failing;
+        # failonnomatch turns the same sentence into the script's error.
+        result = self.run_script(
+            "mkdir /empty ; ls /empty/*.txt ; echo AFTER_MATCH")
+        self.assertEqual(result.returncode, 0,
+                         result.stdout + result.stderr)
+        self.assertIn("No files found matching", result.stdout)
+        self.assertIn("AFTER_MATCH", result.stdout)
+        result = self.run_script(
+            "option failonnomatch on ; ls /empty/*.txt ; "
+            "echo SHOULD_NOT_RUN")
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("No files found matching", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+
+    def test_alias_names_reach_the_commands_they_stand_for(self):
+        """md, rename, recv, mget, mput and del are this client's aliases;
+        they have to do the work of the command, and the script stops at
+        quit like it stops at exit."""
+        source = self.root / "alias.txt"
+        source.write_bytes(b"alias data\n")
+        downloaded = self.root / "alias-downloaded.txt"
+        reuploaded = self.root / "alias-reuploaded.txt"
+        result = self.run_script(
+            "option confirm off ; "
+            "mkdir /docs ; md /docs/sub ; put %s /docs/a.txt ; "
+            "rename /docs/a.txt /docs/b.txt ; "
+            "recv /docs/b.txt %s ; mget /docs/b.txt %s ; "
+            "mput %s /docs/c.txt ; del /docs/b.txt ; del /docs/c.txt ; "
+            "ls /docs ; echo ALIASES_OK ; quit ; echo SHOULD_NOT_RUN" %
+            (source, downloaded, reuploaded, reuploaded))
+        self.assertEqual(result.returncode, 0,
+                         result.stdout + result.stderr)
+        self.assertIn("ALIASES_OK", result.stdout)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+        self.assertEqual(sha256_of(source), sha256_of(downloaded))
+        self.assertEqual(sha256_of(source), sha256_of(reuploaded))
+        listing = self.run_script("ls /docs")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertIn("sub", listing.stdout)
+        self.assertNotIn("a.txt", listing.stdout)
+        self.assertNotIn("b.txt", listing.stdout)
+        self.assertNotIn("c.txt", listing.stdout)
 
 
 def run_and_report():

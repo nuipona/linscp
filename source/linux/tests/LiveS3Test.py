@@ -244,11 +244,16 @@ class LiveS3Tests(unittest.TestCase):
         self.assertIn("ROUNDTRIP_OK", result.stdout)
         self.assertEqual(sha256_of(source), sha256_of(downloaded))
 
-        # stat reports the size the server does.
-        result = self.run_script("stat /photos/roundtrip.bin")
+        # attr reports the size the server does; stat prints the single
+        # listing line upstream prints, with no key/value lines at all.
+        result = self.run_script("attr /photos/roundtrip.bin")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("SizeBytes:   %d" % source.stat().st_size,
                       result.stdout)
+        result = self.run_script("stat /photos/roundtrip.bin")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("SizeBytes:", result.stdout)
+        self.assertRegex(result.stdout, r"(?m)^\S.* roundtrip\.bin$")
 
     @posix_only("the client shells out to curl against 127.0.0.1")
     def test_resumed_download_continues_through_a_byte_range(self):

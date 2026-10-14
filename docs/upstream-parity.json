@@ -20,7 +20,7 @@
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader).",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused (SignatureDoesNotMatch from the server, a secret-key complaint before any request), bucket and object listings through mkdir/put, rmdir refusing a non-empty directory while accepting a marker-less prefix and refusing the bucket itself, an upload/download roundtrip with a checksum, a resumed download that only completes if the server's 206 byte range was used, rename as copy-plus-delete with the source gone afterwards, remove of a missing key failing, stat reporting the server's size and time, and botocore signing one request the server must accept - the reference implementation tying both sides to AWS's own behavior. POSIX-only (curl against 127.0.0.1), so it cannot be cited for Windows.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, search, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored).",
-     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: a wrong password refused by the 401 retry before any command runs, listings built from PROPFIND Depth 1 properties (type, size, date - including on a server that refuses GET on collections), stat carrying the real size and modification time and a missing path saying so, mkdir refusing an existing name, rmdir refusing a non-empty directory and succeeding once emptied, rename through MOVE leaving exactly the destination behind, remove of a missing file failing, and an upload/download roundtrip with a checksum. The suite is standard-library-only and the client speaks plain HTTP, so it also runs where CTest does, Windows included; only Linux evidence is cited here.",
+     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: a wrong password refused by the 401 retry before any command runs, listings built from PROPFIND Depth 1 properties (type, size, date - including on a server that refuses GET on collections), stat carrying the real size and modification time and a missing path saying so, mkdir refusing an existing name, rmdir refusing a non-empty directory and succeeding once emptied, rename through MOVE leaving exactly the destination behind, remove of a missing file failing, and an upload/download roundtrip with a checksum. It then checks the console outputs that need a live session and that upstream defines: stat as exactly one listing line, cd and pwd printing the directory, dir listing, the open-session listing and active line of session, close naming the session it closed and refusing a foreign index, the no-match sentence of an empty mask with and without option failonnomatch, and the md/rename/recv/mget/mput/del/quit aliases doing their command's work. The suite is standard-library-only and the client speaks plain HTTP, so the same run happens on every platform CTest runs on, Windows included.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server."
     }
    },
@@ -29,9 +29,10 @@
     "date": "2026-10-14",
     "suites": {
      "unit": "linuxscp-unittest.exe, the same C++ checks, built and run by the MSVC and MinGW jobs.",
-     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, which is where a Windows path or separator difference shows."
+     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, the upstream-shaped console outputs (help's two columns, lls columns, no-match sentences, exit/quit/end and the lcd/lpwd/session-offline refusals), which is where a Windows path or separator difference shows.",
+     "live-dav": "LiveDavTest.py against TestDavServer.py, the same throwaway WebDAV endpoint the Linux job runs: the full live suite through Windows curl - PROPFIND listings, stat as one listing line, mkdir/rmdir/rename/remove, the upload/download roundtrip, session and close with their upstream-shaped lines, the no-match sentence, and the md/rename/recv/mget/mput/del/quit aliases. This is the suite that carries the Windows evidence for the console commands that need a connection."
     },
-    "cannot_prove": "No live transfer of any kind. The native PuTTY SFTP transport is not built for Windows, and the curl.exe that ships with Windows 10 and 11 has no SFTP or SCP support, so there is no way for the Windows job to open an SFTP session against the test server; a curl built with libssh2 would change that. What that leaves unproven: the transport itself, permissions and timestamps on uploads, a POSIX server's path semantics, and every extension whose answer only a server can give."
+    "cannot_prove": "No SFTP or S3 session of any kind. The native PuTTY SFTP transport is not built for Windows, and the curl.exe that ships with Windows 10 and 11 has no SFTP or SCP support, so the Windows job cannot open an SFTP session against the test server; a curl built with libssh2 would change that, and the live S3 suite skips for the want of a listener there. WebDAV, which Windows curl does speak, is run live instead and is cited wherever a connection-level behaviour needs Windows evidence. What stays unproven on Windows: the SFTP transport itself, S3, permissions and timestamps on SFTP uploads, a POSIX server's path semantics, and every extension whose answer only an SFTP server can give (ln, chmod, checksum and friends)."
    }
   }
  },
@@ -49,16 +50,32 @@
    "notes": "Sets 'option transfer binary' like upstream, with arity checks. No per-site transfer presets."
   },
   "bye": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+   "status": "verified",
+   "notes": "Stops the script where it stands with no output and no arguments, like upstream's continue flag (exit, quit and end are the same command, bye an alias of exit). Covered by the script suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ],
+    "windows": [
+     "script"
+    ]
+   }
   },
   "call": {
    "status": "partial",
    "notes": "Rejoins and re-quotes the arguments and runs them over SSH exec in a one-shot second connection (the main SFTP session stays open). No interactive shell with a pty."
   },
   "cd": {
-   "status": "partial",
-   "notes": "With no argument it goes to the home directory captured at connect time and prints the resulting directory, like upstream; 'cd <dir>' also prints. No directory history."
+   "status": "verified",
+   "notes": "With no argument it goes to the home directory captured at connect time; either form prints the resulting directory, like upstream (upstream's script interpreter has no directory history either). Covered by the live WebDAV suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "live-dav"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   },
   "checksum": {
    "status": "partial",
@@ -75,8 +92,18 @@
    }
   },
   "close": {
-   "status": "partial",
-   "notes": "Single connection only; no indexed session close."
+   "status": "verified",
+   "notes": "Closes the session with no argument or with the 1-based index of the session to close ('close 1' is the only index that exists here), prints \"Session '<name>' closed.\" like upstream, and refuses other indexes; like upstream it needs a connection before the argument is even looked at. Opening a different stored site closes the previous connection the same way. Covered by the script suite (offline refusal) and the live WebDAV suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "copyid": {
    "status": "partial",
@@ -92,26 +119,40 @@
    "notes": "Server-side copy-data extension with a streamed fallback through the local host, recursive directory trees, multi-source into an existing directory and confirm-on-overwrite. Verified live via the fallback path; the native path needs a server with the copy-data extension."
   },
   "dir": {
-   "status": "partial",
-   "notes": "Listing whose mask comes from the trailing path component ('ls docs/*.log'), like upstream. Long format is the SFTP longname, not upstream's column formatting."
-  },
-  "echo": {
-   "status": "partial",
-   "notes": "Plain token output. The line has already been through the upstream expansions - script parameters, %TIMESTAMP% and environment variables - because they are applied before dispatch; text in single quotes is left alone.",
+   "status": "verified",
+   "notes": "Alias of 'ls' with the same listing, mask and no-match semantics. Covered by the live WebDAV suite on both platforms.",
    "verified_on": {
     "linux": [
-     "script",
-     "unit"
+     "live-dav"
     ],
     "windows": [
-     "script",
-     "unit"
+     "live-dav"
+    ]
+   }
+  },
+  "echo": {
+   "status": "verified",
+   "notes": "Plain token output. The line has already been through the upstream expansions - script parameters, %TIMESTAMP% and environment variables - because they are applied before dispatch; text in single quotes is left alone. Covered by the script suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ],
+    "windows": [
+     "script"
     ]
    }
   },
   "exit": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+   "status": "verified",
+   "notes": "Stops the script where it stands with no output and no arguments, like upstream's continue flag. Covered by the script suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ],
+    "windows": [
+     "script"
+    ]
+   }
   },
   "get": {
    "status": "partial",
@@ -127,8 +168,8 @@
    }
   },
   "help": {
-   "status": "partial",
-   "notes": "Per-command 'help <command> / 'man <command>' with syntax lines and a general listing. Command names, including those in help, may be given as an unambiguous abbreviation.",
+   "status": "verified",
+   "notes": "'help' lists every command as upstream does, name in an 8-wide column followed by its one-line description; 'help <command>' prints that command's help text, and aliases resolve to the command they stand for (unknown names are refused). Covered by the script suite on both platforms.",
    "verified_on": {
     "linux": [
      "script"
@@ -148,8 +189,8 @@
    }
   },
   "lcd": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified.",
+   "status": "verified",
+   "notes": "Changes the local directory and prints the directory it landed in, like upstream; a directory that cannot be entered is an error and stops a batch script. Covered by the script suite on both platforms.",
    "verified_on": {
     "linux": [
      "script"
@@ -160,8 +201,8 @@
    }
   },
   "lls": {
-   "status": "partial",
-   "notes": "Local directories and simple wildcard masks; names-only output, not upstream formatting.",
+   "status": "verified",
+   "notes": "Upstream's columns: date, time, size (or <DIR> for a directory) and the name, with the date and time widths fitted to the widest entry; a trailing wildcard leaf masks the listing, the default lists everything, and a path that matches nothing prints the no-match sentence - a failure only under option failonnomatch. Covered by the script suite on both platforms.",
    "verified_on": {
     "linux": [
      "script"
@@ -176,16 +217,33 @@
    "notes": "SFTP SYMLINK with the upstream argument order (target, link), verified live. Fails explicitly on protocols without symlinks."
   },
   "lpwd": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+   "status": "verified",
+   "notes": "Prints the local working directory, no arguments like upstream. Covered by the script suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ],
+    "windows": [
+     "script"
+    ]
+   }
   },
   "ls": {
-   "status": "partial",
-   "notes": "Listing whose mask comes from the trailing path component ('ls docs/*.log'), like upstream. Long format is the SFTP longname, not upstream's column formatting."
+   "status": "verified",
+   "notes": "Listing whose mask comes from the trailing path component ('ls docs/*.log'), like upstream. Long format prints the entry's listing line - the server's long name over SFTP, a synthesized ls -l line on the transfer backends - which is what upstream prints as well (File->ListingStr). A mask that matches nothing prints the no-match sentence, a failure only under option failonnomatch. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "verified_on": {
+    "linux": [
+     "live-dav",
+     "live-s3"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   },
   "man": {
-   "status": "partial",
-   "notes": "Same as 'help': per-command syntax and a general listing, with unambiguous abbreviations accepted.",
+   "status": "verified",
+   "notes": "Same as 'help': the two-column listing without arguments, the per-command help text with one, aliases resolving to their command. Covered by the script suite on both platforms.",
    "verified_on": {
     "linux": [
      "script"
@@ -200,11 +258,15 @@
    "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "mkdir": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified.",
+   "status": "verified",
+   "notes": "Creates exactly one directory - one argument like upstream - and is silent on success; refusals (a name that exists) and other server answers are reported and fail the script. Covered by the live WebDAV and S3 suites on Linux and the live WebDAV suite on Windows.",
    "verified_on": {
     "linux": [
-     "live-sftp"
+     "live-dav",
+     "live-s3"
+    ],
+    "windows": [
+     "live-dav"
     ]
    }
   },
@@ -213,8 +275,16 @@
    "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "mv": {
-   "status": "partial",
-   "notes": "Multi-source with an existing-directory target, rename in place and confirm-on-overwrite, like upstream."
+   "status": "verified",
+   "notes": "Multi-source with an existing-directory target, rename in place and confirm-on-overwrite, like upstream. Covered by the live WebDAV suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "live-dav"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   },
   "open": {
    "status": "partial",
@@ -257,46 +327,87 @@
    }
   },
   "pwd": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+   "status": "verified",
+   "notes": "Prints the remote working directory after checking there is a session, like upstream. Covered by the live WebDAV suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "live-dav"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   },
   "recv": {
    "status": "partial",
    "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "rename": {
-   "status": "partial",
-   "notes": "One source and one destination only."
-  },
-  "rm": {
-   "status": "partial",
-   "notes": "Multiple files, masks and -onlyfile (directories are skipped with a status), no-match reporting gated by option failonnomatch, like upstream. No recursive delete, matching upstream.",
+   "status": "verified",
+   "notes": "One source and one destination only, like upstream's mv in its rename form. Covered by the live WebDAV suite on both platforms.",
    "verified_on": {
     "linux": [
-     "live-sftp"
+     "live-dav"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
+  },
+  "rm": {
+   "status": "verified",
+   "notes": "Multiple files, masks and -onlyfile (directories are skipped with a status), no-match reporting gated by option failonnomatch, like upstream. No recursive delete, matching upstream. Covered by the live WebDAV suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "live-dav"
+    ],
+    "windows": [
+     "live-dav"
     ]
    }
   },
   "rmdir": {
-   "status": "partial",
-   "notes": "Multiple directories in one command, continuing past failures; only empty directories, like upstream."
+   "status": "verified",
+   "notes": "Multiple directories in one command, continuing past failures; only empty directories, like upstream. Covered by the live WebDAV suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "live-dav"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   },
   "send": {
    "status": "partial",
    "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
   },
   "session": {
-   "status": "partial",
-   "notes": "Lists the stored sessions from sessions.ini. The non-upstream helpers savesession and rmsession create and remove them, and 'open <name>' resolves a stored session, whose stored password (when one is stored) is encrypted under a sibling\nsessions.key rather than kept in the clear. Missing: folder tree and raw\nsettings.",
+   "status": "verified",
+   "notes": "Upstream 'session' semantics: it needs an open session, no argument lists the open sessions as '%3d  name' and prints which one is active, and 'session <index>' switches (only index 1 exists with one connection; other indexes are refused). The stored-sites listing, export/import and lookup by name moved to the plural 'sessions' command, which savesession/rmsession feed and 'open <name>' also resolves. The session folder tree and raw settings are not part of this command and stay tracked under 'open'. Covered by the script suite (the offline refusals) and the live WebDAV suite (listing, switching) on both platforms.",
    "verified_on": {
     "linux": [
-     "script"
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
     ]
    }
   },
   "stat": {
-   "status": "partial",
-   "notes": "Basic command implemented; full upstream argument, output and session semantics have not been verified."
+   "status": "verified",
+   "notes": "Prints the one listing line upstream prints for the path (the line 'ls -l' shows: permissions, links, owner, group, size, time and name), exactly one line with no key/value text. The breakdown this used to print lives on as the LinuxSCP addition 'attr', which the graphical client parses instead. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "verified_on": {
+    "linux": [
+     "live-dav",
+     "live-s3"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   },
   "symlink": {
    "status": "partial",
@@ -460,32 +571,71 @@
   },
   {
    "name": "savesession / rmsession",
-   "status": "partial",
-   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key\non save, and a stored value that cannot be decrypted is preserved across\nan unrelated re-save.",
+   "status": "verified",
+   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key on save, and a stored value that cannot be decrypted is preserved across an unrelated re-save. Covered by the script suite on both platforms.",
    "verified_on": {
     "linux": [
-     "unit",
      "script"
     ],
     "windows": [
-     "unit"
+     "script"
     ]
    }
   },
   {
    "name": "sessions",
-   "status": "partial",
-   "notes": "Plural alias of 'session' with no argument, listing the stored sites. Not an upstream command name."
+   "status": "verified",
+   "notes": "Stored-sites companion of 'session': lists the sites in sessions.ini with their URL and remote directory, opens one by name (as does 'open <name>'), and exports or imports the whole list (sessions export/import). Not an upstream command name - upstream keeps none of this in its script language - while 'session' itself now follows upstream's open-session semantics. Covered by the script suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ],
+    "windows": [
+     "script"
+    ]
+   }
   },
   {
    "name": "show",
-   "status": "missing",
-   "notes": "Recognised only to report that it is unsupported: the connection runs the SFTP subsystem, so there is no shell state to show. Not an upstream script command either."
+   "status": "verified",
+   "notes": "Recognised and answered with the reason: this build connects with the SFTP subsystem, so there is no shell state to show, and the command says so instead of failing as an unknown name. Not an upstream script command. Covered by the script suite on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ],
+    "windows": [
+     "script"
+    ]
+   }
   },
   {
    "name": "del, md, sync, quit, end",
-   "status": "partial",
-   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage."
+   "status": "verified",
+   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage. Covered on both platforms: sync, quit and end by the script suite, md and del by the live WebDAV suite.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
+  },
+  {
+   "name": "attr",
+   "status": "verified",
+   "notes": "The key/value attribute block the console printed before 'stat' followed upstream: path, size, permissions, modified time, SizeBytes, ModifiedEpoch and owner lines, parsed by the graphical client (remote_stat). Not an upstream command - upstream's 'stat' prints the single listing line instead. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "verified_on": {
+    "linux": [
+     "live-dav",
+     "live-s3"
+    ],
+    "windows": [
+     "live-dav"
+    ]
+   }
   }
  ]
 }

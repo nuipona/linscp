@@ -64,7 +64,7 @@ std::string ToLower(const std::string & text)
  * the dispatcher grows a command that is not listed here.
  */
 const char * const kCommandNames[] = {
-    "!", "ascii", "binary", "bye", "call", "cd", "checksum", "chmod",
+    "!", "ascii", "attr", "binary", "bye", "call", "cd", "checksum", "chmod",
     "close", "copyid", "cp", "del", "delsession", "dir", "echo", "edit",
     "end", "exit", "get", "help", "keepuptodate", "lcd", "lls", "ln",
     "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv", "open",
@@ -888,18 +888,45 @@ bool Script::OpenSite(const std::vector<std::string> & args)
     return true;
 }
 
-void Script::CloseSite()
+/*
+ * The session name of the open connection, the way upstream's session
+ * listing identifies a connection opened from a URL: its host.
+ */
+static std::string SessionDisplayNameFor(const SessionOptions & options)
 {
+    return options.hostName.empty() ? std::string("session") : options.hostName;
+}
+
+void Script::CloseSite(const std::vector<std::string> & args)
+{
+    /* Upstream checks the session first, then accepts an optional
+     * 1-based index of the session to close. Only one connection exists
+     * here, so index 1 is the only one that resolves. */
     if (!mSession.IsOpen())
     {
         Console::Instance().Error(Texts::NotConnected());
         mErrors++;
         return;
     }
+    if (args.size() > 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("close",
+            "Syntax: close [<index>]."));
+        mErrors++;
+        return;
+    }
+    if (!args.empty() && args[0] != "1")
+    {
+        Console::Instance().Error("Invalid session index '" + args[0] + "'.");
+        mErrors++;
+        return;
+    }
+    const std::string name = SessionDisplayNameFor(mSession.Options());
     mSession.Close();
     mRemoteDirectory.clear();
     mHomeDirectory.clear();
     Console::Instance().LogAction("session", "action=\"close\"");
+    Console::Instance().WriteLine("Session '" + name + "' closed.");
 }
 
 bool Script::ChangeRemoteDirectory(const std::vector<std::string> & args)
@@ -973,6 +1000,30 @@ void Script::PrintRemoteEntry(const std::string & name, const LscpName & entry,
     line += buffer;
     line += " " + FormatFileTime(entry.attrs.mtime) + " " + name;
     Console::Instance().WriteLine(line);
+}
+
+/*
+ * Upstream prints "No files found matching '<mask>'." when a mask matched
+ * nothing and only turns it into a script error when the option
+ * failonnomatch is on; the reason from the operating system follows the
+ * sentence when there is one.
+ */
+void Script::NoMatch(const std::string & mask, const std::string & error)
+{
+    std::string message = "No files found matching '" + mask + "'.";
+    if (!error.empty())
+    {
+        message += " " + error;
+    }
+    if (mFailOnNoMatch)
+    {
+        Console::Instance().Error(message);
+        mErrors++;
+    }
+    else
+    {
+        Console::Instance().WriteLine(message);
+    }
 }
 
 bool Script::ListRemote(const std::vector<std::string> & args)
@@ -1064,6 +1115,10 @@ bool Script::ListRemote(const std::vector<std::string> & args)
         count++;
     }
     RemoteFreeNames(names);
+    if (!mask.empty() && count == 0)
+    {
+        NoMatch(mask, std::string());
+    }
     Console::Instance().Status(Texts::DirectoryRead(count));
     return true;
 }
@@ -1092,6 +1147,13 @@ bool Script::ChangeLocalDirectory(const std::vector<std::string> & args)
         mErrors++;
         return false;
     }
+    /* Upstream prints the directory after changing into it, like 'cd'. */
+    std::string after = GetLocalDirectory(error);
+    if (after.empty())
+    {
+        after = path;
+    }
+    Console::Instance().WriteLine(after);
     return true;
 }
 
@@ -2385,21 +2447,44 @@ bool Script::ListLocal(const std::vector<std::string> & args)
 {
     if (args.size() > 1)
     {
-        Console::Instance().Error(Texts::WrongArguments("lls", "Syntax: lls [<directory>[/<mask>]]"));
+        Console::Instance().Error(Texts::WrongArguments("lls",
+            "Syntax: lls [<directory>[/<mask>]]"));
         mErrors++;
         return false;
     }
     std::string error;
     std::string path = args.empty() ? GetLocalDirectory(error) : ExpandTilde(args[0]);
+    if (path.empty())
+    {
+        Console::Instance().Error(error.empty() ?
+            std::string("The local directory cannot be determined.") : error);
+        mErrors++;
+        return false;
+    }
+
+    /* Upstream defaults the mask to '*.*' and keeps a trailing wildcard
+     * leaf as the mask; both decide what a no-match message says. */
+    std::string messageMask = "*.*";
+    if (!args.empty())
+    {
+        const std::string leaf = LocalFileName(path);
+        if (HasWildcard(leaf))
+        {
+            messageMask = leaf;
+        }
+    }
+
     std::vector<std::string> paths;
     if (StatLocal(path).isDir)
     {
         std::vector<std::string> names;
         if (!ListLocalDirectory(path, names, error))
         {
-            Console::Instance().Error(Texts::CannotReadDirectory(path, error));
-            mErrors++;
-            return false;
+            /* Upstream turns any failed search into a no-match line (an
+             * error only with failonnomatch), with the OS reason after it. */
+            NoMatch(messageMask, error.empty() ?
+                std::string("The directory cannot be listed.") : error);
+            return true;
         }
         for (const std::string & name : names)
         {
@@ -2409,15 +2494,65 @@ bool Script::ListLocal(const std::vector<std::string> & args)
     else if (!ExpandLocalWildcard(path, paths, error) ||
         (!HasWildcard(path) && paths.empty()))
     {
-        Console::Instance().Error(Texts::LocalError("list", path,
-            error.empty() ? "No such file or directory." : error));
-        mErrors++;
-        return false;
+        NoMatch(messageMask, !error.empty() ? error :
+            std::string("No such file or directory."));
+        return true;
     }
+
     std::sort(paths.begin(), paths.end());
+
+    /* The columns of upstream's lls: date, time, size (or <DIR>) and the
+     * name, with the date and time widths taken from the widest entry. */
+    struct Row
+    {
+        std::string date;
+        std::string time;
+        std::string size;
+        std::string name;
+    };
+    std::vector<Row> rows;
+    size_t dateLen = 0;
+    size_t timeLen = 0;
     for (const std::string & entry : paths)
     {
-        Console::Instance().WriteLine(LocalFileName(entry));
+        const std::string name = LocalFileName(entry);
+        if (name == ".")
+        {
+            continue;
+        }
+        const LocalFileInfo info = StatLocal(entry);
+        Row row;
+        row.date = FormatFileDate(info.mtime);
+        row.time = FormatFileClock(info.mtime);
+        char size[32];
+        if (info.isDir)
+        {
+            snprintf(size, sizeof(size), "%-14s", "<DIR>");
+        }
+        else
+        {
+            snprintf(size, sizeof(size), "%14llu",
+                static_cast<unsigned long long>(info.size));
+        }
+        row.size = size;
+        row.name = name;
+        dateLen = row.date.size() > dateLen ? row.date.size() : dateLen;
+        timeLen = row.time.size() > timeLen ? row.time.size() : timeLen;
+        rows.push_back(row);
+    }
+    if (rows.empty())
+    {
+        NoMatch(messageMask, std::string());
+        return true;
+    }
+    for (const Row & row : rows)
+    {
+        std::string date = row.date;
+        date.append(dateLen - row.date.size(), ' ');
+        std::string time = row.time;
+        time.append(timeLen - row.time.size(), ' ');
+        Console::Instance().WriteLine(date + "  " + time + "    " +
+            row.size + " " + row.name);
     }
     return true;
 }
@@ -3929,7 +4064,51 @@ bool Script::EditRemoteFile(const std::vector<std::string> & args)
  * Stored sessions (the site manager)                                  *
  * ------------------------------------------------------------------ */
 
+/*
+ * Upstream 'session' lists the open sessions as 'index<2 spaces>name' and
+ * prints which one is active; with an argument (a 1-based index) it
+ * switches to that session and prints only the active line. A CheckSession
+ * comes first, so an offline 'session' is an error like upstream's. Only
+ * one connection exists here, so index 1 is the only one that resolves.
+ */
 bool Script::SessionCommand(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    if (args.size() > 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("session",
+            "Syntax: session [<index>]."));
+        mErrors++;
+        return false;
+    }
+    if (!args.empty() && args[0] != "1")
+    {
+        Console::Instance().Error("Invalid session index '" + args[0] + "'.");
+        mErrors++;
+        return false;
+    }
+    const std::string name = SessionDisplayNameFor(mSession.Options());
+    if (args.empty())
+    {
+        char index[8];
+        snprintf(index, sizeof(index), "%3d", 1);
+        Console::Instance().WriteLine(std::string(index) + "  " + name);
+    }
+    Console::Instance().WriteLine("Active session: 1 (" + name + ")");
+    return true;
+}
+
+/*
+ * 'sessions' is the stored-sites side of the console: listing them, the
+ * export/import helpers and looking one up by name. Upstream spells none
+ * of this 'session' - its 'session' switches between open connections,
+ * which is SessionCommand below - so the name follows this client's
+ * plural convention instead.
+ */
+bool Script::StoredSessionsCommand(const std::vector<std::string> & args)
 {
     Console & console = Console::Instance();
     const std::string path = mSessions.Path();
@@ -3939,7 +4118,7 @@ bool Script::SessionCommand(const std::vector<std::string> & args)
         std::string error;
         if (args.size() != 2)
         {
-            console.Error(Texts::WrongArguments("session",
+            console.Error(Texts::WrongArguments("sessions",
                 "Syntax: session export <file>."));
             mErrors++;
             return false;
@@ -3959,7 +4138,7 @@ bool Script::SessionCommand(const std::vector<std::string> & args)
     {
         if (args.size() != 2)
         {
-            console.Error(Texts::WrongArguments("session",
+            console.Error(Texts::WrongArguments("sessions",
                 "Syntax: session import <file>."));
             mErrors++;
             return false;
@@ -3987,7 +4166,7 @@ bool Script::SessionCommand(const std::vector<std::string> & args)
 
     if (args.size() == 1 && ToLower(args[0]) == "list")
     {
-        return SessionCommand(std::vector<std::string>());
+        return StoredSessionsCommand(std::vector<std::string>());
     }
 
     if (args.size() == 1)
@@ -4005,7 +4184,7 @@ bool Script::SessionCommand(const std::vector<std::string> & args)
     if (args.size() > 1)
     {
         console.Error(Texts::WrongArguments("session",
-            "Syntax: session [NAME|list|export <file>|import <file>]."));
+            "Syntax: sessions [NAME|list|export <file>|import <file>]."));
         mErrors++;
         return false;
     }
@@ -4065,7 +4244,7 @@ bool Script::OpenStoredSite(const std::string & name)
     std::string error;
     if (mSession.IsOpen())
     {
-        CloseSite();
+        CloseSite(std::vector<std::string>());
     }
 
     SessionOptions options = SessionStore::ToSessionOptions(*stored, mDefaults);
@@ -5440,8 +5619,16 @@ bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
     return ok;
 }
 
-bool Script::StatRemote(const std::vector<std::string> & args)
+/*
+ * 'attr' is this client's key/value breakdown of a remote file's
+ * attributes - the machine-readable form the graphical client parses.
+ * It used to be what 'stat' printed; upstream's 'stat' prints a single
+ * listing line instead, which is why the listing line is StatRemote
+ * below and this detail stayed available under its own name.
+ */
+bool Script::AttrRemote(const std::vector<std::string> & args)
 {
+
     if (!RequireConnection())
     {
         return false;
@@ -5480,6 +5667,38 @@ bool Script::StatRemote(const std::vector<std::string> & args)
     Console::Instance().WriteLine("Owner:       " + std::string(
         attrs.flags & LSCP_ATTR_UIDGID ?
         std::to_string(attrs.uid) + ":" + std::to_string(attrs.gid) : std::string("unknown")));
+    return true;
+}
+
+/*
+ * Upstream 'stat' prints the one listing line of the path - what 'ls -l'
+ * shows for that entry. The attribute probe itself is AttrRemote's.
+ */
+bool Script::StatRemote(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    if (args.size() != 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("stat", "Syntax: stat <file>"));
+        mErrors++;
+        return false;
+    }
+    std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
+    LscpAttrs attrs;
+    std::string error;
+    if (RemoteStat(path, &attrs, error) != LSCP_SFTP_STAT_EXISTS)
+    {
+        Console::Instance().Error(Texts::RemoteError("read the attributes of", path,
+            error));
+        mErrors++;
+        return false;
+    }
+    LscpName entry = LscpName();
+    entry.attrs = attrs;
+    PrintRemoteEntry(RemoteFileName(path), entry, true);
     return true;
 }
 
@@ -5920,19 +6139,49 @@ bool Script::SetOption(const std::vector<std::string> & args)
     return false;
 }
 
-/* Help text of one command. Upstream keeps these in its resource
- * strings; this is the equivalent for the implemented subset, close to
- * the wording of the WinSCP documentation. */
-const char * Script::CommandHelp(const std::string & command)
+/*
+ * The command an alias stands for, for the help of an alias; names that
+ * are commands of their own come back unchanged.
+ */
+static std::string CanonicalCommandAlias(const std::string & name)
 {
     static const struct
     {
-        const char * name;
-        const char * help;
-    } helps[] = {
+        const char * alias;
+        const char * target;
+    } aliases[] = {
+        { "!", "call" }, { "?", "help" }, { "del", "rm" },
+        { "delsession", "rmsession" }, { "dir", "ls" }, { "end", "exit" },
+        { "md", "mkdir" }, { "mget", "get" }, { "mput", "put" },
+        { "quit", "exit" }, { "recv", "get" }, { "rename", "mv" },
+        { "send", "put" }, { "sync", "synchronize" },
+    };
+    for (size_t i = 0; i < sizeof(aliases) / sizeof(aliases[0]); i++)
+    {
+        if (name == aliases[i].alias)
+        {
+            return aliases[i].target;
+        }
+    }
+    return name;
+}
+
+/* Help texts, kept as data so that 'help' can enumerate the commands the
+ * way upstream enumerates its registered ones. Upstream keeps these in its
+ * resource strings; this is the equivalent for the implemented subset,
+ * close to the wording of the WinSCP documentation. */
+namespace {
+const struct ScriptCommandHelpEntry
+{
+    const char * name;
+    const char * help;
+} kScriptCommandHelps[] = {
         { "ascii", "ascii\n"
             "  Transfers files in ASCII mode: line endings are converted\n"
             "  (CRLF to LF when downloading, LF to CRLF when uploading)." },
+        { "attr", "attr <file>\n"
+            "  Prints path, size, permissions, modification time and owner\n"
+            "  of a remote file, one key/value line each." },
         { "binary", "binary\n"
             "  Transfers files in binary mode (no conversion)." },
         { "bye", "bye\n"
@@ -5951,8 +6200,9 @@ const char * Script::CommandHelp(const std::string & command)
             "  (644, 0700) or symbolic (u+x, go-w, a=r,go-w, u+s); with\n"
             "  -recursive everything below a directory is changed too,\n"
             "  symbolic links excepted." },
-        { "close", "close\n"
-            "  Closes the session." },
+        { "close", "close [ <index> ]\n"
+            "  Closes the open session, or the session at the 1-based\n"
+            "  <index> (only one connection is open at a time)." },
         { "copyid", "copyid [ <keyfile> ]\n"
             "  Installs the public key of the private key in use (or of\n"
             "  <keyfile>) into ~/.ssh/authorized_keys on the server, so\n"
@@ -6016,10 +6266,23 @@ const char * Script::CommandHelp(const std::string & command)
             "  directories." },
         { "rmdir", "rmdir <directory> [ <directory>... ]\n"
             "  Deletes empty remote directories." },
-        { "session", "session [ export <file> | import <file> ]\n"
-            "  Lists stored sessions, or exports/imports them." },
+        { "rmsession", "rmsession <name>\n"
+            "  Removes the stored session <name>." },
+        { "savesession", "savesession <name> [ options ]\n"
+            "  Stores the current session, or the one the options\n"
+            "  describe, under <name>." },
+        { "show", "show\n"
+            "  Not available in this build: the connection runs the SFTP\n"
+            "  subsystem, so remote shell commands cannot be shown." },
+        { "session", "session [ <index> ]\n"
+            "  Lists the open sessions and prints which one is active;\n"
+            "  with a 1-based <index> it switches to that session." },
+        { "sessions", "sessions [ NAME | list | export <file> | import <file> ]\n"
+            "  Lists the stored sites, opens one by name, or exports and\n"
+            "  imports the whole list." },
         { "stat", "stat <file>\n"
-            "  Prints the attributes of a remote file." },
+            "  Prints the listing line of a remote path, as ls -l shows\n"
+            "  it. The key/value breakdown of attr stays available there." },
         { "synchronize", "synchronize local|remote|both [ <localdir> [ <remotedir> ] ]\n"
             "  [ -delete ] [-nodelete] [-mirror] [-preview]\n"
             "  [-criteria=time|size|either|none] [-filemask=<mask>]\n"
@@ -6028,12 +6291,17 @@ const char * Script::CommandHelp(const std::string & command)
             "  Same as 'ln'." },
         { "terminal", "terminal\n"
             "  Opens an interactive shell terminal on the server." },
-    };
-    for (size_t i = 0; i < sizeof(helps) / sizeof(helps[0]); i++)
+};
+}
+
+const char * Script::CommandHelp(const std::string & command)
+{
+    for (size_t i = 0; i < sizeof(kScriptCommandHelps) /
+        sizeof(kScriptCommandHelps[0]); i++)
     {
-        if (command == helps[i].name)
+        if (command == kScriptCommandHelps[i].name)
         {
-            return helps[i].help;
+            return kScriptCommandHelps[i].help;
         }
     }
     return NULL;
@@ -6048,6 +6316,11 @@ void Script::PrintHelp(const std::vector<std::string> & args)
             const char * help = CommandHelp(ToLower(args[i]));
             if (help == NULL)
             {
+                /* Aliases share the help of the command they stand for. */
+                help = CommandHelp(CanonicalCommandAlias(ToLower(args[i])));
+            }
+            if (help == NULL)
+            {
                 Console::Instance().Error(Texts::UnknownCommand(args[i]));
                 mErrors++;
                 continue;
@@ -6056,7 +6329,30 @@ void Script::PrintHelp(const std::vector<std::string> & args)
         }
         return;
     }
-    Console::Instance().WriteLine(Texts::Usage());
+    /* Upstream lists every registered command with a description in
+     * 'name<7 spaces> description' columns; the description is the
+     * second line of the per-command help text. */
+    std::string output;
+    for (size_t i = 0; i < sizeof(kScriptCommandHelps) /
+        sizeof(kScriptCommandHelps[0]); i++)
+    {
+        const std::string help = kScriptCommandHelps[i].help;
+        size_t summaryStart = help.find('\n');
+        std::string summary = summaryStart == std::string::npos ?
+            std::string() : help.substr(summaryStart + 1);
+        while (!summary.empty() && (summary[0] == ' ' || summary[0] == '\t'))
+        {
+            summary.erase(0, 1);
+        }
+        if (summary.empty())
+        {
+            continue;
+        }
+        char prefix[16];
+        snprintf(prefix, sizeof(prefix), "%-8s ", kScriptCommandHelps[i].name);
+        output += std::string(prefix) + summary + "\n";
+    }
+    Console::Instance().WriteLine(output);
 }
 
 bool Script::ExecuteLine(const std::string & line)
@@ -6171,7 +6467,7 @@ bool Script::ExecuteCommand(const std::string & line)
     }
     if (command == "close")
     {
-        CloseSite();
+        CloseSite(args);
         return true;
     }
     if (command == "cd")
@@ -6244,9 +6540,14 @@ bool Script::ExecuteCommand(const std::string & line)
         EditRemoteFile(args);
         return true;
     }
-    if (command == "session" || command == "sessions")
+    if (command == "session")
     {
         SessionCommand(args);
+        return true;
+    }
+    if (command == "sessions")
+    {
+        StoredSessionsCommand(args);
         return true;
     }
     if (command == "savesession")
@@ -6318,6 +6619,11 @@ bool Script::ExecuteCommand(const std::string & line)
     if (command == "stat")
     {
         StatRemote(args);
+        return true;
+    }
+    if (command == "attr")
+    {
+        AttrRemote(args);
         return true;
     }
     if (command == "option")

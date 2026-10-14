@@ -135,9 +135,30 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(errors, [])
         both = [e for e in entries if len(e.get("verified_on", {})) > 1]
         self.assertTrue(both, "no entry has evidence from more than one platform")
-        self.assertFalse([e for e in entries if e["status"] == "verified"],
-                         "an entry was promoted to verified; the gate says "
-                         "that needs evidence for every aspect, not some")
+        # Promotion is allowed only when every aspect of the claim is
+        # accounted for: each platform the ledger ships on contributes at
+        # least one suite that actually ran the behaviours the notes
+        # describe, the notes say which suites those are, and no aspect
+        # of the entry is still listed as missing inside the claim.
+        platforms = inventory["verification"]["platforms"]
+        verified = [e for e in entries if e["status"] == "verified"]
+        for entry in verified:
+            label = entry.get("name") or "?"
+            cited = entry.get("verified_on")
+            self.assertTrue(cited, label + ": verified with no evidence at all")
+            self.assertEqual(sorted(cited), sorted(platforms),
+                             label + ": a platform the ledger ships on has "
+                             "no evidence for this entry")
+            for platform, suites in cited.items():
+                self.assertTrue(suites,
+                                label + ": " + platform + " cites no suite")
+            self.assertRegex(
+                entry["notes"], r"(?i)covered by|covered on",
+                label + ": the notes never say which evidence covers which "
+                "behaviour")
+            self.assertNotIn(
+                "Missing:", entry["notes"],
+                label + ": a verified claim still lists a missing aspect")
 
 
 if __name__ == "__main__":

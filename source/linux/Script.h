@@ -226,10 +226,11 @@ private:
     bool SwitchError(const std::string & command, const std::string & hint);
     bool ListLocal(const std::vector<std::string> & args);
     bool OpenSite(const std::vector<std::string> & args);
-    void CloseSite();
+    void CloseSite(const std::vector<std::string> & args);
     bool ChangeRemoteDirectory(const std::vector<std::string> & args);
     void PrintRemoteDirectory();
     bool ListRemote(const std::vector<std::string> & args);
+    void NoMatch(const std::string & mask, const std::string & error);
     bool ChangeLocalDirectory(const std::vector<std::string> & args);
     void PrintLocalDirectory();
     bool GetFiles(const std::vector<std::string> & args);
@@ -257,6 +258,7 @@ private:
     bool KeepUpToDate(const std::vector<std::string> & args);
     bool EditRemoteFile(const std::vector<std::string> & args);
     bool SessionCommand(const std::vector<std::string> & args);
+    bool StoredSessionsCommand(const std::vector<std::string> & args);
     bool SaveStoredSession(const std::vector<std::string> & args);
     bool RemoveStoredSessionEntry(const std::vector<std::string> & args);
     /* Opens a stored session by name; false when there is no such
@@ -290,6 +292,7 @@ private:
     bool ApplyRemotePermissions(const std::string & path, const std::string & mode,
         bool recursive, unsigned long long & changed);
     bool StatRemote(const std::vector<std::string> & args);
+    bool AttrRemote(const std::vector<std::string> & args);
     bool SetOption(const std::vector<std::string> & args);
     void OpenTerminal(const std::vector<std::string> & args);
     void PrintHelp(const std::vector<std::string> & args);

@@ -291,7 +291,7 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("Not connected", result.stderr)
 
     def test_stored_sessions(self):
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("no stored sessions", result.stdout)
 
@@ -300,7 +300,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Stored session 'demo'", result.stdout)
 
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("demo", result.stdout)
         self.assertIn("sftp://alice@demo.example.com:2222", result.stdout)
@@ -316,7 +316,7 @@ class ScriptTests(unittest.TestCase):
 
         result = self.run_commands("rmsession demo")
         self.assertEqual(result.returncode, 0, result.stderr)
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertIn("no stored sessions", result.stdout)
 
     def test_savesession_stores_password_encrypted(self):
@@ -346,7 +346,7 @@ class ScriptTests(unittest.TestCase):
             self.assertEqual(keyfile.stat().st_mode & 0o077, 0)
 
         # The listing shows the session, never the password.
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("hunter2", result.stdout)
 
@@ -398,17 +398,17 @@ class ScriptTests(unittest.TestCase):
     def test_session_export_import(self):
         self.run_commands("savesession one -host=one.example.com")
         exported = pathlib.Path(self.config) / "exported.ini"
-        result = self.run_commands(f'session export "{exported}"')
+        result = self.run_commands(f'sessions export "{exported}"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Exported 1 session", result.stdout)
         self.assertTrue(exported.is_file())
 
         result = self.run_commands("rmsession one")
         self.assertEqual(result.returncode, 0, result.stderr)
-        result = self.run_commands(f'session import "{exported}"')
+        result = self.run_commands(f'sessions import "{exported}"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Imported 1 session", result.stdout)
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertIn("one.example.com", result.stdout)
 
     def test_savesession_rejects_unknown_switches(self):
@@ -464,18 +464,114 @@ class ScriptTests(unittest.TestCase):
             (root / "directory").mkdir()
             result = self.run_commands(f'lls "{root}"')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(),
-                             ["directory", "hello world.txt", "other.bin"])
+            # Upstream's columns: date, time, size (or <DIR>), then name.
+            lines = result.stdout.splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertRegex(lines[0], r"\d{2}:\d{2} +<DIR> +directory$")
+            self.assertRegex(lines[1], r"\d{2}:\d{2} +4 hello world\.txt$")
+            self.assertRegex(lines[2], r"\d{2}:\d{2} +4 other\.bin$")
             result = self.run_commands(f'lls "{root / "*.txt"}"')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(), ["hello world.txt"])
+            self.assertEqual(len(result.stdout.splitlines()), 1)
+            self.assertRegex(result.stdout,
+                             r"\d{2}:\d{2} +4 hello world\.txt$")
+            # A path that matches nothing is a no-match line, not a
+            # failure - unless failonnomatch turns it into one.
             result = self.run_commands(f'lls "{root / "missing"}"')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("No files found matching", result.stdout)
+            self.assertIn("No such file or directory", result.stdout)
+            result = self.run_commands(f'lls "{root / "*.none"}"')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("No files found matching '*.none'", result.stdout)
+            result = self.run_commands(
+                f'option failonnomatch on; lls "{root / "missing"}"')
             self.assertEqual(result.returncode, 1)
+            self.assertIn("No files found matching", result.stderr)
 
-    def test_help_alias(self):
+    def test_help_lists_commands_and_command_help(self):
+        """'help' lists every command in upstream's name/description
+        columns; 'help <command>' (aliases included) prints its help."""
+        result = self.run_commands("help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"(?m)^ascii\s+Transfers files")
+        self.assertRegex(result.stdout,
+                         r"(?m)^session\s+Lists the open sessions")
+        self.assertRegex(result.stdout, r"(?m)^attr\s+Prints path, size")
         result = self.run_commands("man")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Commands:", result.stdout)
+        self.assertRegex(result.stdout, r"(?m)^ascii\s+Transfers files")
+        result = self.run_commands("help rename")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mv <source>", result.stdout)
+        result = self.run_commands("help nosuchthing")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Unknown command", result.stderr)
+
+    def test_exit_and_bye_end_the_script(self):
+        """exit and bye stop the script where they are, like upstream's
+        continue flag: nothing after them runs."""
+        for stopper in ("exit", "bye"):
+            with self.subTest(stopper=stopper):
+                result = self.run_commands(f"echo ONE; {stopper}; echo TWO")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("ONE", result.stdout)
+                self.assertNotIn("TWO", result.stdout)
+
+    def test_lcd_prints_where_it_went(self):
+        """lcd reports the directory it changed into, like cd does."""
+        with tempfile.TemporaryDirectory(prefix="linuxscp lcd ") as tmp:
+            result = self.run_commands(f'lpwd; lcd "{tmp}"; lpwd; echo MARK')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.splitlines()
+            changed = lines[1]
+            self.assertIn(changed, (str(pathlib.Path(tmp)),
+                                    str(pathlib.Path(tmp).resolve())))
+            self.assertEqual(lines[2], changed)
+            self.assertIn("MARK", result.stdout)
+            result = self.run_commands(f'lcd "{tmp}/nope-here"; echo AFTER')
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn("AFTER", result.stdout)
+
+    def test_show_is_refused_with_the_reason(self):
+        """'show' exists only to say that this build has no shell state:
+        the connection runs the SFTP subsystem."""
+        result = self.run_commands("show ; echo AFTER")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("SFTP subsystem", result.stderr)
+        self.assertNotIn("AFTER", result.stdout)
+
+    def test_exit_aliases_end_the_script(self):
+        """quit and end stand for exit; '?' stands for help."""
+        for stopper in ("quit", "end"):
+            with self.subTest(stopper=stopper):
+                result = self.run_commands(f"echo ONE; {stopper}; echo TWO")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("ONE", result.stdout)
+                self.assertNotIn("TWO", result.stdout)
+        result = self.run_commands("?")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"(?m)^ascii\s+Transfers files")
+
+    def test_sync_alias_reaches_synchronize(self):
+        """'sync' validates as synchronize does - an unknown switch is
+        named as such rather than as an unknown command."""
+        result = self.run_commands(
+            "sync local -criteria=whenever ; echo AFTER")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("synchronize", result.stderr)
+        self.assertNotIn("Unknown command", result.stderr)
+
+    def test_session_and_close_need_a_connection(self):
+        """Like upstream's CheckSession, 'session' and 'close' refuse to
+        run before anything is open - argument checks happen after."""
+        for command in ("session", "session 1", "close", "close 1",
+                        "close 2"):
+            with self.subTest(command=command):
+                result = self.run_commands(command + "; echo AFTER")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Not connected", result.stderr)
+                self.assertNotIn("AFTER", result.stdout)
 
 
     def test_xml_action_log(self):

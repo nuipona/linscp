@@ -1744,8 +1744,12 @@ def transfer_switches(body):
 
 
 def remote_stat(tab, remote_path, timeout=30):
-    """Parse the 'stat' output of the core into a dictionary."""
-    code, lines = tab.run("stat " + quote_remote(remote_path), timeout=timeout)
+    """Parse the 'attr' output of the core into a dictionary.
+
+    'attr' is the key/value breakdown of a remote file's attributes; the
+    upstream-shaped 'stat' prints a single listing line instead.
+    """
+    code, lines = tab.run("attr " + quote_remote(remote_path), timeout=timeout)
     if code != 0:
         return None
     info = {"path": remote_path, "size": 0, "mtime": 0, "is_dir": False,

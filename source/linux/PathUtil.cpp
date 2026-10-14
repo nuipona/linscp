@@ -715,6 +715,40 @@ std::string FormatFileTime(unsigned long time)
     return std::string(buffer);
 }
 
+/* The date and clock split of FormatFileTime for the 'lls' columns. */
+std::string FormatFileDate(unsigned long time)
+{
+    static const char * months[] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    time_t t = static_cast<time_t>(time);
+    struct tm tmResult;
+    if (!LocalTime(t, tmResult))
+    {
+        return "unknown";
+    }
+    char buffer[32];
+    snprintf(buffer, sizeof(buffer), "%s %2d %d",
+        months[tmResult.tm_mon % 12], tmResult.tm_mday,
+        tmResult.tm_year + 1900);
+    return std::string(buffer);
+}
+
+std::string FormatFileClock(unsigned long time)
+{
+    time_t t = static_cast<time_t>(time);
+    struct tm tmResult;
+    if (!LocalTime(t, tmResult))
+    {
+        return "??";
+    }
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%02d:%02d",
+        tmResult.tm_hour, tmResult.tm_min);
+    return std::string(buffer);
+}
+
 } // namespace linuxscp
 
 /* Permission parsing, shared by 'chmod' and by '-permissions='. */

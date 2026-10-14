@@ -236,7 +236,9 @@ which is either a URL or the name of a stored session (see
 above).
 .TP
 .B close
-Disconnect.
+Disconnect the open session, or the session at the 1-based
+.I index
+given as an argument (one connection is open at a time).
 .TP
 .BI cd " directory"
 Change the remote directory.
@@ -255,10 +257,15 @@ is accepted and does nothing, as entries starting with a dot are always
 listed.
 .TP
 .BI lls " [directory[/mask]]"
-List local names, optionally matching a simple wildcard mask.
+List local files in the columns upstream prints: date, time, size (or
+.BR <DIR> )
+and name, optionally filtered by a simple wildcard mask. A mask that
+matches nothing prints a sentence instead of failing, unless
+.B option failonnomatch on
+turns that sentence into the script error.
 .TP
 .BI lcd " directory"
-Change the local directory.
+Change the local directory and print it.
 .TP
 .B lpwd
 Print the local directory.
@@ -394,7 +401,15 @@ after the download began. Without an argument the current remote directory is
 used.
 .TP
 .B session
-List the stored sessions.
+List the open sessions as index and name and print which one is active.
+With a 1-based
+.I index
+as the only connection that is open, it prints the active session.
+.TP
+.B sessions
+List the stored sessions (also
+.BR "sessions export" ,
+.BR "sessions import" ).
 .TP
 .BI savesession " name [" options ]"
 Store the current session, or the session described by the options, under
@@ -469,6 +484,11 @@ session is required. Reading a key file is a POSIX\-build capability; the
 Windows build says so instead of doing nothing.
 .TP
 .BI stat " file"
+Print the listing line of a remote path, the line
+.B ls \-l
+would show for it.
+.TP
+.BI attr " file"
 Print the attributes of a remote file: path, size, permissions, modification
 time and owner. The
 .B SizeBytes
@@ -511,7 +531,9 @@ is supported. Reconnect settings, ASCII/automatic transfers, file-mask
 switches and other unimplemented compatibility options fail explicitly.
 .TP
 .B help
-List the commands.
+List the commands with a short description in two columns.
+.BR "help" \ ICommand
+prints the help of one command, aliases resolving to their command.
 .TP
 .B exit
 End the session. The aliases
