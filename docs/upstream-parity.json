@@ -15,9 +15,9 @@
     "how": "make -C source/linux all check && make -C source/linux check-live",
     "date": "2026-10-14",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 665 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file.",
-     "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog.",
-     "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions.",
+     "unit": "source/linux/tests/UnitTest.cpp - 713 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file.",
+     "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file).",
+     "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader).",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server."
     }
    },
@@ -215,7 +215,7 @@
   },
   "open": {
    "status": "partial",
-   "notes": "URL sessions and stored-session names; an unknown host key is refused and reported on a HOSTKEY line so it can be pinned. No raw settings, SSH tunnels, session folders or session selection UI in the console client.",
+   "notes": "URL sessions and stored-session names; an unknown host key is refused and reported on a HOSTKEY line so it can be pinned. No raw settings, SSH tunnels, session folders or session selection UI in the console client. A stored password that cannot be decrypted is reported and the\nopen continues without it.",
    "verified_on": {
     "linux": [
      "script",
@@ -284,7 +284,12 @@
   },
   "session": {
    "status": "partial",
-   "notes": "Lists the stored sessions from sessions.ini. The non-upstream helpers savesession and rmsession create and remove them, and 'open <name>' resolves a stored session, but there is no folder tree, no raw settings and no password encryption."
+   "notes": "Lists the stored sessions from sessions.ini. The non-upstream helpers savesession and rmsession create and remove them, and 'open <name>' resolves a stored session, whose stored password (when one is stored) is encrypted under a sibling\nsessions.key rather than kept in the clear. Missing: folder tree and raw\nsettings.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ]
+   }
   },
   "stat": {
    "status": "partial",
@@ -371,15 +376,21 @@
   {
    "name": "Sessions/configuration",
    "status": "partial",
-   "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import and last-used tracking. Missing: folder tree, raw settings, encrypted passwords and the full upstream configuration model."
+   "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import and last-used tracking. Stored passwords are encrypted under a sibling 'sessions.key' (created\non first use, user-only access) in a format the graphical client reads and\nwrites too. Missing: folder tree, raw settings and the full upstream\nconfiguration model.",
+   "verified_on": {
+    "linux": [
+     "script"
+    ]
+   }
   },
   {
    "name": "Security/authentication",
    "status": "partial",
-   "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account or encrypted credential store.",
+   "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
    "verified_on": {
     "linux": [
-     "live-sftp"
+     "live-sftp",
+     "unit"
     ]
    }
   },
@@ -431,10 +442,11 @@
   {
    "name": "savesession / rmsession",
    "status": "partial",
-   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly.",
+   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key\non save, and a stored value that cannot be decrypted is preserved across\nan unrelated re-save.",
    "verified_on": {
     "linux": [
-     "unit"
+     "unit",
+     "script"
     ],
     "windows": [
      "unit"

@@ -24,6 +24,12 @@ int lscp_hash_file(const char * algorithm, const char * path,
     char * hex, size_t hexSize);
 const char * lscp_hash_error(void);
 
+/* HMAC-SHA256 of 'data' under 'key' through the PuTTY core (the PRF the
+ * sessions-file password encryption is built from). Writes 32 bytes to
+ * 'out'; 'outSize' must be at least 32. Returns 0 on success. */
+int lscp_hmac_sha256(const void * key, size_t keyLen,
+    const void * data, size_t dataLen, unsigned char * out, size_t outSize);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

@@ -272,6 +272,14 @@ are not implemented; see the pinned audit for the full list.
   load such keys into the agent instead.
 * **Password**: `-password=` or `LINUXSCP_PASSWORD`. In interactive mode the
   client asks; in `-batch` mode it fails rather than prompting.
+* **Stored password**: `savesession <name> -password=...` writes it encrypted
+  as `lscp1$...` under `sessions.key` next to `sessions.ini` (created on
+  first use, readable by this account only), never in the clear; a
+  plaintext entry from before that is rewritten encrypted on the next save.
+  Without the key file, `open <name>` says the stored password cannot be
+  used and continues without it (a key or an agent may still be enough),
+  and an unrelated re-save keeps the unreadable value instead of
+  destroying it. The graphical client reads and writes the same format.
 
 ### Host keys
 
@@ -399,6 +407,7 @@ implementation includes:
   `-parameter` with `%1%`..`%9%`, `%TIMESTAMP%` and `%ENVIRONMENT%`
   expansion, and an XML action log (`-xmllog=`).
 * Stored sessions shared with the GUI (`session`, `savesession`, `rmsession`,
-  export and import).
+  export and import), including the encrypted stored-password format both
+  clients read.
 * Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
 * Native Debian `.deb` packaging with standard menu launchers and icons.

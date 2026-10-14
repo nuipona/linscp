@@ -18,6 +18,7 @@ built into Windows has no SFTP or SCP support, so there is no session for
 these tests to open - not a slow test, an impossible one. A Windows install
 that puts a curl built with libssh2 on PATH gets these tests back.
 """
+import base64
 import hashlib
 import importlib.util
 import os
@@ -393,6 +394,166 @@ class LiveSftpTests(unittest.TestCase):
         self.assertEqual(sha256_of(target), digest)
 
     @posix_only("curl cannot set the modification time of an upload")
+    # -- stored passwords, shared with the GUI ------------------------------
+    def clean_sessions(self):
+        """This config directory is shared by the class; a session file
+        left behind by one test must not decide the next one's outcome."""
+        for name in ("sessions.ini", "sessions.key"):
+            candidate = self.config / name
+            if candidate.exists():
+                candidate.unlink()
+
+    def run_stored(self, command, timeout=60):
+        """Run a script that is NOT prefaced with an open-by-URL, so a
+        stored session's own credentials are what gets used."""
+        argv = [BINARY, "-batch", "-hostkey=*",
+                "-command=" + command]
+        return subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout,
+                              env=dict(os.environ,
+                                       LINUXSCP_CONFIG_DIR=str(self.config)))
+
+    def gui_crypto(self):
+        """The graphical client's own reader for sessions.ini."""
+        gui_dir = HERE.parents[1] / "gui"
+        if str(gui_dir) not in sys.path:
+            sys.path.insert(0, str(gui_dir))
+        import linscp_crypto
+        return linscp_crypto
+
+    @posix_only("the test writes the key file with POSIX permissions")
+    def test_password_encrypted_by_python_opens_the_core(self):
+        """The whole point of the shared format: a password encrypted by
+        the GUI's module must authenticate the console client."""
+        linscp_crypto = self.gui_crypto()
+        self.clean_sessions()
+        try:
+            key = os.urandom(32)
+            (self.config / "sessions.key").write_text(
+                base64.b64encode(key).decode("ascii") + "\n")
+            (self.config / "sessions.ini").write_text(
+                "[vault]\n"
+                "protocol=sftp\n"
+                "host=127.0.0.1\n"
+                "port=%d\n"
+                "username=%s\n"
+                "password=%s\n" %
+                (self.port, USER, linscp_crypto.encrypt(PASSWORD, key)),
+                encoding="utf-8")
+
+            result = self.run_stored("open vault ; ls ; echo OPENED")
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+            self.assertIn("OPENED", result.stdout)
+
+            # Listing the sessions never prints the password either.
+            result = self.run_stored("session")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(PASSWORD, result.stdout + result.stderr)
+        finally:
+            self.clean_sessions()
+
+    @posix_only("the test writes the key file with POSIX permissions")
+    def test_missing_key_file_is_reported_and_the_password_preserved(self):
+        """An undecryptable password stops nobody who has a key, says so
+        loudly, and survives a re-save that cannot read it."""
+        linscp_crypto = self.gui_crypto()
+        self.clean_sessions()
+        try:
+            key = os.urandom(32)
+            key_bytes = base64.b64encode(key).decode("ascii") + "\n"
+            (self.config / "sessions.key").write_text(key_bytes)
+            (self.config / "sessions.ini").write_text(
+                "[vault]\n"
+                "protocol=sftp\n"
+                "host=127.0.0.1\n"
+                "port=%d\n"
+                "username=%s\n"
+                "password=%s\n" %
+                (self.port, USER, linscp_crypto.encrypt(PASSWORD, key)),
+                encoding="utf-8")
+            before = (self.config / "sessions.ini").read_text(encoding="utf-8")
+            (self.config / "sessions.key").unlink()
+
+            result = self.run_stored("open vault")
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 1, combined)
+            self.assertIn("cannot be used", combined)
+            self.assertIn("sessions.key", combined)
+            # The file itself was not rewritten on the way to failure.
+            self.assertEqual(
+                (self.config / "sessions.ini").read_text(encoding="utf-8"),
+                before)
+
+            # An unrelated re-save must keep the value it cannot read.
+            result = self.run_stored(
+                "savesession vault -host=127.0.0.1 -port=%d -username=%s" %
+                (self.port, USER))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = (self.config / "sessions.ini").read_text(encoding="utf-8")
+            blob = None
+            for line in before.splitlines():
+                if line.startswith("password="):
+                    blob = line.split("=", 1)[1]
+            self.assertTrue(blob and blob.startswith("lscp1$"), before)
+            self.assertIn("password=" + blob, text)
+
+            # Key restored: the same session opens, by decryption.
+            (self.config / "sessions.key").write_text(key_bytes)
+            result = self.run_stored("open vault ; ls ; echo STILL_GOT_IT")
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+            self.assertIn("STILL_GOT_IT", result.stdout)
+        finally:
+            self.clean_sessions()
+
+    @posix_only("the test writes the key file with POSIX permissions")
+    def test_password_stored_by_the_core_decrypts_in_python(self):
+        """And the other direction: what the console client encrypts has
+        to come back out through the GUI's reader, password and all."""
+        linscp_crypto = self.gui_crypto()
+        gui_dir = HERE.parents[1] / "gui"
+        if str(gui_dir) not in sys.path:
+            sys.path.insert(0, str(gui_dir))
+        self.clean_sessions()
+        try:
+            result = self.run_stored(
+                "savesession katsite -host=127.0.0.1 -port=%d -username=%s "
+                "-password=%s" % (self.port, USER, PASSWORD))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("stored encrypted", result.stdout)
+
+            text = (self.config / "sessions.ini").read_text(encoding="utf-8")
+            self.assertNotIn(PASSWORD, text)
+            blob = None
+            for line in text.splitlines():
+                if line.startswith("password="):
+                    blob = line.split("=", 1)[1]
+            self.assertTrue(blob and blob.startswith("lscp1$"), text)
+
+            key = linscp_crypto.load_key(
+                linscp_crypto.key_path_for(str(self.config / "sessions.ini")))
+            self.assertEqual(linscp_crypto.decrypt(blob, key), PASSWORD)
+
+            # The GUI's own session reader (the one the site list uses)
+            # reports it as usable, not locked.
+            import linuxscp_gui
+            old = os.environ.get("LINUXSCP_CONFIG_DIR")
+            os.environ["LINUXSCP_CONFIG_DIR"] = str(self.config)
+            try:
+                sessions = linuxscp_gui.read_stored_sessions()
+            finally:
+                if old is None:
+                    os.environ.pop("LINUXSCP_CONFIG_DIR", None)
+                else:
+                    os.environ["LINUXSCP_CONFIG_DIR"] = old
+            match = [s for s in sessions if s["name"] == "katsite"]
+            self.assertEqual(len(match), 1, sessions)
+            self.assertEqual(match[0]["password"], PASSWORD)
+            self.assertFalse(match[0].get("password_locked"))
+        finally:
+            self.clean_sessions()
+
     def test_timestamps_survive_in_both_directions(self):
         """'-preservetime' means the server time and the local time agree
         after a transfer, whichever way the bytes went - which only a real

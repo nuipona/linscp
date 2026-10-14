@@ -19,10 +19,14 @@
  * The section name is the session name and may contain '/', which the
  * graphical client shows as a folder tree. Passwords are never written
  * unless the user asks for it explicitly ('savesession -password=...'),
- * and then only with the permissions of the user (0600 on POSIX).
+ * and then only encrypted under a key file next to this one
+ * ('sessions.key', created on first use with the permissions of the
+ * user); a value that still reads as plaintext came from before the
+ * encryption existed and is upgraded on the next save.
  *
  * The graphical client reads the same file, which is why the format is
- * deliberately simple and stable.
+ * deliberately simple and stable - and why the encryption carries a
+ * version prefix the other side understands.
  */
 
 #ifndef LINUXSCP_SESSIONSTORE_H
@@ -47,12 +51,22 @@ struct StoredSession
     std::string hostKey;
     std::string remoteDirectory;
     std::string localDirectory;
-    /* Saved only when explicitly requested; empty otherwise. */
+    /*
+     * Saved only when explicitly requested; empty otherwise. When the
+     * file holds an encrypted password, 'password' receives the
+     * decrypted text at load; if that fails (no key file, wrong key,
+     * tampered value) 'password' stays empty, 'passwordStored' keeps
+     * true, 'passwordRaw' preserves the encrypted value so a save does
+     * not destroy it, and 'passwordError' says why it is unusable.
+     */
     std::string password;
+    bool passwordStored;
+    std::string passwordRaw;
+    std::string passwordError;
     /* Seconds since the epoch of the last successful connect, 0 = never. */
     unsigned long long lastUsed;
 
-    StoredSession() : portNumber(0), lastUsed(0) {}
+    StoredSession() : portNumber(0), passwordStored(false), lastUsed(0) {}
 };
 
 class SessionStore
@@ -66,10 +80,31 @@ public:
     /* Configuration directory + "sessions.ini". */
     static std::string DefaultPath();
     const std::string & Path() const { return mPath; }
+    /* The key file that pairs with Path(): '<path without .ini>.key'. */
+    const std::string & KeyPath() const { return mKeyPath; }
+
+    /*
+     * The stored-password format, shared with the graphical client
+     * (source/gui/linscp_crypto.py produces and consumes the same
+     * bytes): 'lscp1$' + base64(nonce[16] || ciphertext || tag[32]).
+     * The keystream is HMAC-SHA256 of the nonce and a block counter
+     * under a key derived from the key file; the tag is HMAC-SHA256
+     * over the format label, the nonce and the ciphertext under a
+     * second derived key (encrypt-then-MAC, each direction domain
+     * separated from the raw key-file bytes). 'key' is the raw
+     * 32-byte content of the key file. Static so that tests can hold
+     * both directions against one key.
+     */
+    static bool EncryptPassword(const std::string & plain,
+        const std::string & key, std::string & encoded, std::string & error);
+    static bool DecryptPassword(const std::string & encoded,
+        const std::string & key, std::string & plain, std::string & error);
 
     /* Reloads the file, discarding unsaved changes. */
     bool Load(std::string & error);
-    /* Writes the file, creating its directory with user-only access. */
+    /* Writes the file, creating its directory with user-only access.
+     * Passwords are encrypted before the file is opened, so a failure
+     * to encrypt leaves the previous file intact. */
     bool Save(std::string & error) const;
 
     const std::vector<StoredSession> & Sessions() const { return mSessions; }
@@ -109,6 +144,7 @@ private:
 
     std::vector<StoredSession> mSessions;
     std::string mPath;
+    std::string mKeyPath;
 };
 
 } // namespace linuxscp

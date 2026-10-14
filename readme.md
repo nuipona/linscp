@@ -68,7 +68,7 @@ curl build. Scripting covers the WinSCP transfer switches (file masks,
 transfers, unambiguous command and option abbreviations, script
 parameters with `%TIMESTAMP%` and environment expansion, and an XML action
 log; the .NET assembly and PowerShell automation APIs, transfer presets,
-session folder trees and encrypted stored passwords remain open gaps.
+session folder trees remain open gaps.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 for the pinned upstream baseline, command inventory, limitations and tests.

@@ -1415,6 +1415,197 @@ void TestSessionStore()
         CHECK_TRUE(reread.Find("backup") == NULL);
     }
 
+    /*
+     * The stored-password format is shared with the graphical client
+     * (source/gui/linscp_crypto.py). These vectors were produced by
+     * that implementation against key 00..1f and nonce 00..0f: if the
+     * construction here ever drifts, decrypting them fails.
+     */
+    {
+        std::string key;
+        for (size_t i = 0; i < 32; i++)
+        {
+            key += static_cast<char>(i);
+        }
+        std::string plain;
+        std::string error;
+        const std::string kat1 =
+            "lscp1$AAECAwQFBgcICQoLDA0ODzNWSp01TpOx8x81IxUhAo51bcOMpoJg2g83"
+            "SWf7byn+amPfGSNCsg==";
+        const std::string kat2 =
+            "lscp1$AAECAwQFBgcICQoLDA0ODyh/TZpwV840DnvHA0xT2r+AMLWGHq75A+y"
+            "WlakWbPb1Vamz4fx1qXAujDW+jENVNco73r8LQnf9okOrUaR9J3/jO9TylMxS"
+            "ZCsE0g==";
+        CHECK_TRUE(SessionStore::DecryptPassword(kat1, key, plain, error));
+        CHECK_EQ(plain, "kitten2");
+        CHECK_TRUE(SessionStore::DecryptPassword(kat2, key, plain, error));
+        CHECK_EQ(plain, "p@ss word: with $paces/slashes+plus\nnewline");
+
+        /* Round trip, and no plaintext anywhere near the ciphertext. */
+        std::string encoded;
+        CHECK_TRUE(SessionStore::EncryptPassword("hunter2!*()", key, encoded,
+            error));
+        CHECK_TRUE(encoded.compare(0, 6, "lscp1$") == 0);
+        CHECK_TRUE(encoded.find("hunter2") == std::string::npos);
+        std::string back;
+        CHECK_TRUE(SessionStore::DecryptPassword(encoded, key, back, error));
+        CHECK_EQ(back, "hunter2!*()");
+
+        /* Tampering and wrong keys are refused, not decoded to garbage. */
+        std::string tampered = encoded;
+        tampered[tampered.size() - 2] =
+            tampered[tampered.size() - 2] == 'A' ? 'B' : 'A';
+        CHECK_FALSE(SessionStore::DecryptPassword(tampered, key, back, error));
+        CHECK_TRUE(!error.empty());
+        CHECK_FALSE(SessionStore::DecryptPassword(encoded,
+            std::string(32, 'x'), back, error));
+        CHECK_FALSE(SessionStore::DecryptPassword("no-such-format", key, back,
+            error));
+        CHECK_FALSE(SessionStore::EncryptPassword(std::string(5000, 'a'), key,
+            encoded, error));
+    }
+
+    /*
+     * On disk: encrypted, under a key file that appears with the first
+     * stored password and decrypts again on the next load.
+     */
+    {
+        const std::string secure = temporary + "/secure";
+        const std::string ini = secure + "/sessions.ini";
+        const std::string keyPath = secure + "/sessions.key";
+        SessionStore store(ini);
+        CHECK_EQ(store.KeyPath(), keyPath);
+        CHECK_FALSE(std::filesystem::exists(keyPath)); /* nothing yet */
+
+        StoredSession session;
+        session.name = "vault";
+        session.hostName = "vault.example.com";
+        session.protocol = "sftp";
+        session.password = "correct horse battery staple";
+        std::string error;
+        CHECK_TRUE(store.AddOrUpdate(session, error));
+        CHECK_TRUE(store.Save(error));
+
+        CHECK_TRUE(std::filesystem::exists(keyPath));
+        /* The file holds the ciphertext, never the password. */
+        FILE * file = fopen(ini.c_str(), "rb");
+        CHECK_TRUE(file != NULL);
+        std::string content;
+        if (file != NULL)
+        {
+            char buffer[4096];
+            size_t got;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                content.append(buffer, got);
+            }
+            fclose(file);
+        }
+        CHECK_TRUE(content.find("correct horse battery staple") ==
+            std::string::npos);
+        CHECK_TRUE(content.find("password=lscp1$") != std::string::npos);
+
+        /* And a fresh load decrypts it back. */
+        SessionStore reread(ini);
+        const StoredSession * found = reread.Find("vault");
+        CHECK_TRUE(found != NULL);
+        CHECK_EQ(found != NULL ? found->password : std::string("missing"),
+            "correct horse battery staple");
+        CHECK_TRUE(found != NULL && found->passwordRaw.empty());
+        CHECK_TRUE(found != NULL && found->passwordError.empty());
+
+        /*
+         * Without the key file the entry stays locked: the value is
+         * preserved byte for byte across a save, and the reason is
+         * reported for whoever tries to use it.
+         */
+        std::string keyFileContent;
+        file = fopen(keyPath.c_str(), "rb");
+        CHECK_TRUE(file != NULL);
+        if (file != NULL)
+        {
+            char buffer[512];
+            const size_t got = fread(buffer, 1, sizeof(buffer), file);
+            keyFileContent.assign(buffer, got);
+            fclose(file);
+        }
+        CHECK_TRUE(remove(keyPath.c_str()) == 0);
+
+        SessionStore locked(ini);
+        const StoredSession * held = locked.Find("vault");
+        CHECK_TRUE(held != NULL);
+        CHECK_TRUE(held != NULL && held->password.empty());
+        CHECK_TRUE(held != NULL && held->passwordStored);
+        CHECK_TRUE(held != NULL && !held->passwordRaw.empty());
+        CHECK_TRUE(held != NULL && !held->passwordError.empty());
+        const std::string blob = held != NULL ? held->passwordRaw : "";
+        CHECK_TRUE(blob.compare(0, 6, "lscp1$") == 0);
+        CHECK_TRUE(locked.Save(error));
+        SessionStore afterLockedSave(ini);
+        const StoredSession * stillHeld = afterLockedSave.Find("vault");
+        CHECK_TRUE(stillHeld != NULL && stillHeld->passwordRaw == blob);
+        CHECK_TRUE(stillHeld != NULL && stillHeld->password.empty());
+
+        /* Put the key back and the same value decrypts again. */
+        file = fopen(keyPath.c_str(), "wb");
+        CHECK_TRUE(file != NULL);
+        if (file != NULL)
+        {
+            fwrite(keyFileContent.data(), 1, keyFileContent.size(), file);
+            fclose(file);
+        }
+        SessionStore restored(ini);
+        const StoredSession * back2 = restored.Find("vault");
+        CHECK_TRUE(back2 != NULL);
+        CHECK_EQ(back2 != NULL ? back2->password : std::string("missing"),
+            "correct horse battery staple");
+        CHECK_TRUE(back2 != NULL && back2->passwordError.empty());
+    }
+
+    /*
+     * A plaintext password from before the encryption existed is read,
+     * and the next save upgrades it without ever writing it back in
+     * the clear.
+     */
+    {
+        const std::string legacyPath = temporary + "/legacy.ini";
+        FILE * file = fopen(legacyPath.c_str(), "wb");
+        CHECK_TRUE(file != NULL);
+        if (file != NULL)
+        {
+            fputs("[legacy]\nprotocol=sftp\nhost=old.example.com\n"
+                "password=hunter2-plain\n", file);
+            fclose(file);
+        }
+        SessionStore legacy(legacyPath);
+        const StoredSession * found = legacy.Find("legacy");
+        CHECK_TRUE(found != NULL);
+        CHECK_EQ(found != NULL ? found->password : std::string("missing"),
+            "hunter2-plain");
+        std::string error;
+        CHECK_TRUE(legacy.Save(error));
+
+        file = fopen(legacyPath.c_str(), "rb");
+        std::string content;
+        if (file != NULL)
+        {
+            char buffer[4096];
+            size_t got;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                content.append(buffer, got);
+            }
+            fclose(file);
+        }
+        CHECK_TRUE(content.find("hunter2-plain") == std::string::npos);
+        CHECK_TRUE(content.find("password=lscp1$") != std::string::npos);
+
+        SessionStore upgraded(legacyPath);
+        const StoredSession * again = upgraded.Find("legacy");
+        CHECK_EQ(again != NULL ? again->password : std::string("missing"),
+            "hunter2-plain");
+    }
+
     /* Names are validated. */
     CHECK_FALSE(SessionStore::IsValidName(""));
     CHECK_FALSE(SessionStore::IsValidName(" leading"));

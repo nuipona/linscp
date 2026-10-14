@@ -4074,6 +4074,18 @@ bool Script::OpenStoredSite(const std::string & name)
         options.userName = CurrentUserName();
     }
     Console & console = Console::Instance();
+    if (stored->passwordStored && stored->password.empty() &&
+        !stored->passwordError.empty())
+    {
+        /*
+         * Not fatal: a key file or an agent may be enough, and a
+         * password-only session will fail at authentication with this
+         * already on screen to explain why.
+         */
+        console.Error("The stored password of session '" + stored->name +
+            "' cannot be used: " + stored->passwordError +
+            ". Continuing without it.");
+    }
     console.Status("Connecting to " + options.hostName + " (stored session '" +
         stored->name + "')...");
     if (!mSession.Open(options, error))
@@ -4260,6 +4272,25 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
             return false;
         }
     }
+    else
+    {
+        const StoredSession * previous = mSessions.Find(name);
+        if (previous != NULL && previous->name == name &&
+            previous->passwordStored && previous->password.empty() &&
+            !previous->passwordRaw.empty())
+        {
+            /*
+             * An encrypted password this machine cannot decrypt is not
+             * silently dropped by an unrelated re-save: keep the value
+             * exactly as it is until the key file is back. (Once it
+             * decrypts again, 'savesession <name>' without -password
+             * clears it, as documented.)
+             */
+            session.passwordStored = true;
+            session.passwordRaw = previous->passwordRaw;
+            session.passwordError = previous->passwordError;
+        }
+    }
 
     std::string error;
     if (!mSessions.AddOrUpdate(session, error))
@@ -4280,8 +4311,11 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
             std::string(" in ") + mSessions.Path()) + ".");
     if (!session.password.empty())
     {
-        console.Status("Warning: the password was written to the session file. "
-            "It is readable by this account only; remove it with "
+        console.Status("Warning: the password was stored encrypted in the "
+            "session file" +
+            (mSessions.KeyPath().empty() ? std::string() :
+                std::string(" under '") + mSessions.KeyPath() + "'") +
+            ". It is readable by this account only; remove it with "
             "'savesession " + name + "' after connecting with a key or an agent.");
     }
     return true;

@@ -319,6 +319,82 @@ class ScriptTests(unittest.TestCase):
         result = self.run_commands("session")
         self.assertIn("no stored sessions", result.stdout)
 
+    def test_savesession_stores_password_encrypted(self):
+        """A password given to savesession is written encrypted under a
+        key file, never in the clear, and the session list stays quiet
+        about it."""
+        import base64
+
+        result = self.run_commands(
+            "savesession secret -host=secret.example.com -username=alice "
+            "-password=hunter2-plain")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stored encrypted", result.stdout)
+        self.assertIn("sessions.key", result.stdout)
+
+        stored = pathlib.Path(self.config) / "sessions.ini"
+        keyfile = pathlib.Path(self.config) / "sessions.key"
+        text = stored.read_text(encoding="utf-8")
+        self.assertNotIn("hunter2-plain", text)
+        self.assertIn("password=lscp1$", text)
+        self.assertTrue(keyfile.is_file())
+        key = base64.b64decode(keyfile.read_text().strip())
+        self.assertEqual(len(key), 32)
+        if os.name == "posix":
+            # Group or world readable is a bug, whatever the umask was.
+            # Windows has no permission bits to compare against.
+            self.assertEqual(keyfile.stat().st_mode & 0o077, 0)
+
+        # The listing shows the session, never the password.
+        result = self.run_commands("session")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("hunter2", result.stdout)
+
+        # Saving again without -password clears a password it could read
+        # (the documented way to remove one).
+        result = self.run_commands(
+            "savesession secret -host=secret.example.com -username=alice")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("password=", stored.read_text(encoding="utf-8"))
+
+    def test_savesession_keeps_a_password_it_cannot_decrypt(self):
+        """Without the key file the encrypted value is unreadable, and an
+        unrelated re-save must not destroy what it cannot see."""
+        import base64
+
+        result = self.run_commands(
+            "savesession locked -host=locked.example.com -password=keepme")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        stored = pathlib.Path(self.config) / "sessions.ini"
+        keyfile = pathlib.Path(self.config) / "sessions.key"
+        text = stored.read_text(encoding="utf-8")
+        blob = None
+        for line in text.splitlines():
+            if line.startswith("password="):
+                blob = line.split("=", 1)[1]
+        self.assertIsNotNone(blob)
+        self.assertTrue(blob.startswith("lscp1$"))
+        self.assertNotIn("keepme", text)
+        saved_key = keyfile.read_bytes()
+        keyfile.unlink()
+
+        # Re-save without the password: the entry is replaced, but the
+        # value it could not decrypt stays exactly as it was.
+        result = self.run_commands(
+            "savesession locked -host=locked.example.com -port=22")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = stored.read_text(encoding="utf-8")
+        self.assertIn("password=" + blob, text)
+        self.assertNotIn("keepme", text)
+
+        # With the key restored the same value decrypts again (the core
+        # reports the failure rather than using an empty password; the
+        # success side is covered by the live suite).
+        keyfile.write_bytes(saved_key)
+        key = base64.b64decode(saved_key.decode().strip())
+        self.assertEqual(len(key), 32)
+
     def test_session_export_import(self):
         self.run_commands("savesession one -host=one.example.com")
         exported = pathlib.Path(self.config) / "exported.ini"

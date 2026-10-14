@@ -77,8 +77,8 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 | S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
 | Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. Resume-capable transfers stage through upstream's `.filepart` name and are renamed into place only when complete - `option resume automatic` (default) from upstream's 100 KB threshold, `on` always, `off` never - so an interrupted transfer never leaves a truncated file under the final name and a continuation reads the staging file instead of splicing the existing destination; the live suite covers both directions, the stale-staging-file restart and `option resume off`. That suite cannot run on Windows at all, because the `curl.exe` built into Windows has no SFTP support, so nothing about a Windows transfer is verified (`docs/windows.md`). Missing: transfer presets and per-file progress reporting on the curl paths. |
 | Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror` and ASCII conversion verified against a live server. Missing: path exclusions and a real watch mode: `keepuptodate` still repeats a full comparison on a timer. |
-| Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
-| Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
+| Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Stored passwords are encrypted under a sibling `sessions.key`, in a format the GUI reads and writes too. Missing folder trees, raw settings and the full upstream configuration model. |
+| Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account or upstream key-management UI; stored session passwords are encrypted at rest under `sessions.key` rather than kept in the clear. |
 | GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization. |
 | Editing/search | `edit` downloads, runs the configured editor and uploads on change, with a size limit (`option editmaxsize`) and a refusal when the remote file changed meanwhile; remote search walks directories by name mask. Missing save/upload monitoring of local edits, full-text search, encoding handling and the custom command system. |
 | Automation | CLI scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters, `%TIMESTAMP%` and environment expansion, and an XML action log (`-xmllog=`) with masked passwords. Missing: the .NET assembly and PowerShell APIs, and log-format equivalence - our log mirrors upstream's structure but does not copy a schema, since upstream has no XML session log to copy. |
@@ -170,6 +170,14 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
   off` when `-resume` finds no staging file to continue, because the
   overwrite is confirmed before the transfer instead of being assumed
   from the switch.
+* `savesession <name> -password=...` stores the password encrypted under a
+  key file (`sessions.ini` -> `sessions.key`, created on first use with
+  user-only access) in the `lscp1$` format the graphical client also reads;
+  plaintext entries from before are upgraded on the next save. Omitting
+  `-password` still clears a password that could be read, but a value the
+  key file cannot decrypt is preserved across an unrelated re-save, and
+  `open <name>` reports why a stored password cannot be used instead of
+  silently connecting without it.
 
 These intentional fail-closed changes can break scripts that previously relied
 on silently ignored settings. Review those scripts; do not remove a safety
@@ -206,7 +214,10 @@ download interrupted by Ctrl-C that stays in `.filepart` and is completed by a
 plain `get`, the same for an interrupted upload, a continuation that must not
 splice an existing destination, a transfer whose server dies under it and the
 same resume against a restarted server, `option resume off` disabling the
-staging, and `-preservetime` in both directions.
+staging, `-preservetime` in both directions, and the shared stored-password
+format: a password encrypted by the GUI's module authenticating the console
+client, a missing key file reported without losing the value, and a
+core-written password decrypted back by the GUI's reader.
 
 The server itself is a plain filesystem-backed SFTP + exec endpoint (user
 `testuser`, `LSCP_TEST_ROOT` as the visible root) that implements `chattr` for
@@ -269,8 +280,7 @@ to say what those suites proved.
    `.filepart` staging (the atomic temporary-file policy) and a live-server
    test harness - including refused opens, denied operations and
    interruption/data integrity - are in place. What is left is a user
-   account or an encrypted credential store and upstream's batch per-file
-   error/prompt semantics.
+   account and upstream's batch per-file error/prompt semantics.
 2. **Real protocol coverage:** replace generic listing approximations with
    protocol-specific SCP, WebDAV and signed S3 clients; expand FTP/SFTP handling.
    Test CRUD, directory enumeration, metadata, authentication and resume against
@@ -281,8 +291,8 @@ to say what those suites proved.
    workflow and a real file-system watch mode behind `keepuptodate`.
    `-resumesupport=` thresholds and `-append` are in place for the native
    transport, with the curl backends refusing them explicitly.
-4. **Session and desktop capabilities:** session folders, raw settings and
-   encrypted passwords; queue priorities and transfer presets (speed limiting
+4. **Session and desktop capabilities:** session folders and raw settings;
+   queue priorities and transfer presets (speed limiting
    and reconnect exist); local-side
    editing, full-text search and custom commands; Commander/Explorer workflows,
    drag and drop, accessibility and translations, with GUI workflow tests.
