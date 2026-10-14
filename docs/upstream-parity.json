@@ -15,9 +15,10 @@
     "how": "make -C source/linux all check && make -C source/linux check-live",
     "date": "2026-10-14",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 713 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file.",
+     "unit": "source/linux/tests/UnitTest.cpp - 728 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file).",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader).",
+     "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused (SignatureDoesNotMatch from the server, a secret-key complaint before any request), bucket and object listings through mkdir/put, rmdir refusing a non-empty directory while accepting a marker-less prefix and refusing the bucket itself, an upload/download roundtrip with a checksum, a resumed download that only completes if the server's 206 byte range was used, rename as copy-plus-delete with the source gone afterwards, remove of a missing key failing, stat reporting the server's size and time, and botocore signing one request the server must accept - the reference implementation tying both sides to AWS's own behavior. POSIX-only (curl against 127.0.0.1), so it cannot be cited for Windows.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server."
     }
    },
@@ -344,8 +345,14 @@
   },
   {
    "name": "Amazon S3",
-   "status": "missing",
-   "notes": "s3 URLs currently become HTTPS; no AWS SigV4 signing, credentials/region configuration or S3 bucket/object listing implementation."
+   "status": "partial",
+   "notes": "AWS Signature Version 4 signing over curl (AWS4-HMAC-SHA256, pinned to botocore's vectors in the unit suite), s3:// session URLs with region from AWS_REGION, AWS_DEFAULT_REGION, the hostname (s3.<region>.amazonaws.com or .com.cn) or us-east-1, and path-style bucket access: ListBuckets, ListObjectsV2 with delimiter and continuation, HEAD stat, get with range resume and Last-Modified preservation, put, directory markers with bucket-aware mkdir/rmdir, rename as copy-plus-delete, and explicit refusal of unsigned or wrongly signed requests. Evidence is Linux-only (the live suite's server and client path are POSIX). Not implemented: ACLs, versioning, multipart upload, storage classes, SSE options, object metadata beyond content, and a Windows functional claim.",
+   "verified_on": {
+    "linux": [
+     "unit",
+     "live-s3"
+    ]
+   }
   },
   {
    "name": "Transfers",

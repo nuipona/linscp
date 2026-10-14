@@ -37,7 +37,7 @@ jobs:
           # suite skips, which is why the skip count is printed.
           set -o pipefail
           python3 -m venv "$RUNNER_TEMP/live-test-venv"
-          "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko
+          "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko botocore
           "$RUNNER_TEMP/live-test-venv/bin/python" \
             -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp 2>&1 |
             tee "$RUNNER_TEMP/live-tests.log"
@@ -47,6 +47,23 @@ jobs:
             exit 1
           }
           grep '^evidence: ' "$RUNNER_TEMP/live-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
+      - name: Live S3 regressions
+        run: |
+          # Same venv as the SFTP suite: the S3 suite's own server is
+          # standard-library only, and botocore (install above) is what the
+          # reference-signature test needs to run instead of skipping.
+          set -o pipefail
+          "$RUNNER_TEMP/live-test-venv/bin/python" \
+            -u source/linux/tests/LiveS3Test.py source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/live-s3-tests.log"
+          grep -E 'evidence: suite=live-s3 .*ran=[1-9]' \
+            "$RUNNER_TEMP/live-s3-tests.log" > /dev/null || {
+            echo "::error::the live S3 suite ran no tests"
+            exit 1
+          }
+          grep '^evidence: ' "$RUNNER_TEMP/live-s3-tests.log" |
             { while IFS= read -r line; do
               printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Validate upstream gap inventory (not full parity)

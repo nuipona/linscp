@@ -28,6 +28,7 @@
 #include "Console.h"
 #include "Editor.h"
 #include "SessionStore.h"
+#include "S3SigV4.h"
 #include "SyncPlanner.h"
 
 namespace {
@@ -1322,6 +1323,110 @@ void TestSyncStateFile()
 }
 
 /* ------------------------------------------------------------------ *
+ * Amazon S3 request signing (AWS Signature Version 4)                 *
+ * ------------------------------------------------------------------ */
+
+/*
+ * The vectors come from outside this code: the signing key is the
+ * worked example in AWS's "Signature Version 4 signing process"
+ * documentation (20150830 / us-east-1 / iam), and the two requests
+ * were signed by botocore 1.43 with a frozen clock (2026-01-15
+ * 10:30:00 UTC = epoch 1768473000). If any step of the construction
+ * here drifts, one of them stops matching.
+ */
+void TestS3SigV4()
+{
+    using namespace linuxscp::s3sig;
+
+    const std::string secret = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    CHECK_EQ(HexEncode(SigningKey(secret, "20150830", "us-east-1", "iam")),
+        "c4afb1cc5771d871763a393e44b703571b55cc28424d1a5e86da6ed3c154a4b9");
+
+    /* Encoding rules: the S3 flavor, '~' kept, uppercase hex. */
+    CHECK_EQ(UriEncode("a b/c+d~e", true), "a%20b/c%2Bd~e");
+    CHECK_EQ(UriEncode("a b/c+d~e", false), "a%20b%2Fc%2Bd~e");
+    CHECK_EQ(CanonicalQuery("b=2&a=1&a=0&a=10"), "a=0&a=1&a=10&b=2");
+    CHECK_EQ(CredentialScope("20260115", "us-east-1", "s3"),
+        "20260115/us-east-1/s3/aws4_request");
+    CHECK_EQ(AmzDate(1768473000ULL), "20260115T103000Z");
+    CHECK_EQ(DateStamp(1768473000ULL), "20260115");
+
+    const std::string emptyHash =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    /* A signed ListObjectsV2-style GET. */
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair("x-amz-date", "20260115T103000Z"));
+    headers.push_back(std::make_pair("host", "s3.example.com"));
+    headers.push_back(std::make_pair("x-amz-content-sha256", emptyHash));
+    const std::string canonical = CanonicalRequest("GET", "/bucket",
+        "delimiter=%2F&list-type=2&max-keys=100&prefix=docs%2Fa",
+        headers, emptyHash);
+    const std::string expectedCanonical =
+        "GET\n"
+        "/bucket\n"
+        "delimiter=%2F&list-type=2&max-keys=100&prefix=docs%2Fa\n"
+        "host:s3.example.com\n"
+        "x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+        "x-amz-date:20260115T103000Z\n"
+        "\n"
+        "host;x-amz-content-sha256;x-amz-date\n"
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    CHECK_EQ(canonical, expectedCanonical);
+    const std::string scope = CredentialScope("20260115", "us-east-1", "s3");
+    const std::string toSign = StringToSign("20260115T103000Z", scope,
+        canonical);
+    const std::string signature = SignatureHex(toSign,
+        SigningKey(secret, "20260115", "us-east-1", "s3"));
+    CHECK_EQ(signature,
+        "7d151aa653d4a54778780085f0edbe6d135ed056a28e85bada65053d6e2e35ba");
+    CHECK_EQ(AuthorizationHeader("AKIDEXAMPLE", scope,
+                 "host;x-amz-content-sha256;x-amz-date", signature),
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260115/us-east-1/s3/aws4_request, "
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+        "Signature=7d151aa653d4a54778780085f0edbe6d135ed056a28e85bada65053d6e2e35ba");
+
+    /* And the whole Sign() pipeline, which must land on the same bytes
+     * (this is what the client actually calls). */
+    SignedRequest signed1 = Sign("GET", "/bucket",
+        "delimiter=%2F&list-type=2&max-keys=100&prefix=docs%2Fa",
+        "s3.example.com", std::vector<std::pair<std::string, std::string> >(),
+        emptyHash, 1768473000ULL, "us-east-1", "AKIDEXAMPLE", secret);
+    CHECK_EQ(signed1.canonicalRequest, expectedCanonical);
+    CHECK_EQ(signed1.signedHeaders, "host;x-amz-content-sha256;x-amz-date");
+    CHECK_EQ(signed1.authorization,
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260115/us-east-1/s3/aws4_request, "
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+        "Signature=7d151aa653d4a54778780085f0edbe6d135ed056a28e85bada65053d6e2e35ba");
+
+    /* A PUT with reserved characters in the key, UNSIGNED-PAYLOAD. */
+    std::vector<std::pair<std::string, std::string> > putHeaders;
+    putHeaders.push_back(std::make_pair("x-amz-date", "20260115T103000Z"));
+    putHeaders.push_back(std::make_pair("host", "s3.example.com"));
+    putHeaders.push_back(std::make_pair("x-amz-content-sha256",
+        "UNSIGNED-PAYLOAD"));
+    const std::string canonical2 = CanonicalRequest("PUT",
+        "/bucket/hello%20world%2Bdir/f.txt", "",
+        putHeaders, "UNSIGNED-PAYLOAD");
+    const std::string expectedCanonical2 =
+        "PUT\n"
+        "/bucket/hello%20world%2Bdir/f.txt\n"
+        "\n"
+        "host:s3.example.com\n"
+        "x-amz-content-sha256:UNSIGNED-PAYLOAD\n"
+        "x-amz-date:20260115T103000Z\n"
+        "\n"
+        "host;x-amz-content-sha256;x-amz-date\n"
+        "UNSIGNED-PAYLOAD";
+    CHECK_EQ(canonical2, expectedCanonical2);
+    const std::string signature2 = SignatureHex(
+        StringToSign("20260115T103000Z", scope, canonical2),
+        SigningKey(secret, "20260115", "us-east-1", "s3"));
+    CHECK_EQ(signature2,
+        "4e1f492da78c20e5bab873603c6ba95cba1ffd7b22d0275497cb4cc3d2dfbc56");
+}
+
+/* ------------------------------------------------------------------ *
  * Stored sessions                                                     *
  * ------------------------------------------------------------------ */
 
@@ -2056,6 +2161,7 @@ int main()
     TestSyncPlanOrder();
     TestSyncStateFile();
     TestSessionStore();
+    TestS3SigV4();
     TestEditorHelpers();
     TestNewScriptCommands();
     TestPermissionModes();

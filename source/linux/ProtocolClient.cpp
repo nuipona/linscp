@@ -1,4 +1,5 @@
 #include "ProtocolClient.h"
+#include "S3Client.h"
 #include "LocalFs.h"
 #include "PathUtil.h"
 #include "Platform.h"
@@ -413,6 +414,11 @@ std::string OctalPermissions(int permissions)
 
 } // namespace
 
+bool IsCurlEndpointUnreachable(int code)
+{
+    return IsEndpointUnreachable(code);
+}
+
 bool ProtocolClient::IsMultiProtocol(const std::string & proto)
 {
     std::string p = ToLower(proto);
@@ -445,6 +451,10 @@ void ProtocolClient::FreeNames(LscpNames * names)
 bool ProtocolClient::List(const SessionOptions & options, const std::string & remotePath,
     LscpNames * names, std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::List(options, remotePath, names, error);
+    }
     if (names == NULL)
     {
         error = "Null output pointer.";
@@ -495,6 +505,10 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
 bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
     const std::string & remotePath, std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::CheckEndpoint(options, remotePath, error);
+    }
     std::vector<ListingEntry> entries;
     int code = 0;
     std::string path = remotePath.empty() ? std::string("/") : remotePath;
@@ -532,6 +546,10 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
 int ProtocolClient::Stat(const SessionOptions & options, const std::string & remotePath,
     LscpAttrs * attrs, std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::Stat(options, remotePath, attrs, error);
+    }
     if (attrs != NULL)
     {
         memset(attrs, 0, sizeof(*attrs));
@@ -644,6 +662,12 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
     void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::Get(options, remotePath, localPath, resumeOffset,
+            preserveTime, size, progress, progressCtx, error,
+            speedKBytesPerSecond);
+    }
     (void)progress;
     (void)progressCtx;
     if (size != NULL)
@@ -699,6 +723,12 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
     void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::Put(options, localPath, remotePath, permissions,
+            resumeOffset, preserveTime, size, progress, progressCtx, error,
+            speedKBytesPerSecond);
+    }
     (void)permissions;
     (void)progress;
     (void)progressCtx;
@@ -753,6 +783,10 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 int ProtocolClient::Remove(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::Remove(options, remotePath, error);
+    }
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
 
@@ -790,6 +824,10 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
 int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::RemoveDir(options, remotePath, error);
+    }
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
 
@@ -827,6 +865,10 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
 int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::MakeDir(options, remotePath, error);
+    }
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
 
@@ -864,6 +906,10 @@ int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & 
 int ProtocolClient::Move(const SessionOptions & options, const std::string & fromPath,
     const std::string & toPath, std::string & error)
 {
+    if (ToLower(options.protocol) == "s3")
+    {
+        return S3Client::Move(options, fromPath, toPath, error);
+    }
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
 

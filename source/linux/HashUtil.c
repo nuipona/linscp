@@ -175,3 +175,15 @@ int lscp_hmac_sha256(const void * key, size_t keyLen,
         make_ptrlen(data, dataLen), out);
     return 0;
 }
+
+int lscp_sha256(const void * data, size_t dataLen,
+    unsigned char * out, size_t outSize)
+{
+    if (out == NULL || outSize < 32)
+    {
+        set_error("The SHA-256 output buffer is too small.");
+        return -1;
+    }
+    hash_simple(&ssh_sha256, make_ptrlen(data, dataLen), out);
+    return 0;
+}

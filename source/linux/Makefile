@@ -145,6 +145,8 @@ APP_SRCS := \
 	SftpClient.c \
 	HashUtil.c \
 	ProtocolClient.cpp \
+	S3SigV4.cpp \
+	S3Client.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
 	ScriptParams.cpp \
@@ -211,12 +213,14 @@ $(BINDIR)/unittest: $(TEST_OBJS) $(APP_LIB_OBJS) $(PUTTY_LIB)
 check: $(BINDIR)/unittest
 	$(BINDIR)/unittest
 
-# Transfers against the SFTP server in tests/, which needs paramiko and skips
-# itself without it. Separate from 'check' because it starts a server and
-# takes seconds rather than milliseconds.
+# Transfers against the servers in tests/, which take seconds rather than
+# milliseconds: ScriptTest is server-free, LiveSftpTest skips itself without
+# paramiko, LiveS3Test is standard-library-only (botocore is an optional
+# extra one test skips without).
 check-live: $(BINDIR)/linuxscp
 	python3 tests/ScriptTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveSftpTest.py $(BINDIR)/linuxscp
+	python3 tests/LiveS3Test.py $(BINDIR)/linuxscp
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
