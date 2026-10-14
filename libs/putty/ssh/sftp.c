@@ -548,6 +548,128 @@ bool fxp_rename_recv(struct sftp_packet *pktin, struct sftp_request *req)
 }
 
 /*
+ * LinuxSCP additions: the SFTP v3 SYMLINK request and the copy-data and
+ * check-file-name extensions (both understood by OpenSSH), which the
+ * stock PuTTY client never sends.
+ */
+#define SSH_FXP_SYMLINK_LSCP 20   /* 0x14 */
+
+struct sftp_request *fxp_symlink_send(const char *target,
+                                      const char *linkpath)
+{
+    struct sftp_request *req = sftp_alloc_request();
+    struct sftp_packet *pktout;
+
+    pktout = sftp_pkt_init(SSH_FXP_SYMLINK_LSCP);
+    put_uint32(pktout, req->id);
+    put_stringz(pktout, target);
+    put_stringz(pktout, linkpath);
+    sftp_send(pktout);
+
+    return req;
+}
+
+bool fxp_symlink_recv(struct sftp_packet *pktin, struct sftp_request *req)
+{
+    int id;
+    sfree(req);
+    id = fxp_got_status(pktin);
+    sftp_pkt_free(pktin);
+    return id == 1;
+}
+
+struct sftp_request *fxp_copydata_send(struct fxp_handle *readHandle,
+                                       uint64_t readOffset, uint64_t length,
+                                       struct fxp_handle *writeHandle,
+                                       uint64_t writeOffset)
+{
+    struct sftp_request *req = sftp_alloc_request();
+    struct sftp_packet *pktout;
+
+    pktout = sftp_pkt_init(SSH_FXP_EXTENDED);
+    put_uint32(pktout, req->id);
+    put_stringz(pktout, "copy-data");
+    put_string(pktout, readHandle->hstring, readHandle->hlen);
+    put_uint64(pktout, readOffset);
+    put_uint64(pktout, length);
+    put_string(pktout, writeHandle->hstring, writeHandle->hlen);
+    put_uint64(pktout, writeOffset);
+    sftp_send(pktout);
+
+    return req;
+}
+
+bool fxp_copydata_recv(struct sftp_packet *pktin, struct sftp_request *req)
+{
+    int id;
+    sfree(req);
+    id = fxp_got_status(pktin);
+    sftp_pkt_free(pktin);
+    return id == 1;
+}
+
+struct sftp_request *fxp_checkfile_name_send(const char *path,
+                                             const char *algorithms,
+                                             uint64_t offset, uint64_t length,
+                                             uint32_t block_size)
+{
+    struct sftp_request *req = sftp_alloc_request();
+    struct sftp_packet *pktout;
+
+    pktout = sftp_pkt_init(SSH_FXP_EXTENDED);
+    put_uint32(pktout, req->id);
+    put_stringz(pktout, "check-file-name");
+    put_stringz(pktout, path);
+    put_stringz(pktout, algorithms);
+    put_uint64(pktout, offset);
+    put_uint64(pktout, length);
+    put_uint32(pktout, block_size);
+    sftp_send(pktout);
+
+    return req;
+}
+
+struct fxp_checksum *fxp_checkfile_name_recv(struct sftp_packet *pktin,
+                                             struct sftp_request *req)
+{
+    sfree(req);
+    if (pktin->type == SSH_FXP_EXTENDED_REPLY) {
+        ptrlen algorithm = get_string(pktin);
+        uint32_t block_size = get_uint32(pktin);
+        ptrlen hash = get_string(pktin);
+        struct fxp_checksum *result;
+
+        if (get_err(pktin) || block_size != 0) {
+            fxp_internal_error("malformed FXP_EXTENDED_REPLY packet");
+            sftp_pkt_free(pktin);
+            return NULL;
+        }
+
+        result = snew(struct fxp_checksum);
+        result->algorithm = mkstr(algorithm);
+        result->hash_len = hash.len;
+        result->hash = snewn(hash.len ? hash.len : 1, unsigned char);
+        memcpy(result->hash, hash.ptr, hash.len);
+        sftp_pkt_free(pktin);
+        return result;
+    } else {
+        fxp_got_status(pktin);
+        sftp_pkt_free(pktin);
+        return NULL;
+    }
+}
+
+void fxp_free_checksum(struct fxp_checksum *checksum)
+{
+    if (checksum == NULL) {
+        return;
+    }
+    sfree(checksum->algorithm);
+    sfree(checksum->hash);
+    sfree(checksum);
+}
+
+/*
  * Retrieve the attributes of a file. We have fxp_stat which works
  * on filenames, and fxp_fstat which works on open file handles.
  */

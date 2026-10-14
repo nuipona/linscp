@@ -29,6 +29,8 @@
 #include <string>
 #include <vector>
 
+#include "TextMode.h"
+
 namespace linuxscp {
 
 /* Which side is the target of the synchronization.
@@ -56,25 +58,68 @@ enum class SyncCriteria
 const char * SyncModeName(SyncMode mode);
 const char * SyncCriteriaName(SyncCriteria criteria);
 
+/* One comparison attached to a mask token, WinSCP's extended mask
+ * syntax: '*.tmp>1M' or '*.log>=2026-01-01'. */
+struct MaskCriterion
+{
+    bool isSize;                  /* false: a time comparison */
+    int op;                       /* 0 '=', 1 '<', 2 '>', 3 '<=', 4 '>=' */
+    unsigned long long size;      /* bytes, when isSize */
+    unsigned long time;           /* seconds since the epoch, when !isSize */
+};
+
+/* One mask token of a WinSCP file mask:
+ *
+ *   name mask       "*.tmp"         matches file names
+ *   directory mask  "any/build/"      matches directories (trailing '/')
+ *   path mask       "docs/*.txt"    matches paths relative to the root
+ *
+ * plus any number of size/time criteria. */
+struct FileMaskToken
+{
+    std::string text;             /* the token as written, for Describe() */
+    std::string pattern;          /* the pattern without criteria/slash */
+    bool directoryOnly;           /* written with a trailing '/' */
+    bool isPath;                  /* the pattern contains a '/' */
+    std::vector<MaskCriterion> criteria;
+
+    FileMaskToken() : directoryOnly(false), isPath(false) {}
+};
+
 /* A set of include/exclude file masks.
  *
- * The syntax is the WinSCP one, restricted to file name masks:
+ * The syntax is the WinSCP one:
  *
  *   "*.txt"                 include only files matching *.txt
  *   "|*.bak"                exclude files matching *.bak
  *   "*.txt|*.bak;*.tmp"     include *.txt except *.bak and *.tmp
  *
  * Several masks are separated by ';'. A mask without wildcards matches
- * that exact name. Exclusions are also applied to directories, which
- * prunes a whole subtree; an include mask never prunes a directory,
- * because the files below it may still match. */
+ * that exact name. A mask ending in '/' matches directories only (by
+ * its name or by trailing path components), so '|x/build/' prunes every
+ * 'build' directory wherever it sits. A mask containing '/' elsewhere
+ * matches the path of an entry relative to the transfer/synchronization
+ * root. Size and time criteria ('*.txt>=1M', '*.log<2026-01-01') apply
+ * to files only; a mask with a criterion never matches a directory.
+ *
+ * Exclusions are also applied to directories, which prunes a whole
+ * subtree; an include mask never prunes a directory unless it is an
+ * explicit directory or path mask. */
 struct FileMask
 {
-    std::vector<std::string> include;
-    std::vector<std::string> exclude;
+    std::vector<FileMaskToken> include;
+    std::vector<FileMaskToken> exclude;
 
     bool empty() const { return include.empty() && exclude.empty(); }
     bool Parse(const std::string & text, std::string & error);
+    /* Full match with everything a transfer knows about an entry.
+     * 'relativePath' is the entry path below the transfer root ('/'
+     * separated, no leading or trailing '/'); size/mtime are what the
+     * source side reported, 0 when unknown. */
+    bool Accepts(const std::string & name, bool isDirectory,
+        unsigned long long size, unsigned long mtime,
+        const std::string & relativePath) const;
+    /* Name-only match for callers that have no metadata. */
     bool Accepts(const std::string & name, bool isDirectory) const;
     std::string Describe() const;
 };
@@ -166,6 +211,11 @@ struct SyncOptions
     FileMask mask;
     bool deleteObsolete;
     bool recursive;
+    /* '-mirror': make the target match the source even where the target
+     * is newer (local/remote modes only, like upstream). */
+    bool mirror;
+    /* Line-ending conversion applied to the files the plan moves. */
+    TransferMode transferMode;
     /* Memory of the previous pass, or NULL for a stateless comparison.
      * 'both' only detects conflicts when there is a state, and only
      * deletes when the state proves an entry was removed on the other
@@ -173,7 +223,8 @@ struct SyncOptions
     class SyncState * state;
 
     SyncOptions() : mode(SyncMode::Local), criteria(SyncCriteria::Time),
-        deleteObsolete(false), recursive(true), state(NULL) {}
+        deleteObsolete(false), recursive(true), mirror(false),
+        transferMode(TransferMode::Binary), state(NULL) {}
 };
 
 bool PlanSynchronization(SyncFileSystem & localFs, SyncFileSystem & remoteFs,

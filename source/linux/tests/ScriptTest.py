@@ -61,28 +61,77 @@ class ScriptTests(unittest.TestCase):
                 self.assertIn("batch = " + mode, result.stdout)
 
     def test_reject_noop_options(self):
-        for command in ("option reconnect 10", "option reconnecttime 10",
-                        "option transfer ascii", "option transfer automatic", "ascii",
-                        "option batch garbage"):
+        for command in ("option reconnect 10", "option batch garbage",
+                        "option transfer nonsense", "option reconnecttime nope",
+                        "option include *.txt|bad|mask"):
             with self.subTest(command=command):
                 result = self.run_commands(command + "; echo SHOULD_NOT_RUN")
                 self.assertEqual(result.returncode, 1)
                 self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
-    def test_binary(self):
-        result = self.run_commands("option transfer binary; binary; echo OK")
+    def test_transfer_modes_are_real_options(self):
+        # ascii/automatic and reconnecttime used to be rejected; they are
+        # implemented now, so they must stop the run with success.
+        for command in ("option transfer ascii", "option transfer automatic",
+                        "ascii", "binary", "option reconnecttime 30",
+                        "option echo on", "option failonnomatch on",
+                        "option synchdelete on", "option include *.txt",
+                        "option exclude *.bak"):
+            with self.subTest(command=command):
+                result = self.run_commands(command + "; echo OK")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("OK", result.stdout)
+
+    def test_option_listing(self):
+        # 'option' with no name lists every supported option.
+        result = self.run_commands("option")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("OK", result.stdout)
+        for name in ("echo", "batch", "confirm", "resume", "transfer",
+                     "include", "exclude", "failonnomatch", "synchdelete",
+                     "reconnecttime", "editor", "editmaxsize"):
+            self.assertIn(name + " = ", result.stdout)
+
+    def test_option_echo_prints_commands(self):
+        result = self.run_commands("option echo on; echo HELLO")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("echo HELLO", result.stdout)
+        self.assertIn("HELLO", result.stdout)
+
+    def test_ascii_resume_is_rejected_before_connection(self):
+        for command in ("get -transfer=ascii -resume x /tmp/", "put -resume -transfer=automatic x /tmp/"):
+            with self.subTest(command=command):
+                result = self.run_commands(command)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("binary only", result.stderr)
+                self.assertNotIn("Not connected", result.stderr)
 
     def test_reject_transfer_switches_before_connection(self):
+        # Implemented switches (filemask, transfer modes, permissions) pass
+        # the switch check and stop at the connection; the rest is refused
+        # up front instead of being silently ignored.
         for command in ("get", "recv", "mget", "put", "send", "mput"):
-            for switch in ("-filemask=*.txt", "-transfer=ascii", "-transfer=automatic",
-                           "-resumegarbage", "-resume=off", "-speed=10", "-unknown"):
+            for switch in ("-resumegarbage", "-resume=off", "-speed=10",
+                           "-unknown", "-latest", "-criteria=time",
+                           "-transfer=garbage", "-filemask=",
+                           "-filemask=*.txt|*.a|*.b", "-permissions=999"):
                 with self.subTest(command=command, switch=switch):
                     result = self.run_commands(f"{command} {switch} source destination")
                     self.assertEqual(result.returncode, 1)
-                    self.assertIn("Unsupported switch", result.stderr)
+                    self.assertTrue("Unsupported switch" in result.stderr or
+                                    "Wrong arguments" in result.stderr,
+                                    result.stderr)
                     self.assertNotIn("Not connected", result.stderr)
+
+    def test_transfer_switches_are_accepted(self):
+        for command in ("get", "recv", "mget", "put", "send", "mput"):
+            for switch in ("-filemask=*.txt|*.bak",
+                           "-filemask=*.jpg>1K<1M",
+                           "-transfer=binary", "-transfer=ascii",
+                           "-transfer=automatic"):
+                with self.subTest(command=command, switch=switch):
+                    result = self.run_commands(f"{command} {switch} source destination")
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn("Not connected", result.stderr)
 
     def test_transfer_aliases_dispatch(self):
         for command in ("get", "recv", "mget", "put", "send", "mput"):
@@ -93,8 +142,8 @@ class ScriptTests(unittest.TestCase):
                 self.assertNotIn("Unsupported switch", result.stderr)
 
     def test_sync_validation(self):
-        for args in ("remote -mirror", "local -criteria=whenever",
-                     "local -filemask=sub/*.txt", "sideways", "local a b c", ""):
+        for args in ("local -criteria=whenever",
+                     "local -filemask=*.txt>garbage", "sideways", "local a b c", ""):
             with self.subTest(args=args):
                 result = self.run_commands("synchronize " + args)
                 self.assertEqual(result.returncode, 1)
@@ -109,13 +158,21 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("Not connected", result.stderr)
 
     def test_keepuptodate_validation(self):
-        for args in ("", "sideways", "local -bogus"):
+        # 'keepuptodate' takes no direction word (it always updates the
+        # local side), so bare directories parse fine and stop at the
+        # connection check.
+        for args in ("", "sideways"):
+            with self.subTest(args=args):
+                result = self.run_commands("keepuptodate " + args)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Not connected", result.stderr)
+        for args in ("local -bogus", "a b c"):
             with self.subTest(args=args):
                 result = self.run_commands("keepuptodate " + args)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Wrong arguments", result.stderr)
         # Without a terminal it needs a fixed number of passes.
-        result = self.run_commands("keepuptodate local /tmp /tmp")
+        result = self.run_commands("keepuptodate /tmp /tmp")
         self.assertEqual(result.returncode, 1)
         self.assertIn("Not connected", result.stderr)
 

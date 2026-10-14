@@ -31,13 +31,13 @@ LinuxSCP-specific aliases and commands are not counted as upstream coverage.
 
 | Area | Current implementation and remaining work |
 | --- | --- |
-| SFTP | Native PuTTY on POSIX, curl on Windows. Verify extension negotiation, metadata, links, server-side copy/checksum and backend equivalence. |
+| SFTP | Native PuTTY on POSIX, curl on Windows. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Remaining: metadata policies and Windows-side equivalence. |
 | SCP | curl-dependent transfer path, not WinSCP's remote-shell filesystem engine. Listing and directory operations need a real SCP implementation. |
 | FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
 | WebDAV | HTTP operations exist, but listing does not implement DAV PROPFIND/XML properties. Not a complete WebDAV filesystem. |
 | S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
-| Transfers | Binary recursive transfers and basic offset resume. Missing full masks/exclusions, ASCII/automatic conversion, speed limits, retry/reconnect, atomic temporary-file policy and complete metadata handling. |
-| Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-delete`, `-recursive` and a state record that tells a change from a conflict, with unit coverage and live-server checks. Missing `-mirror`, `-nodelete`, `-continue`, path exclusions, text conversion and a real watch mode: `keepuptodate` repeats a full comparison on a timer. |
+| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion verified byte-exact against a live server. Missing: speed limits, transfer presets and atomic temporary-file policies. |
+| Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror` and ASCII conversion verified against a live server. Missing: path exclusions and a real watch mode: `keepuptodate` still repeats a full comparison on a timer. |
 | Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
 | Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
 | GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization. |
@@ -54,18 +54,34 @@ LinuxSCP-specific aliases and commands are not counted as upstream coverage.
   continue, but retain a nonzero process exit status when errors occurred.
   Noninteractive modes suppress prompts. This does **not** yet implement
   upstream's full per-file error/prompt policy inside a multi-file command.
-* Added `man`, `recv`, `mget`, `send`, `mput` dispatch aliases and `binary`.
-  Added `lls [directory[/mask]]` using local filesystem enumeration, with
-  names-only output. `ascii` and remote shell alias `!` fail explicitly.
-* Unsupported transfer switches now fail before any connection or transfer
-  instead of being ignored or treated as paths. `-filemask` is **not** implemented;
-  `-transfer=binary` is valid, while ASCII/automatic mode fails. Only bare
-  `-resume` is implemented; valued resume-policy switches are rejected.
-  Prefix filenames beginning with `-` with `./`.
-* Reconnect and nonbinary transfer options no longer falsely report success.
+* Added `man`, `recv`, `mget`, `send`, `mput` dispatch aliases, `binary`,
+  `ascii` (both set `option transfer`), `lls [directory[/mask]]` with local
+  enumeration, and per-command `help`/`man` syntax lines.
+* Implemented WinSCP file masks (`-filemask=`, `option include/exclude`) with
+  name/directory/path masks and size/time criteria, plus `-transfer=binary|
+  ascii|automatic` conversion (CRLF/LF) around every transfer, including
+  planned synchronizations. Resuming stays binary-only and is rejected
+  explicitly when combined with ASCII.
+* New remote commands, each verified against a live in-process SFTP server:
+  `cp` (server-side copy-data with streamed fallback, recursive),
+  `ln`/`symlink` (SFTP SYMLINK), `checksum <alg> <file>` (server-side
+  check-file-name first, local sha-256/sha-1/md5/crc32 through the PuTTY core
+  as fallback, printed as `<hash> <file>`), and `call`/`!` (SSH exec in a
+  one-shot second connection, leaving the SFTP session open). `copyid` still
+  fails explicitly with instructions instead of editing authorized_keys.
+* Command semantics completed: `cd` with no argument goes home and prints the
+  directory, `ls` takes its mask from the trailing path component, `rm`
+  supports `-onlyfile`, `rmdir`/`mv` take multiple arguments (with an existing
+  directory as the `mv` target), and `option` lists all settings when called
+  without a name (echo, batch, confirm, resume, transfer, include/exclude,
+  failonnomatch, synchdelete, reconnecttime, editor, editmaxsize).
+* Unsupported transfer switches and option values still fail before any
+  connection or transfer instead of being ignored or treated as paths; prefix
+  filenames beginning with `-` with `./`. `option reconnecttime <seconds>|off`
+  now really reconnects a dropped session instead of reporting success.
 * Synchronization validates the direction, argument count and switches before
   use; `both -delete` is rejected rather than risking destructive sequential
-  reconciliation. Unsupported criteria/filter switches fail explicitly.
+  reconciliation, and `-mirror` is rejected with `both`.
 
 These intentional fail-closed changes can break scripts that previously relied
 on silently ignored settings. Review those scripts; do not remove a safety
@@ -77,6 +93,16 @@ filter just to make a transfer proceed.
 make -C source/linux all check
 python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
 python3 tools/check_upstream_parity.py
+```
+
+An optional live check runs an in-process SFTP server (Python `paramiko`,
+`pip install --user paramiko`) and exercises `cd`/`ls` masks, `cp`, `ln`,
+`checksum`, `call`, `mv`, `rmdir`, `rm -onlyfile`, ASCII transfers and
+`synchronize -mirror -transfer=` against a real connection:
+
+```sh
+python3 source/linux/tests/TestSftpServer.py &   # listens on 127.0.0.1:12765
+# testuser/testpass, /tmp/lscp-sftp-root as the visible root
 ```
 
 The Python CLI regression suite exercises default/explicit batch policies,
@@ -110,19 +136,20 @@ behavioral evidence on each supported platform, not merely a dispatcher entry.
 ## Prioritized completion plan
 
 1. **Safety and automation:** host keys are verified and pinned rather than
-   accepted, and the GUI API is loopback-only behind a per-run token; what is
-   left is a user account or encrypted credential store, file masks, batch
-   per-file semantics, parameter expansion, retries and atomic transfers, plus
-   live-server tests for failed opens, denied operations and interruption/
-   data integrity.
+   accepted, and the GUI API is loopback-only behind a per-run token; file
+   masks, ASCII/automatic conversion, reconnect and a live-server test harness
+   are in place. What is left is a user account or encrypted credential store,
+   `copyid`'s authorized_keys editing, batch per-file semantics, parameter
+   expansion and atomic transfers, plus live-server tests for failed opens,
+   denied operations and interruption/data integrity.
 2. **Real protocol coverage:** replace generic listing approximations with
    protocol-specific SCP, WebDAV and signed S3 clients; expand FTP/SFTP handling.
    Test CRUD, directory enumeration, metadata, authentication and resume against
    controlled servers on Linux and Windows.
-3. **Synchronization:** the planner exists with previews, criteria, filtering
-   and deletion guards; remaining work is `-mirror`/`-nodelete`/`-continue`,
-   path exclusions, text conversion, a conflict resolution workflow and a real
-   file-system watch mode behind `keepuptodate`.
+3. **Synchronization:** the planner exists with previews, criteria, filtering,
+   `-mirror`, `-transfer=` conversion, deletion guards and `keepuptodate
+   -continue`; remaining work is path exclusions, a conflict resolution
+   workflow and a real file-system watch mode behind `keepuptodate`.
 4. **Session and desktop capabilities:** session folders, raw settings and
    encrypted passwords; queue priorities, speed limits and reconnect; local-side
    editing, full-text search and custom commands; Commander/Explorer workflows,

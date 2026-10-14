@@ -354,6 +354,138 @@ int lscp_sftp_set_times(const char * path, unsigned long atime,
     return simple_request("Setting the times of", path, fxp_setstat_recv);
 }
 
+int lscp_sftp_symlink(const char * target, const char * linkPath)
+{
+    clear_error();
+    sftp_register(fxp_symlink_send(target, linkPath));
+    return simple_request("Creating the symbolic link", linkPath,
+        fxp_symlink_recv);
+}
+
+int lscp_sftp_copy(const char * from, const char * to)
+{
+    clear_error();
+
+    struct sftp_request * request;
+    struct sftp_request * found;
+    struct sftp_packet * pktin;
+
+    sftp_register(request = fxp_open_send(from, SSH_FXF_READ, NULL));
+    pktin = receive_response(request, &found);
+    if (pktin == NULL)
+    {
+        return -1;
+    }
+    struct fxp_handle * readHandle = fxp_open_recv(pktin, found);
+    if (readHandle == NULL)
+    {
+        set_error_path("Opening the source of the copy", from);
+        return -1;
+    }
+
+    sftp_register(request = fxp_open_send(to,
+        SSH_FXF_WRITE | SSH_FXF_CREAT | SSH_FXF_TRUNC, NULL));
+    pktin = receive_response(request, &found);
+    if (pktin == NULL)
+    {
+        close_handle(readHandle);
+        return -1;
+    }
+    struct fxp_handle * writeHandle = fxp_open_recv(pktin, found);
+    if (writeHandle == NULL)
+    {
+        set_error_path("Opening the target of the copy", to);
+        close_handle(readHandle);
+        return -1;
+    }
+
+    sftp_register(fxp_copydata_send(readHandle, 0, 0, writeHandle, 0));
+    pktin = receive_response(request, &found);
+    const bool readClosed = close_handle(readHandle);
+    const bool writeClosed = close_handle(writeHandle);
+    if (pktin == NULL)
+    {
+        return -1;
+    }
+    const bool copied = fxp_copydata_recv(pktin, found);
+    if (!copied)
+    {
+        if (fxp_error_type() == SSH_FX_OP_UNSUPPORTED)
+        {
+            set_error("The server does not implement the copy-data extension.");
+            return -2;
+        }
+        set_error_path("Copying", from);
+        return -1;
+    }
+    if (!readClosed || !writeClosed)
+    {
+        set_error("Closing the copy handles failed.");
+        return -1;
+    }
+    return 0;
+}
+
+int lscp_sftp_checksum(const char * algorithm, const char * path,
+    char * usedAlgorithm, size_t usedAlgorithmSize,
+    char * hex, size_t hexSize)
+{
+    clear_error();
+    if (usedAlgorithm != NULL && usedAlgorithmSize > 0)
+    {
+        usedAlgorithm[0] = '\0';
+    }
+    if (hex != NULL && hexSize > 0)
+    {
+        hex[0] = '\0';
+    }
+
+    struct sftp_request * request;
+    struct sftp_request * found;
+    struct sftp_packet * pktin;
+
+    sftp_register(request = fxp_checkfile_name_send(path, algorithm, 0, 0, 0));
+    pktin = receive_response(request, &found);
+    if (pktin == NULL)
+    {
+        return -1;
+    }
+    struct fxp_checksum * checksum = fxp_checkfile_name_recv(pktin, found);
+    if (checksum == NULL)
+    {
+        if (fxp_error_type() == SSH_FX_OP_UNSUPPORTED)
+        {
+            set_error("The server does not implement the check-file-name "
+                "extension.");
+            return -2;
+        }
+        set_error_path("Calculating the checksum of", path);
+        return -1;
+    }
+
+    if (usedAlgorithm != NULL && usedAlgorithmSize > 0)
+    {
+        snprintf(usedAlgorithm, usedAlgorithmSize, "%s",
+            checksum->algorithm != NULL ? checksum->algorithm : "");
+    }
+    if (hex != NULL && hexSize > 0)
+    {
+        static const char digits[] = "0123456789abcdef";
+        size_t out = 0;
+        size_t i;
+        for (i = 0; i < checksum->hash_len && out + 2 < hexSize; i++)
+        {
+            const unsigned char byte = checksum->hash[i];
+            hex[out++] = digits[byte >> 4];
+            hex[out++] = digits[byte & 0x0f];
+        }
+        hex[out] = '\0';
+    }
+    fxp_free_checksum(checksum);
+    return 0;
+}
+
+
 static unsigned long long local_file_size(FILE * file)
 {
     struct stat st;

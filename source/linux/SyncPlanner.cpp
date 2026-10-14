@@ -75,17 +75,401 @@ const char * SyncActionName(SyncAction action)
  * FileMask                                                            *
  * ------------------------------------------------------------------ */
 
+namespace {
+
+/* Matches one pattern component against one path component. */
+bool MatchesComponent(const std::string & pattern, const std::string & text)
+{
+    return MatchesMask(pattern, text) ||
+        (kIsWindows && MatchesMaskInsensitive(pattern, text));
+}
+
+/* A directory mask matches the directory itself and any trailing part
+ * of its path, so 'build/' and 'any/build/' both prune a directory named
+ * 'build' at any depth. */
+bool MatchesDirectoryPath(const FileMaskToken & token,
+    const std::string & relativePath, const std::string & name)
+{
+    if (token.pattern.empty())
+    {
+        return true;
+    }
+    std::vector<std::string> patternParts;
+    std::vector<std::string> pathParts;
+    std::string part;
+    const std::string & source = token.pattern;
+    for (size_t i = 0; i <= source.size(); i++)
+    {
+        if (i < source.size() && source[i] != '/')
+        {
+            part += source[i];
+            continue;
+        }
+        if (!part.empty())
+        {
+            patternParts.push_back(part);
+        }
+        part.clear();
+    }
+    /* At the root (or from the name-only overload) the entry has no
+     * path below the root yet; its name is the whole path. */
+    const std::string & path = relativePath.empty() ? name : relativePath;
+    for (size_t i = 0; i <= path.size(); i++)
+    {
+        if (i < path.size() && path[i] != '/')
+        {
+            part += path[i];
+            continue;
+        }
+        if (!part.empty())
+        {
+            pathParts.push_back(part);
+        }
+        part.clear();
+    }
+    /* A leading '*' component ('x/build/') stands for any prefix,
+     * including none at all. */
+    while (patternParts.size() > 1 && patternParts[0] == "*")
+    {
+        patternParts.erase(patternParts.begin());
+    }
+    if (patternParts.size() > pathParts.size())
+    {
+        return false;
+    }
+    const size_t offset = pathParts.size() - patternParts.size();
+    for (size_t i = 0; i < patternParts.size(); i++)
+    {
+        if (!MatchesComponent(patternParts[i], pathParts[offset + i]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A file path mask matches the whole path below the transfer root. */
+bool MatchesFilePath(const FileMaskToken & token, const std::string & relativePath)
+{
+    if (relativePath.empty())
+    {
+        return false;
+    }
+    return MatchesComponent(token.pattern, relativePath);
+}
+
+bool MatchesCriterion(unsigned long long value, unsigned long long threshold,
+    int op)
+{
+    switch (op)
+    {
+        case 0: return value == threshold;
+        case 1: return value < threshold;
+        case 2: return value > threshold;
+        case 3: return value <= threshold;
+        case 4: return value >= threshold;
+    }
+    return false;
+}
+
+/* Size/time criteria apply to files only; 0 (unknown) never matches a
+ * criterion, so a mask with a criterion never selects an entry whose
+ * metadata the source could not report. */
+bool MatchesCriteria(const FileMaskToken & token, unsigned long long size,
+    unsigned long mtime)
+{
+    for (size_t i = 0; i < token.criteria.size(); i++)
+    {
+        const MaskCriterion & criterion = token.criteria[i];
+        if (criterion.isSize)
+        {
+            if (size == 0 || !MatchesCriterion(size, criterion.size, criterion.op))
+            {
+                return false;
+            }
+        }
+        else
+        {
+            if (mtime == 0 || !MatchesCriterion(mtime, criterion.time, criterion.op))
+            {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+/* One token against one entry. 'forExclude' tells name-only masks that
+ * they are being tested for pruning: an exclusion may prune a directory
+ * of that name, an inclusion never does (the files below it may still
+ * match). */
+bool MatchesToken(const FileMaskToken & token, const std::string & name,
+    bool isDirectory, unsigned long long size, unsigned long mtime,
+    const std::string & relativePath, bool forExclude)
+{
+    if (isDirectory)
+    {
+        if (!token.criteria.empty())
+        {
+            return false;
+        }
+        if (!token.directoryOnly && !token.isPath)
+        {
+            return forExclude && MatchesComponent(token.pattern, name);
+        }
+        return MatchesDirectoryPath(token, relativePath, name);
+    }
+    if (token.directoryOnly)
+    {
+        return false;
+    }
+    if (!token.criteria.empty() && !MatchesCriteria(token, size, mtime))
+    {
+        return false;
+    }
+    if (token.isPath)
+    {
+        return MatchesFilePath(token, relativePath);
+    }
+    return MatchesComponent(token.pattern, name);
+}
+
+/* Parses the value of one size/time criterion ('1M', '500K',
+ * '2026-01-31', '2026-01-31T12:30'). */
+bool ParseCriterionValue(const std::string & text, size_t begin, size_t end,
+    MaskCriterion & criterion, std::string & error)
+{
+    if (begin >= end)
+    {
+        error = "A mask criterion is missing its value.";
+        return false;
+    }
+    const std::string value = text.substr(begin, end - begin);
+
+    /* A date (with an optional time) is a time criterion. */
+    if (value.size() >= 10 && value[4] == '-' && value[7] == '-')
+    {
+        struct tm fields;
+        memset(&fields, 0, sizeof(fields));
+        bool ok = true;
+        for (size_t i = 0; ok && i < 10; i++)
+        {
+            if (i == 4 || i == 7)
+            {
+                continue;
+            }
+            if (value[i] < '0' || value[i] > '9')
+            {
+                ok = false;
+            }
+        }
+            if (ok)
+            {
+                fields.tm_year = atoi(value.substr(0, 4).c_str()) - 1900;
+                fields.tm_mon = atoi(value.substr(5, 2).c_str()) - 1;
+                fields.tm_mday = atoi(value.substr(8, 2).c_str());
+                if (fields.tm_mon < 0 || fields.tm_mon > 11 ||
+                    fields.tm_mday < 1 || fields.tm_mday > 31 ||
+                    fields.tm_year + 1900 < 1970)
+                {
+                    error = "The date '" + value + "' in a file mask is not valid.";
+                    return false;
+                }
+                if (value.size() > 10)
+            {
+                if (value[10] != 'T' || value.size() < 16)
+                {
+                    ok = false;
+                }
+                else
+                {
+                    for (size_t i = 11; ok && i < value.size(); i++)
+                    {
+                        if (i != 13 && (value[i] < '0' || value[i] > '9'))
+                        {
+                            ok = false;
+                        }
+                    }
+                    if (ok)
+                    {
+                        fields.tm_hour = atoi(value.substr(11, 2).c_str());
+                        fields.tm_min = atoi(value.substr(14, 2).c_str());
+                        if (value.size() == 19 && value[16] == ':')
+                        {
+                            fields.tm_sec = atoi(value.substr(17, 2).c_str());
+                        }
+                        else if (value.size() != 16)
+                        {
+                            ok = false;
+                        }
+                        if (fields.tm_hour > 23 || fields.tm_min > 59 ||
+                            fields.tm_sec > 59)
+                        {
+                            ok = false;
+                        }
+                    }
+                }
+            }
+            if (ok)
+            {
+                fields.tm_isdst = -1;
+                const time_t seconds = mktime(&fields);
+                if (seconds == static_cast<time_t>(-1))
+                {
+                    error = "The date '" + value + "' in a file mask is not valid.";
+                    return false;
+                }
+                criterion.isSize = false;
+                criterion.time = static_cast<unsigned long>(seconds);
+                return true;
+            }
+        }
+        if (!ok)
+        {
+            error = "The date '" + value + "' in a file mask is not valid "
+                "(use yyyy-mm-dd or yyyy-mm-ddThh:mm[:ss]).";
+            return false;
+        }
+    }
+
+    /* Everything else is a byte count with an optional K/M/G suffix. */
+    size_t digits = 0;
+    while (digits < value.size() &&
+        value[digits] >= '0' && value[digits] <= '9')
+    {
+        digits++;
+    }
+    if (digits == 0)
+    {
+        error = "The value '" + value + "' of a file mask criterion is "
+            "neither a size (with optional K, M or G) nor a date.";
+        return false;
+    }
+    unsigned long long bytes = 0;
+    for (size_t i = 0; i < digits; i++)
+    {
+        bytes = bytes * 10ULL + static_cast<unsigned long long>(value[i] - '0');
+        if (bytes > (1ULL << 40))
+        {
+            bytes = (1ULL << 40);
+            break;
+        }
+    }
+    std::string suffix = value.substr(digits);
+    if (!suffix.empty())
+    {
+        const char unit = static_cast<char>(toupper(
+            static_cast<unsigned char>(suffix[0])));
+        if (suffix.size() != 1 ||
+            (unit != 'K' && unit != 'M' && unit != 'G'))
+        {
+            error = "The size suffix '" + suffix + "' in a file mask is "
+                "not supported (use K, M or G).";
+            return false;
+        }
+        const unsigned long long shift = unit == 'K' ? 10ULL :
+            unit == 'M' ? 20ULL : 30ULL;
+        if (bytes > ((1ULL << 50) >> shift))
+        {
+            bytes = (1ULL << 50) >> shift;
+        }
+        bytes <<= shift;
+    }
+    criterion.isSize = true;
+    criterion.size = bytes;
+    return true;
+}
+
+/* Splits one mask token into its pattern and its criteria. */
+bool ParseMaskToken(const std::string & text, FileMaskToken & token,
+    std::string & error)
+{
+    token.text = text;
+    token.directoryOnly = false;
+    token.isPath = false;
+    token.criteria.clear();
+
+    std::string pattern;
+    size_t i = 0;
+    while (i < text.size() && text[i] != '<' && text[i] != '>' && text[i] != '=')
+    {
+        pattern += text[i];
+        i++;
+    }
+
+    while (i < text.size())
+    {
+        MaskCriterion criterion;
+        int op = -1;
+        if (text[i] == '<')
+        {
+            op = 1;
+        }
+        else if (text[i] == '>')
+        {
+            op = 2;
+        }
+        else if (text[i] == '=')
+        {
+            op = 0;
+        }
+        if (op == -1)
+        {
+            error = "Unexpected character '" + std::string(1, text[i]) +
+                "' in the file mask '" + text + "'.";
+            return false;
+        }
+        i++;
+        if (i < text.size() && text[i] == '=')
+        {
+            if (op == 1 || op == 2)
+            {
+                op += 2;                      /* '<=' and '>=' */
+                i++;
+            }
+            else
+            {
+                error = "The operator in the file mask '" + text +
+                    "' is not valid (use <, >, =, <= or >=).";
+                return false;
+            }
+        }
+        criterion.op = op;
+        const size_t valueBegin = i;
+        while (i < text.size() && text[i] != '<' && text[i] != '>' && text[i] != '=')
+        {
+            i++;
+        }
+        if (!ParseCriterionValue(text, valueBegin, i, criterion, error))
+        {
+            return false;
+        }
+        token.criteria.push_back(criterion);
+    }
+
+    if (!pattern.empty() && pattern[pattern.size() - 1] == '/')
+    {
+        token.directoryOnly = true;
+        pattern.erase(pattern.size() - 1);
+    }
+    token.isPath = pattern.find('/') != std::string::npos;
+    token.pattern = pattern.empty() ? "*" : pattern;
+    return true;
+}
+
+} // namespace
+
 bool FileMask::Parse(const std::string & text, std::string & error)
 {
     include.clear();
     exclude.clear();
     std::string trimmed = text;
-    while (!trimmed.empty() && (trimmed[0] == ' ' || trimmed[0] == '"'))
+    while (!trimmed.empty() && (trimmed[0] == ' ' || trimmed[0] == '\"'))
     {
         trimmed.erase(0, 1);
     }
     while (!trimmed.empty() && (trimmed[trimmed.size() - 1] == ' ' ||
-        trimmed[trimmed.size() - 1] == '"'))
+        trimmed[trimmed.size() - 1] == '\"'))
     {
         trimmed.erase(trimmed.size() - 1);
     }
@@ -117,7 +501,7 @@ bool FileMask::Parse(const std::string & text, std::string & error)
 
     for (size_t g = 0; g < groups.size(); g++)
     {
-        std::vector<std::string> & target = g == 0 ? include : exclude;
+        std::vector<FileMaskToken> & target = g == 0 ? include : exclude;
         std::string mask;
         for (size_t i = 0; i <= groups[g].size(); i++)
         {
@@ -129,14 +513,14 @@ bool FileMask::Parse(const std::string & text, std::string & error)
             }
             if (!mask.empty())
             {
-                if (mask.find('/') != std::string::npos ||
-                    mask.find('\\') != std::string::npos)
+                FileMaskToken token;
+                if (!ParseMaskToken(mask, token, error))
                 {
-                    error = "The file mask '" + mask + "' contains a path "
-                        "separator; only file name masks are supported.";
+                    include.clear();
+                    exclude.clear();
                     return false;
                 }
-                target.push_back(mask);
+                target.push_back(token);
                 mask.clear();
             }
         }
@@ -149,31 +533,50 @@ bool FileMask::Parse(const std::string & text, std::string & error)
     return true;
 }
 
-bool FileMask::Accepts(const std::string & name, bool isDirectory) const
+bool FileMask::Accepts(const std::string & name, bool isDirectory,
+    unsigned long long size, unsigned long mtime,
+    const std::string & relativePath) const
 {
     for (size_t i = 0; i < exclude.size(); i++)
     {
-        if (MatchesMask(exclude[i], name) ||
-            (kIsWindows && MatchesMaskInsensitive(exclude[i], name)))
+        if (MatchesToken(exclude[i], name, isDirectory, size, mtime,
+            relativePath, true))
         {
             return false;
         }
     }
-    /* An include mask never prunes a directory: the files below it may
-     * still match, and pruning would silently skip them. */
-    if (include.empty() || isDirectory)
+    if (include.empty())
+    {
+        return true;
+    }
+    /* Does any include mask address directories at all? If not, include
+     * masks never prune a directory. */
+    bool anyDirectoryInclude = false;
+    for (size_t i = 0; i < include.size(); i++)
+    {
+        if (include[i].directoryOnly || include[i].isPath)
+        {
+            anyDirectoryInclude = true;
+        }
+    }
+    if (isDirectory && !anyDirectoryInclude)
     {
         return true;
     }
     for (size_t i = 0; i < include.size(); i++)
     {
-        if (MatchesMask(include[i], name) ||
-            (kIsWindows && MatchesMaskInsensitive(include[i], name)))
+        if (MatchesToken(include[i], name, isDirectory, size, mtime,
+            relativePath, false))
         {
             return true;
         }
     }
     return false;
+}
+
+bool FileMask::Accepts(const std::string & name, bool isDirectory) const
+{
+    return Accepts(name, isDirectory, 0, 0, std::string());
 }
 
 std::string FileMask::Describe() const
@@ -185,7 +588,7 @@ std::string FileMask::Describe() const
         {
             result += ";";
         }
-        result += include[i];
+        result += include[i].text;
     }
     if (!exclude.empty())
     {
@@ -196,7 +599,7 @@ std::string FileMask::Describe() const
             {
                 result += ";";
             }
-            result += exclude[i];
+            result += exclude[i].text;
         }
     }
     return result.empty() ? std::string("(none)") : result;
@@ -475,13 +878,17 @@ private:
             const SyncEntry remote = haveRemote ? remoteIt->second : SyncEntry();
             const bool isDirectory = (haveLocal && local.isDirectory) ||
                 (haveRemote && remote.isDirectory);
+            const std::string child = relative.empty() ? name : relative + "/" + name;
 
-            if (!mOptions.mask.Accepts(name, isDirectory))
+            const unsigned long long entrySize =
+                (haveLocal ? local.size : remote.size);
+            const unsigned long entryTime =
+                (haveLocal && local.mtime != 0) ? local.mtime : remote.mtime;
+            if (!mOptions.mask.Accepts(name, isDirectory, entrySize, entryTime,
+                child))
             {
                 continue;
             }
-
-            const std::string child = relative.empty() ? name : relative + "/" + name;
 
             if (haveLocal && haveRemote && local.isDirectory == remote.isDirectory)
             {
@@ -591,12 +998,13 @@ private:
                 continue;
             }
             const bool isDirectory = entries[i].isDirectory;
-            if (!mOptions.mask.Accepts(entries[i].name, isDirectory))
+            const std::string child = relative.empty() ?
+                entries[i].name : relative + "/" + entries[i].name;
+            if (!mOptions.mask.Accepts(entries[i].name, isDirectory,
+                entries[i].size, entries[i].mtime, child))
             {
                 continue;
             }
-            const std::string child = relative.empty() ?
-                entries[i].name : relative + "/" + entries[i].name;
             /* Without -recursive a directory is not descended into, and
              * an empty one is not created either. */
             if (isDirectory && !mOptions.recursive)
@@ -769,7 +1177,10 @@ private:
         switch (mOptions.criteria)
         {
             case SyncCriteria::Time:
-                return source.mtime > target.mtime;
+                /* Mirror mode resolves any difference toward the
+                 * source, including a newer target. */
+                return mOptions.mirror ? source.mtime != target.mtime :
+                    source.mtime > target.mtime;
             case SyncCriteria::Size:
                 return source.size != target.size;
             case SyncCriteria::Either:

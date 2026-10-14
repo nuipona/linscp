@@ -86,6 +86,25 @@ int lscp_sftp_set_permissions(const char * path, int permissions);
 int lscp_sftp_set_times(const char * path, unsigned long atime,
     unsigned long mtime);
 
+/* Creates a symbolic link at linkPath pointing at target (SSH_FXP_SYMLINK
+ * of SFTP v3). */
+int lscp_sftp_symlink(const char * target, const char * linkPath);
+
+/* Server-side copy through the copy-data extension (OpenSSH and other
+ * v3 servers). Returns 0 on success, -1 with lscp_sftp_error() set
+ * when the server cannot copy server-side (the caller can then copy
+ * through a stream), and -2 when the extension is not supported. */
+int lscp_sftp_copy(const char * from, const char * to);
+
+/* Server-side checksum through the check-file-name extension. On
+ * success 'algorithm' holds what the server used and 'hex' the digest.
+ * Returns 0, -1 (failed) or -2 (extension not supported). The buffer
+ * must hold at least 2*LSCP_MAX_CHECKSUM_BYTES+1 bytes of hex. */
+#define LSCP_MAX_CHECKSUM_BYTES 64
+int lscp_sftp_checksum(const char * algorithm, const char * path,
+    char * usedAlgorithm, size_t usedAlgorithmSize,
+    char * hex, size_t hexSize);
+
 /* size may be NULL. On success it holds the number of bytes transferred. */
 int lscp_sftp_get(const char * remotePath, const char * localPath,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx);
