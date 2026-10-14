@@ -130,7 +130,9 @@ class LiveDavTests(unittest.TestCase):
         """mkdir, put and then two levels of listing: the directory as
         a directory, the object with its byte count and date."""
         source = self.root / "hello.txt"
-        source.write_text("hello dav world\n", encoding="utf-8")
+        # Bytes, not write_text: Windows write_text would translate LF to
+        # CRLF and change the size this test asserts on both platforms.
+        source.write_bytes(b"hello dav world\n")
         result = self.run_script(
             "mkdir /docs ; mkdir /docs/2026 ; "
             "put %s /docs/hello.txt ; "
