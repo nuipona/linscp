@@ -299,6 +299,7 @@ bool IsEndpointUnreachable(int code)
     switch (code)
     {
     case -1:              /* curl could not be run at all */
+    case 1:               /* this curl was not built with the protocol */
     case 3:               /* the URL was malformed */
     case 5:               /* could not resolve the proxy */
     case 6:               /* could not resolve the host */
@@ -507,6 +508,19 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
          * is the command's problem to report, not the connection's. */
         error.clear();
         return true;
+    }
+    if (code == 1)
+    {
+        /*
+         * Worth saying in our own words: the curl.exe that ships with
+         * Windows 10 and 11 is built without SFTP and SCP support, so every
+         * command of such a session fails on it. A user cannot tell that
+         * apart from a broken host.
+         */
+        error += " This curl does not support the '" + options.protocol +
+            "' protocol. The curl.exe built into Windows has no SFTP or "
+            "SCP support; install a curl built with libssh2, or use a "
+            "build with the native SFTP transport.";
     }
     if (error.empty())
     {
