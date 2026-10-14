@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 BINARY = str(pathlib.Path(sys.argv.pop(1)).resolve())
+SUITE_NAME = "script"
 
 
 class ScriptTests(unittest.TestCase):
@@ -500,5 +501,20 @@ class ScriptTests(unittest.TestCase):
                 server.server_close()
 
 
+def run_and_report():
+    """Run the suite, then print one line that says what was actually run.
+
+    'make check' and CI are green whether or not the tests could run, so a
+    missing dependency used to be invisible: this line, which the CI jobs
+    repeat as an annotation, records the skip count next to the pass count.
+    """
+    suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
+    result = unittest.TextTestRunner(verbosity=1).run(suite)
+    print("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
+          (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
+           len(result.failures) + len(result.errors)))
+    return 0 if result.wasSuccessful() else 1
+
+
 if __name__ == "__main__":
-    unittest.main()
+    sys.exit(run_and_report())

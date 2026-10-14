@@ -11,18 +11,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build and run unit tests
-        run: make -C source/linux clean all check
+        run: |
+          set -o pipefail
+          make -C source/linux clean all check 2>&1 |
+            tee "$RUNNER_TEMP/unit-tests.log"
+          # The evidence line is repeated as an annotation, where the API
+          # serves it: 'checks passed' on its own does not say what was
+          # skipped, and a suite that quietly did less is the failure mode
+          # this repository is guarding against.
+          grep -E '^evidence: |checks passed' "$RUNNER_TEMP/unit-tests.log" |
+            { while IFS= read -r line; do echo "::notice::$line"; done; } || :
       - name: Script compatibility regressions
-        run: python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
+        run: |
+          set -o pipefail
+          python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/script-tests.log"
+          grep '^evidence: ' "$RUNNER_TEMP/script-tests.log" |
+            { while IFS= read -r line; do echo "::notice::$line"; done; } || :
       - name: Live SFTP regressions
         run: |
           # The live suite needs a server; paramiko goes in a venv because
           # the runner's system Python is externally managed. Without it the
           # suite skips, which is why the skip count is printed.
+          set -o pipefail
           python3 -m venv "$RUNNER_TEMP/live-test-venv"
           "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko
           "$RUNNER_TEMP/live-test-venv/bin/python" \
-            -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp
+            -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/live-tests.log"
+          grep '^evidence: ' "$RUNNER_TEMP/live-tests.log" |
+            { while IFS= read -r line; do echo "::notice::$line"; done; } || :
       - name: Validate upstream gap inventory (not full parity)
         run: |
           python3 tools/check_upstream_parity.py
@@ -126,6 +144,13 @@ jobs:
         run: |
           $output = & ctest --test-dir build-windows -C Release --output-on-failure 2>&1 | Out-String
           Write-Host $output
+          # What this platform actually proved, as an annotation the API
+          # serves: the skip count included, because the live suite skips the
+          # cases a POSIX host needs and a reader has to be able to tell that
+          # apart from a suite that ran everything.
+          $evidence = $output -split "`r?`n" |
+            Where-Object { $_ -match '^evidence: |checks passed' }
+          foreach ($line in $evidence) { Write-Host "::notice::$($line.Trim())" }
           if ($LASTEXITCODE -ne 0) {
             # Repeat the failing checks as annotations: they stay readable in
             # the API (check-run annotations) even when the full job log is
