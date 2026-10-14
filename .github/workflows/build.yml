@@ -41,6 +41,11 @@ jobs:
           "$RUNNER_TEMP/live-test-venv/bin/python" \
             -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp 2>&1 |
             tee "$RUNNER_TEMP/live-tests.log"
+          grep -E 'evidence: suite=live-sftp .*ran=[1-9]' \
+            "$RUNNER_TEMP/live-tests.log" > /dev/null || {
+            echo "::error::the live SFTP suite ran no tests"
+            exit 1
+          }
           grep '^evidence: ' "$RUNNER_TEMP/live-tests.log" |
             { while IFS= read -r line; do
               printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
@@ -112,7 +117,14 @@ jobs:
         shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP "msvc-build.log"
-          cmake -S . -B build-windows -A x64 2>&1 | Tee-Object -FilePath $log
+          # Pin the interpreter CMake hands to CTest. Without this,
+          # find_package(Python3) picks another installation than the
+          # 'python' on PATH, the test dependencies land in the wrong
+          # site-packages, and the suites that need them skip themselves.
+          $python = (Get-Command python).Source
+          Write-Host "Tests will run under $python"
+          cmake -S . -B build-windows -A x64 "-DPython3_EXECUTABLE=$python" 2>&1 |
+            Tee-Object -FilePath $log
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cmake --build build-windows --config Release 2>&1 |
             Tee-Object -FilePath $log -Append
@@ -139,24 +151,14 @@ jobs:
           # The live SFTP suite brings up its own paramiko server, which is
           # the only way this job can see a transfer rather than a usage
           # message. Without paramiko the suite skips itself; it does not
-          # pass. It has to be installed for the interpreter CTest actually
-          # runs the tests with, which is not necessarily 'python' - the
-          # runner image has more than one.
-          # Read the cache itself: 'cmake -LA' prefixes every line with
-          # '-- ', which silently defeated a '^Python3_EXECUTABLE' match and
-          # installed paramiko for the wrong interpreter.
-          $cache = Get-Content build-windows\CMakeCache.txt |
-            Select-String -Pattern '^Python3_EXECUTABLE:FILEPATH=(.*)$' |
-            Select-Object -First 1
-          $cached = "python"
-          if ($cache) { $cached = $cache.Matches[0].Groups[1].Value }
-          Write-Host "::notice::live tests will run under $cached"
-          & $cached -m pip install --quiet paramiko
+          # pass, and the step below fails if the suite then runs nothing.
+          $python = (Get-Command python).Source
+          & $python -m pip install --quiet paramiko
           # A non-zero exit from pip does not stop pwsh, and a suite that
           # silently skips is worse than a red step: say so here.
-          & $cached -c "import paramiko, sys; print('paramiko', paramiko.__version__, 'on', sys.executable)"
+          & $python -c "import paramiko, sys; print('paramiko', paramiko.__version__, 'on', sys.executable)"
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::paramiko is not importable from $cached"
+            Write-Host "::error::paramiko is not importable from $python"
             exit 1
           }
       - name: Unit tests
@@ -176,6 +178,12 @@ jobs:
           $evidence = $output -split "`r?`n" |
             Where-Object { $_ -match 'evidence: |checks passed' } |
             ForEach-Object { ($_ -replace '^\s*\d+: ', '').Trim() }
+          $live = $evidence | Where-Object { $_ -like '*suite=live-sftp*' }
+          if (-not ($live -match 'ran=[1-9]')) {
+            # The live suite is why this job has any transfer evidence at all.
+            Write-Host "::error::the live SFTP suite ran no tests: $live"
+            exit 1
+          }
           if (-not $evidence) {
             # A run that cannot say what it executed has not established
             # anything, so it does not get to be green.
