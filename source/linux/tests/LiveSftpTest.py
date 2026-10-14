@@ -168,6 +168,9 @@ class LiveSftpTests(unittest.TestCase):
         self.assertIn("Cannot open session", result.stderr)
         self.assertNotIn("Connected", result.stdout)
 
+    @posix_only("curl can only pin an MD5 fingerprint; a SHA256 pin falls "
+                "back to known_hosts on that path, so there is nothing to "
+                "refuse here")
     def test_open_with_an_unexpected_host_key_is_refused(self):
         """A pinned key that does not match has to stop the connection, and
         say that it was the key rather than the network."""

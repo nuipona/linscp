@@ -136,9 +136,16 @@ jobs:
           # The live SFTP suite brings up its own paramiko server, which is
           # the only way this job can see a transfer rather than a usage
           # message. Without paramiko the suite skips itself; it does not
-          # pass.
-          python -m pip install --quiet paramiko
-          python -c "import paramiko; print('paramiko', paramiko.__version__)"
+          # pass. It has to be installed for the interpreter CTest actually
+          # runs the tests with, which is not necessarily 'python' - the
+          # runner image has more than one.
+          $cached = cmake -N -LA build-windows |
+            Select-String -Pattern '^Python3_EXECUTABLE:FILEPATH=' |
+            ForEach-Object { $_.Line.Split('=', 2)[1] } | Select-Object -First 1
+          if (-not $cached) { $cached = "python" }
+          Write-Host "Installing paramiko for $cached"
+          & $cached -m pip install --quiet paramiko
+          & $cached -c "import paramiko, sys; print('paramiko', paramiko.__version__, 'on', sys.executable)"
       - name: Unit tests
         shell: pwsh
         run: |
