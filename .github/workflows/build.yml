@@ -151,8 +151,11 @@ jobs:
           # serves: the skip count included, because the live suite skips the
           # cases a POSIX host needs and a reader has to be able to tell that
           # apart from a suite that ran everything.
+          # ctest prefixes every line it echoes with the test number, so the
+          # pattern is unanchored and the prefix is dropped again.
           $evidence = $output -split "`r?`n" |
-            Where-Object { $_ -match '^evidence: |checks passed' }
+            Where-Object { $_ -match 'evidence: |checks passed' } |
+            ForEach-Object { ($_ -replace '^\s*\d+: ', '').Trim() }
           if (-not $evidence) {
             # A run that cannot say what it executed has not established
             # anything, so it does not get to be green.
