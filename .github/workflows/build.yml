@@ -176,7 +176,7 @@ jobs:
           if [ "$status" -ne 0 ]; then
             # Repeat the diagnostics as check-run annotations: the plain job
             # log is hosted separately and is not readable from everywhere.
-            grep -E 'error:|Error [0-9]+|undefined reference|fatal' "$log" |
+            grep -E 'error:|error C[0-9]+|CMake Error|Error [0-9]+|undefined reference|FAILED:|fatal' "$log" |
               tr -d '\r' | sed 's/%/%25/g' | sort -u | head -12 |
               while IFS= read -r line; do
                 printf '::error::%s\n' "${line//]/%5D}"

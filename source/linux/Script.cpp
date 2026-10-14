@@ -4802,9 +4802,9 @@ bool Script::ApplyRemotePermissions(const std::string & path, const std::string 
     }
     const bool hasPermissions = (attrs.flags & LSCP_ATTR_PERMISSIONS) != 0;
     const bool isDirectory = hasPermissions && (attrs.permissions & 0040000) != 0;
-    const mode_t current = hasPermissions ? static_cast<mode_t>(attrs.permissions & 07777) : 0;
+    const unsigned long current = hasPermissions ? static_cast<unsigned long>(attrs.permissions & 07777) : 0;
 
-    mode_t wanted = 0;
+    unsigned long wanted = 0;
     std::string modeError;
     if (!ParsePermissions(mode, current, isDirectory, wanted, modeError))
     {
@@ -4897,7 +4897,7 @@ bool Script::ChangeRemotePermissions(const std::vector<std::string> & args)
 
     /* Check the mode before anything is touched, so that a typo cannot
      * change the first file and then fail on the second. */
-    mode_t probe = 0;
+    unsigned long probe = 0;
     std::string modeError;
     if (!ParsePermissions(mode, 0644, false, probe, modeError))
     {

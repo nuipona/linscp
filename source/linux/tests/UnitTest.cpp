@@ -1555,7 +1555,7 @@ void TestNewScriptCommands()
 }
 
 
-std::string ModeString(mode_t mode)
+std::string ModeString(unsigned long mode)
 {
     char buffer[16];
     snprintf(buffer, sizeof(buffer), "%04lo", static_cast<unsigned long>(mode));
@@ -1565,7 +1565,7 @@ std::string ModeString(mode_t mode)
 /* 'chmod' understands octal numbers and symbolic expressions alike. */
 void TestPermissionModes()
 {
-    mode_t mode = 0;
+    unsigned long mode = 0;
     std::string error;
 
     CHECK_TRUE(ParseOctalMode("644", mode));

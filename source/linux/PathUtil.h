@@ -63,17 +63,24 @@ std::string FormatSize(uint64_t size);
 std::string FormatPermissions(unsigned long permissions);
 std::string FormatFileTime(unsigned long time);
 
+/*
+ * Permission parsing, for 'chmod' and for '-permissions='. The values are
+ * 'unsigned long' rather than mode_t on purpose: they come from and go to a
+ * server, which carries the twelve permission bits plus the file type bits,
+ * and mode_t is only sixteen bits wide on Windows.
+ */
+
 /* A WinSCP-style octal permission value: '600', '0600', '00600'. */
-bool ParseOctalMode(const std::string & text, mode_t & result);
+bool ParseOctalMode(const std::string & text, unsigned long & result);
 
 /* A symbolic permission expression ('u+x', 'go-w', 'a=r,u+s') applied to
  * 'current'; see the comment in PathUtil.cpp for the accepted grammar. */
-bool ParseSymbolicPermissions(const std::string & text, mode_t current,
-    bool isDirectory, mode_t & result, std::string & error);
+bool ParseSymbolicPermissions(const std::string & text, unsigned long current,
+    bool isDirectory, unsigned long & result, std::string & error);
 
 /* An octal mode or a symbolic expression, as 'chmod' accepts them. */
-bool ParsePermissions(const std::string & text, mode_t current, bool isDirectory,
-    mode_t & result, std::string & error);
+bool ParsePermissions(const std::string & text, unsigned long current,
+    bool isDirectory, unsigned long & result, std::string & error);
 
 } // namespace linuxscp
 

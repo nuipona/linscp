@@ -732,8 +732,8 @@ namespace linuxscp {
  * 'u=rw' leaves the group and the other bits alone. The process umask is
  * deliberately not applied to '=': the caller states the mode it wants.
  */
-bool ParseSymbolicPermissions(const std::string & text, mode_t current,
-    bool isDirectory, mode_t & result, std::string & error)
+bool ParseSymbolicPermissions(const std::string & text, unsigned long current,
+    bool isDirectory, unsigned long & result, std::string & error)
 {
     result = current;
     error.clear();
@@ -825,30 +825,30 @@ bool ParseSymbolicPermissions(const std::string & text, mode_t current,
                 continue;
             }
             const int shift = static_cast<int>(2 - slot) * 3;
-            const mode_t slotMask = static_cast<mode_t>(0x7 << shift);
+            const unsigned long slotMask = static_cast<unsigned long>(0x7 << shift);
 
-            mode_t add = 0;
+            unsigned long add = 0;
             for (size_t p = 0; p < perms.size(); p++)
             {
                 switch (perms[p])
                 {
-                case 'r': add |= static_cast<mode_t>(0x4 << shift); break;
-                case 'w': add |= static_cast<mode_t>(0x2 << shift); break;
-                case 'x': add |= static_cast<mode_t>(0x1 << shift); break;
+                case 'r': add |= static_cast<unsigned long>(0x4 << shift); break;
+                case 'w': add |= static_cast<unsigned long>(0x2 << shift); break;
+                case 'x': add |= static_cast<unsigned long>(0x1 << shift); break;
                 case 'X':
                     if (anyExec || isDirectory)
                     {
-                        add |= static_cast<mode_t>(0x1 << shift);
+                        add |= static_cast<unsigned long>(0x1 << shift);
                     }
                     break;
                 case 'u':
-                    add |= static_cast<mode_t>(((current & 0700) >> 6) << shift);
+                    add |= static_cast<unsigned long>(((current & 0700) >> 6) << shift);
                     break;
                 case 'g':
-                    add |= static_cast<mode_t>(((current & 0070) >> 3) << shift);
+                    add |= static_cast<unsigned long>(((current & 0070) >> 3) << shift);
                     break;
                 case 'o':
-                    add |= static_cast<mode_t>((current & 0007) << shift);
+                    add |= static_cast<unsigned long>((current & 0007) << shift);
                     break;
                 default:
                     break;
@@ -857,30 +857,30 @@ bool ParseSymbolicPermissions(const std::string & text, mode_t current,
 
             if (op == '+')
             {
-                result = static_cast<mode_t>(result | add);
+                result = static_cast<unsigned long>(result | add);
             }
             else if (op == '-')
             {
-                result = static_cast<mode_t>(result & ~add);
+                result = static_cast<unsigned long>(result & ~add);
             }
             else
             {
-                result = static_cast<mode_t>((result & ~slotMask) | (add & slotMask));
+                result = static_cast<unsigned long>((result & ~slotMask) | (add & slotMask));
             }
 
             /* The special bits live outside the three permission classes. */
             if (perms.find('s') != std::string::npos)
             {
-                const mode_t special = (slot == 0 ? 04000 :
+                const unsigned long special = (slot == 0 ? 04000 :
                     (slot == 1 ? 02000 : 0));
-                result = (op == '-' ? static_cast<mode_t>(result & ~special)
-                                    : static_cast<mode_t>(result | special));
+                result = (op == '-' ? static_cast<unsigned long>(result & ~special)
+                                    : static_cast<unsigned long>(result | special));
             }
             if (perms.find('t') != std::string::npos &&
                 (who & (1u << slot)) != 0 && slot == 2)
             {
-                result = (op == '-' ? static_cast<mode_t>(result & ~01000)
-                                    : static_cast<mode_t>(result | 01000));
+                result = (op == '-' ? static_cast<unsigned long>(result & ~01000)
+                                    : static_cast<unsigned long>(result | 01000));
             }
         }
     }
@@ -909,7 +909,7 @@ bool TrimString(const std::string & text, std::string & result)
 }
 
 /* A WinSCP-style octal permission value: '600', '0600', '00600'. */
-bool ParseOctalMode(const std::string & text, mode_t & result)
+bool ParseOctalMode(const std::string & text, unsigned long & result)
 {
     std::string digits = text;
     if (digits.size() > 1 && (digits[0] == '0' || digits[0] == 'o'))
@@ -920,22 +920,22 @@ bool ParseOctalMode(const std::string & text, mode_t & result)
     {
         return false;
     }
-    mode_t mode = 0;
+    unsigned long mode = 0;
     for (size_t i = 0; i < digits.size(); i++)
     {
         if (digits[i] < '0' || digits[i] > '7')
         {
             return false;
         }
-        mode = static_cast<mode_t>(mode * 8 + (digits[i] - '0'));
+        mode = static_cast<unsigned long>(mode * 8 + (digits[i] - '0'));
     }
     result = mode;
     return true;
 }
 
 /* An octal mode or a symbolic expression, as accepted by 'chmod'. */
-bool ParsePermissions(const std::string & text, mode_t current, bool isDirectory,
-    mode_t & result, std::string & error)
+bool ParsePermissions(const std::string & text, unsigned long current, bool isDirectory,
+    unsigned long & result, std::string & error)
 {
     if (!text.empty() && isdigit(static_cast<unsigned char>(text[0])))
     {
