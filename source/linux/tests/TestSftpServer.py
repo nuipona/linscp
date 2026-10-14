@@ -19,9 +19,12 @@ from paramiko.sftp_attr import SFTPAttributes
 from paramiko.sftp import SFTP_OP_UNSUPPORTED  # noqa: F811
 from paramiko.sftp_handle import SFTPHandle
 
-HOST, PORT = "127.0.0.1", 12765
+HOST = "127.0.0.1"
+# A test runner that does not want to collide with another one, or that
+# wants its own jail, sets these; port 0 asks the kernel for a free one.
+PORT = int(os.environ.get("LSCP_TEST_PORT", "12765"))
 USER, PASSWORD = "testuser", "testpass"
-ROOT = "/tmp/lscp-sftp-root"
+ROOT = os.environ.get("LSCP_TEST_ROOT", "/tmp/lscp-sftp-root")
 
 HOST_KEY = paramiko.RSAKey.generate(2048)
 
@@ -203,12 +206,15 @@ def handle(client):
 
 
 def main():
+    os.makedirs(ROOT, exist_ok=True)
     os.chdir(ROOT)
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((HOST, PORT))
     sock.listen(16)
-    print("READY", flush=True)
+    # The port, because 'LSCP_TEST_PORT=0' means the kernel picked it, and a
+    # runner has to learn which one it was.
+    print("READY %d" % sock.getsockname()[1], flush=True)
     while True:
         client, _ = sock.accept()
         threading.Thread(target=handle, args=(client,), daemon=True).start()

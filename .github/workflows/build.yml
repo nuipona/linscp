@@ -14,6 +14,15 @@ jobs:
         run: make -C source/linux clean all check
       - name: Script compatibility regressions
         run: python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
+      - name: Live SFTP regressions
+        run: |
+          # The live suite needs a server; paramiko goes in a venv because
+          # the runner's system Python is externally managed. Without it the
+          # suite skips, which is why the skip count is printed.
+          python3 -m venv "$RUNNER_TEMP/live-test-venv"
+          "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko
+          "$RUNNER_TEMP/live-test-venv/bin/python" \
+            -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp
       - name: Validate upstream gap inventory (not full parity)
         run: |
           python3 tools/check_upstream_parity.py
