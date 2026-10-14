@@ -303,9 +303,16 @@ def run_and_report():
     """
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
-    print("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
-          (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
-           len(result.failures) + len(result.errors)))
+    line = ("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
+            (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
+             len(result.failures) + len(result.errors)))
+    if not result.testsRun and result.skipped:
+        # A suite that ran nothing is not a pass, and 'skipped' alone does not
+        # say whether that is a platform limit or a missing dependency.
+        reasons = "; ".join(sorted(set(str(reason)[:160]
+                                       for _, reason in result.skipped)))
+        line += " because: " + reasons
+    print(line)
     return 0 if result.wasSuccessful() else 1
 
 

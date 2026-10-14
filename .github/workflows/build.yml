@@ -20,14 +20,16 @@ jobs:
           # skipped, and a suite that quietly did less is the failure mode
           # this repository is guarding against.
           grep -E '^evidence: |checks passed' "$RUNNER_TEMP/unit-tests.log" |
-            { while IFS= read -r line; do echo "::notice::$line"; done; } || :
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Script compatibility regressions
         run: |
           set -o pipefail
           python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp 2>&1 |
             tee "$RUNNER_TEMP/script-tests.log"
           grep '^evidence: ' "$RUNNER_TEMP/script-tests.log" |
-            { while IFS= read -r line; do echo "::notice::$line"; done; } || :
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Live SFTP regressions
         run: |
           # The live suite needs a server; paramiko goes in a venv because
@@ -40,7 +42,8 @@ jobs:
             -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp 2>&1 |
             tee "$RUNNER_TEMP/live-tests.log"
           grep '^evidence: ' "$RUNNER_TEMP/live-tests.log" |
-            { while IFS= read -r line; do echo "::notice::$line"; done; } || :
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Validate upstream gap inventory (not full parity)
         run: |
           python3 tools/check_upstream_parity.py
@@ -145,7 +148,13 @@ jobs:
           if (-not $cached) { $cached = "python" }
           Write-Host "Installing paramiko for $cached"
           & $cached -m pip install --quiet paramiko
+          # A non-zero exit from pip does not stop pwsh, and a suite that
+          # silently skips is worse than a red step: say so here.
           & $cached -c "import paramiko, sys; print('paramiko', paramiko.__version__, 'on', sys.executable)"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::paramiko is not importable from $cached"
+            exit 1
+          }
       - name: Unit tests
         shell: pwsh
         run: |
@@ -170,7 +179,10 @@ jobs:
               "tests did not run, or their output is not reaching this step"
             exit 1
           }
-          foreach ($line in $evidence) { Write-Host "::notice::$($line.Trim())" }
+          foreach ($line in $evidence) {
+            $escaped = $line.Trim().Replace('%', '%25').Replace(']', '%5D')
+            Write-Host "::notice::$escaped"
+          }
           if ($LASTEXITCODE -ne 0) {
             # Repeat the failing checks as annotations: they stay readable in
             # the API (check-run annotations) even when the full job log is
