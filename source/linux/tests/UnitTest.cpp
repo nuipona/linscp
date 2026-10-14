@@ -1556,10 +1556,16 @@ void TestSessionStore()
         CHECK_TRUE(SessionStore::DecryptPassword(encoded, key, back, error));
         CHECK_EQ(back, "hunter2!*()");
 
-        /* Tampering and wrong keys are refused, not decoded to garbage. */
+        /* Tampering and wrong keys are refused, not decoded to garbage.
+         * The flip has to land inside the base64 data: the last
+         * characters are padding, where 'A' (all zero bits) can decode
+         * to exactly the bytes the pad stood for - a 1-in-N chance of
+         * a 'tamper' that changes nothing, which showed up as a flaky
+         * pair of checks. Mid-string, every flip moves real bits. */
         std::string tampered = encoded;
-        tampered[tampered.size() - 2] =
-            tampered[tampered.size() - 2] == 'A' ? 'B' : 'A';
+        const size_t tamperAt = 6 + encoded.size() / 2;
+        tampered[tamperAt] =
+            tampered[tamperAt] == 'A' ? 'B' : 'A';
         CHECK_FALSE(SessionStore::DecryptPassword(tampered, key, back, error));
         CHECK_TRUE(!error.empty());
         CHECK_FALSE(SessionStore::DecryptPassword(encoded,

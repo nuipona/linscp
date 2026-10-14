@@ -520,6 +520,18 @@
     }
     .toast.show { opacity: 1; }
     .toast.error { background: #d83b01; }
+    .action-btn.active {
+      background: #2b5797;
+      color: #fff;
+      border-color: #2b5797;
+    }
+    .pane.drop-target {
+      outline: 3px dashed #2b5797;
+      outline-offset: -3px;
+    }
+    .pane.drop-target .file-table-container {
+      background: rgba(43, 87, 151, 0.08);
+    }
   </style>
 </head>
 <body>
@@ -555,7 +567,10 @@
   <div class="commander-main">
 
     <!-- LEFT PANE: LOCAL -->
-    <div class="pane" id="localPane" onclick="focusPane('local')">
+    <div class="pane" id="localPane" onclick="focusPane('local')"
+         ondragover="dragOverPane('local', event)"
+         ondragleave="dragLeavePane('local', event)"
+         ondrop="dropOnPane('local', event)">
       <div class="pane-header">
         <div class="pane-title">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="#0066cc"><path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm2-1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1H2z"/></svg>
@@ -603,6 +618,11 @@
       <button class="action-btn" title="Synchronize the two directories" onclick="openSynchronize()">
         <span style="font-size: 14px;">⇄</span><span>Sync</span>
       </button>
+      <button class="action-btn" id="syncBrowseBtn"
+              title="Synchronized browsing is off: each pane browses on its own"
+              onclick="toggleSyncBrowse()">
+        <span style="font-size: 14px;">⇄</span><span>Synchronized</span>
+      </button>
       <button class="action-btn" title="Edit the selected remote file (F4)" onclick="editSelected()">
         <span style="font-size: 14px;">✎</span><span>Edit</span>
       </button>
@@ -612,7 +632,10 @@
     </div>
 
     <!-- RIGHT PANE: REMOTE -->
-    <div class="pane" id="remotePane" onclick="focusPane('remote')">
+    <div class="pane" id="remotePane" onclick="focusPane('remote')"
+         ondragover="dragOverPane('remote', event)"
+         ondragleave="dragLeavePane('remote', event)"
+         ondrop="dropOnPane('remote', event)">
       <div class="pane-header">
         <div class="pane-title">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="#107c41"><path d="M4.5 11a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm0 2a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm0-4a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1zm1-5.5V5h5V3.5a.5.5 0 0 0-.5-.5h-4a.5.5 0 0 0-.5.5z"/><path d="M14 0H2a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2zM2 1a1 1 0 0 0-1 1v1h14V2a1 1 0 0 0-1-1H2z"/></svg>
@@ -937,7 +960,14 @@
     queue: [],
     paused: false,
     editor: { path: '', content: '', original: '', baseMtime: 0, dirty: false },
-    syncPlan: null
+    syncPlan: null,
+    /* Synchronized browsing (WinSCP's): entering a directory in one
+     * pane carries the other one along when the counterpart exists. */
+    syncBrowse: (() => {
+      try { return localStorage.getItem('lscp-sync-browse') === '1'; }
+      catch (error) { return false; }
+    })(),
+    dragSide: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -1168,13 +1198,14 @@
     const data = await apiGet('/api/local/list' + query + (query ? '&' : '?') + 'tab=' + tabId());
     if (!data || !data.success) {
       if (data && data.error) toast(data.error, true);
-      return;
+      return false;
     }
     state.local.path = data.path;
     state.local.entries = data.entries || [];
     state.local.selection.clear();
     $('localPathInput').value = data.path;
     renderPane('local');
+    return true;
   }
 
   async function loadRemote(path) {
@@ -1182,19 +1213,20 @@
     if (!tab || !tab.connected) {
       state.remote.entries = [];
       renderPane('remote');
-      return;
+      return false;
     }
     const query = path ? '?path=' + encodeURIComponent(path) : '';
     const data = await apiGet('/api/remote/list' + query + (query ? '&' : '?') + 'tab=' + tabId());
     if (!data || !data.success) {
       if (data && data.error) toast(data.error, true);
-      return;
+      return false;
     }
     state.remote.path = data.path;
     state.remote.entries = data.entries || [];
     state.remote.selection.clear();
     $('remotePathInput').value = data.path;
     renderPane('remote');
+    return true;
   }
 
   function renderPane(side) {
@@ -1218,6 +1250,9 @@
         '<td>' + escapeHtml(entry.permissions || '') + '</td>';
       row.onclick = (event) => selectEntry(side, entry, event);
       row.ondblclick = () => openEntry(side, entry);
+      row.draggable = true;
+      row.ondragstart = (event) => beginDrag(side, entry, event);
+      row.ondragend = () => endDrag();
       tbody.appendChild(row);
     }
     const size = pane.entries.reduce((sum, entry) => sum + (entry.is_dir ? 0 : (entry.size || 0)), 0);
@@ -1255,18 +1290,143 @@
     return Array.from(state[side].selection);
   }
 
-  function openEntry(side, entry) {
+  async function loadPane(side, path) {
+    return side === 'local' ? loadLocal(path) : loadRemote(path);
+  }
+
+  /*
+   * Synchronized browsing: both panes move as one. The counterpart is
+   * loaded first, and the pane the user acted on only follows when it
+   * exists there - otherwise both stay where they were, which is what
+   * WinSCP does instead of leaving the pair at different depths.
+   */
+  async function navigateSync(side, targetOfSide) {
+    const other = side === 'local' ? 'remote' : 'local';
+    const otherPath = targetOfSide.name === '..' ?
+      parentPath(state[other].path, other === 'remote') :
+      joinPath(state[other].path, targetOfSide.name, other === 'remote');
+    const otherBefore = state[other].path;
+    const otherOk = await loadPane(other, otherPath);
+    if (!otherOk) {
+      toast('Folder "' + targetOfSide.name + '" does not exist on the ' +
+        other + ' side.', true);
+      return false;
+    }
+    const ownOk = await loadPane(side, targetOfSide.path);
+    if (!ownOk) {
+      /* The counterpart moved and ours vanished under us: put the other
+       * pane back so the pair never diverges. */
+      await loadPane(other, otherBefore);
+      return false;
+    }
+    return true;
+  }
+
+  async function openEntry(side, entry) {
     if (entry.is_dir) {
       const path = joinPath(state[side].path, entry.name, side === 'remote');
-      if (side === 'local') loadLocal(path); else loadRemote(path);
+      if (state.syncBrowse) {
+        await navigateSync(side, { name: entry.name, path: path });
+      } else if (side === 'local') {
+        loadLocal(path);
+      } else {
+        loadRemote(path);
+      }
     } else if (side === 'remote') {
       openEditor(joinPath(state.remote.path, entry.name, true));
     }
   }
 
-  function goUp(side) {
+  async function goUp(side) {
     const path = parentPath(state[side].path, side === 'remote');
-    if (side === 'local') loadLocal(path); else loadRemote(path);
+    if (state.syncBrowse) {
+      await navigateSync(side, { name: '..', path: path });
+    } else if (side === 'local') {
+      loadLocal(path);
+    } else {
+      loadRemote(path);
+    }
+  }
+
+  function toggleSyncBrowse() {
+    state.syncBrowse = !state.syncBrowse;
+    try {
+      localStorage.setItem('lscp-sync-browse', state.syncBrowse ? '1' : '0');
+    } catch (error) { /* private mode: the flag still holds for this run */ }
+    const button = $('syncBrowseBtn');
+    if (button) {
+      button.classList.toggle('active', state.syncBrowse);
+      button.title = state.syncBrowse ?
+        'Synchronized browsing is on: the other pane follows your directory changes' :
+        'Synchronized browsing is off: each pane browses on its own';
+    }
+    toast(state.syncBrowse ?
+      'Synchronized browsing on.' :
+      'Synchronized browsing off.');
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Drag and drop between the panes                                    *
+   * ------------------------------------------------------------------ */
+
+  function beginDrag(side, entry, event) {
+    /* Dragging an entry that is not part of the selection takes just
+     * that entry, like clicking first would. */
+    const pane = state[side];
+    if (!pane.selection.has(entry.name)) {
+      pane.selection.clear();
+      pane.selection.add(entry.name);
+      renderPane(side);
+    }
+    const payload = JSON.stringify({ side: side, names: selectedNames(side) });
+    state.dragSide = side;
+    if (event && event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'copyMove';
+      event.dataTransfer.setData('text/plain', payload);
+    }
+  }
+
+  function endDrag() {
+    state.dragSide = null;
+    document.querySelectorAll('.pane.drop-target').forEach(
+      (pane) => pane.classList.remove('drop-target'));
+  }
+
+  function dragOverPane(side, event) {
+    if (!state.dragSide || state.dragSide === side || !event) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    const pane = $(side + 'Pane');
+    if (pane) pane.classList.add('drop-target');
+  }
+
+  function dragLeavePane(side, event) {
+    if (event && event.relatedTarget) {
+      const pane = $(side + 'Pane');
+      if (pane && pane.contains(event.relatedTarget)) return;
+    }
+    const pane = $(side + 'Pane');
+    if (pane) pane.classList.remove('drop-target');
+  }
+
+  async function dropOnPane(side, event) {
+    if (event) event.preventDefault();
+    endDrag();
+    if (!event || !event.dataTransfer) return;
+    let payload = null;
+    try {
+      payload = JSON.parse(event.dataTransfer.getData('text/plain') || 'null');
+    } catch (error) { payload = null; }
+    if (!payload || !payload.names || !payload.names.length) return;
+    if (payload.side === side) {
+      toast('Dropping onto the same pane does nothing - drop it on the ' +
+        (side === 'local' ? 'remote' : 'local') + ' side to transfer.', true);
+      return;
+    }
+    /* The queue endpoint takes explicit names; use the dragged ones. */
+    state[payload.side].selection = new Set(payload.names);
+    await transfer(payload.side === 'local' ? 'upload' : 'download',
+      payload.names);
   }
 
   function focusPane(side) { state.focusPane = side; }
@@ -1278,9 +1438,10 @@
   function actionUpload() { transfer('upload'); }
   function actionDownload() { transfer('download'); }
 
-  async function transfer(direction) {
+  async function transfer(direction, namesOverride) {
     const source = direction === 'upload' ? 'local' : 'remote';
-    const names = selectedNames(source);
+    const names = namesOverride && namesOverride.length ?
+      namesOverride : selectedNames(source);
     if (!names.length) {
       toast('Select something in the ' + source + ' pane first.', true);
       return;
