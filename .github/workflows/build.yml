@@ -66,6 +66,22 @@ jobs:
           grep '^evidence: ' "$RUNNER_TEMP/live-s3-tests.log" |
             { while IFS= read -r line; do
               printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
+      - name: Live WebDAV regressions
+        run: |
+          # Standard-library server, plain HTTP, curl on any platform:
+          # no venv dependencies at all.
+          set -o pipefail
+          python3 -u source/linux/tests/LiveDavTest.py \
+            source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/live-dav-tests.log"
+          grep -E 'evidence: suite=live-dav .*ran=[1-9]' \
+            "$RUNNER_TEMP/live-dav-tests.log" > /dev/null || {
+            echo "::error::the live WebDAV suite ran no tests"
+            exit 1
+          }
+          grep '^evidence: ' "$RUNNER_TEMP/live-dav-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Validate upstream gap inventory (not full parity)
         run: |
           python3 tools/check_upstream_parity.py

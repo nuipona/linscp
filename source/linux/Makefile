@@ -221,6 +221,7 @@ check-live: $(BINDIR)/linuxscp
 	python3 tests/ScriptTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveSftpTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveS3Test.py $(BINDIR)/linuxscp
+	python3 tests/LiveDavTest.py $(BINDIR)/linuxscp
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)

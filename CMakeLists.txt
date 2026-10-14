@@ -112,6 +112,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME live-s3-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveS3Test.py
     $<TARGET_FILE:linuxscp>)
+  # The WebDAV endpoint is standard-library-only and the client speaks
+  # plain HTTP, so this suite runs wherever CTest does, Windows included.
+  add_test(NAME live-dav-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveDavTest.py
+    $<TARGET_FILE:linuxscp>)
   add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)
   add_test(NAME parity-inventory COMMAND ${Python3_EXECUTABLE}
