@@ -605,7 +605,10 @@ linuxscp \-gui
 LinuxSCP does not implement full WinSCP feature parity. Native POSIX SFTP,
 basic recursive transfers/resume, synchronization, persistent sessions, a
 remote editor and a browser-based graphical interface exist. Other protocols
-use curl and depend on its build capabilities. WebDAV listing is incomplete;
+use curl and depend on its build capabilities: the curl.exe built into Windows
+has no SFTP or SCP support, and an BopenP of such an endpoint then fails
+with that statement rather than reporting a session that cannot transfer
+anything. WebDAV listing is incomplete;
 authenticated S3 signing/listing is absent. File masks, ASCII conversion,
 retries/reconnect and the .NET API are not implemented.
 .PP

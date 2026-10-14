@@ -26,10 +26,9 @@
     "date": "2026-10-14",
     "suites": {
      "unit": "linuxscp-unittest.exe, the same C++ checks, built and run by the MSVC and MinGW jobs.",
-     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, which is where a Windows path or separator difference shows.",
-     "live-sftp": "LiveSftpTest.py against the paramiko server the job starts itself: refused opens, an unexpected host key and a resumed download after the connection died. The POSIX-only cases - Ctrl-C, directory write protection, -preservetime on an upload - skip themselves and say why."
+     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, which is where a Windows path or separator difference shows."
     },
-    "cannot_prove": "The native PuTTY SFTP transport does not exist on Windows, so SFTP here means curl; there is no POSIX server for it to see how permissions, symlinks or path semantics behave against one, and no Windows box in this project's CI has a live server to compare against."
+    "cannot_prove": "No live transfer of any kind. The native PuTTY SFTP transport is not built for Windows, and the curl.exe that ships with Windows 10 and 11 has no SFTP or SCP support, so there is no way for the Windows job to open an SFTP session against the test server; a curl built with libssh2 would change that. What that leaves unproven: the transport itself, permissions and timestamps on uploads, a POSIX server's path semantics, and every extension whose answer only a server can give."
    }
   }
  },
@@ -223,8 +222,7 @@
      "live-sftp"
     ],
     "windows": [
-     "script",
-     "live-sftp"
+     "script"
     ]
    }
   },
@@ -319,8 +317,7 @@
      "manual"
     ],
     "windows": [
-     "unit",
-     "live-sftp"
+     "unit"
     ]
    }
   },
@@ -381,9 +378,6 @@
    "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account or encrypted credential store.",
    "verified_on": {
     "linux": [
-     "live-sftp"
-    ],
-    "windows": [
      "live-sftp"
     ]
    }

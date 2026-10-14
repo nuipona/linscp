@@ -12,9 +12,11 @@ skips, loudly, rather than pretending to pass.
 
 What cannot be done from another platform says so per test instead of taking
 the whole suite with it, because a run that silently does less is worth more
-than one that does nothing: on Windows the SFTP server and the client both
-work, but SIGINT and read-only directories do not, and a curl-backed transfer
-has no way to set the timestamp of an upload.
+than one that does nothing. The suite as a whole is POSIX, for a reason worth
+knowing: on Windows the client speaks SFTP through curl, and the curl.exe
+built into Windows has no SFTP or SCP support, so there is no session for
+these tests to open - not a slow test, an impossible one. A Windows install
+that puts a curl built with libssh2 on PATH gets these tests back.
 """
 import hashlib
 import importlib.util
@@ -66,6 +68,12 @@ class LiveSftpTests(unittest.TestCase):
             raise unittest.SkipTest(
                 "paramiko is not installed; the live SFTP tests are skipped. "
                 "Install it with 'pip install paramiko' to run them.")
+        if os.name != "posix":
+            raise unittest.SkipTest(
+                "SFTP on Windows goes through curl, and the curl.exe built "
+                "into Windows has no SFTP support: there is no session for "
+                "these tests to open. Put a curl built with libssh2 on PATH "
+                "and this restriction goes away.")
         cls.workdir = tempfile.TemporaryDirectory(prefix="linuxscp-live-")
         cls.root = pathlib.Path(cls.workdir.name) / "jail"
         cls.root.mkdir()

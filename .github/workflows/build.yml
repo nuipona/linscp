@@ -145,22 +145,6 @@ jobs:
             }
             exit 1
           }
-      - name: Install the live-test dependencies
-        shell: pwsh
-        run: |
-          # The live SFTP suite brings up its own paramiko server, which is
-          # the only way this job can see a transfer rather than a usage
-          # message. Without paramiko the suite skips itself; it does not
-          # pass, and the step below fails if the suite then runs nothing.
-          $python = (Get-Command python).Source
-          & $python -m pip install --quiet paramiko
-          # A non-zero exit from pip does not stop pwsh, and a suite that
-          # silently skips is worse than a red step: say so here.
-          & $python -c "import paramiko, sys; print('paramiko', paramiko.__version__, 'on', sys.executable)"
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::paramiko is not importable from $python"
-            exit 1
-          }
       - name: Unit tests
         shell: pwsh
         run: |
@@ -178,12 +162,6 @@ jobs:
           $evidence = $output -split "`r?`n" |
             Where-Object { $_ -match 'evidence: |checks passed' } |
             ForEach-Object { ($_ -replace '^\s*\d+: ', '').Trim() }
-          $live = $evidence | Where-Object { $_ -like '*suite=live-sftp*' }
-          if (-not ($live -match 'ran=[1-9]')) {
-            # The live suite is why this job has any transfer evidence at all.
-            Write-Host "::error::the live SFTP suite ran no tests: $live"
-            exit 1
-          }
           if (-not $evidence) {
             # A run that cannot say what it executed has not established
             # anything, so it does not get to be green.

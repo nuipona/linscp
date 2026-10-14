@@ -49,7 +49,7 @@ build on any of them:
 * A platform record without a `how`, a dated `date` and described suites is an
   error, because evidence nobody can reproduce is not evidence.
 
-As it stands: 21 entries have evidence recorded on Linux, 14 on Windows, and
+As it stands: 21 entries have evidence recorded on Linux, 13 on Windows, and
 **0 are `verified`**. The gap is not timidity - Windows has no way to test the
 native PuTTY transport, permissions on uploads, or a POSIX server's path
 semantics, and the ledger says so per entry instead of rounding the whole
@@ -75,7 +75,7 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 | FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
 | WebDAV | HTTP operations exist, but listing does not implement DAV PROPFIND/XML properties. Not a complete WebDAV filesystem. |
 | S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
-| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py` (the resume and open cases run on Windows too, through curl). Missing: transfer presets, the `.filepart` temporary-name policy and atomic temporary-file policies in general. |
+| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. That suite cannot run on Windows at all, because the `curl.exe` built into Windows has no SFTP support, so nothing about a Windows transfer is verified (`docs/windows.md`). Missing: transfer presets, the `.filepart` temporary-name policy and atomic temporary-file policies in general. |
 | Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror` and ASCII conversion verified against a live server. Missing: path exclusions and a real watch mode: `keepuptodate` still repeats a full comparison on a timer. |
 | Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
 | Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
@@ -169,11 +169,13 @@ make -C source/linux check-live          # ScriptTest.py + LiveSftpTest.py
 python3 tools/check_upstream_parity.py   # the inventory and its evidence rules
 ```
 
-On Windows the same three run through CTest (`ctest --test-dir build -C
-Release` after `cmake --build build --config Release`); the live suite needs
-`python -m pip install paramiko`, and its POSIX-only cases skip themselves with
-the reason in the skip message rather than taking the whole suite down with
-them.
+On Windows the first two run through CTest (`ctest --test-dir build -C
+Release` after `cmake --build build --config Release`), and that is where the
+Windows evidence in the ledger comes from. The live suite runs there too but
+skips every case, because the `curl.exe` built into Windows has no SFTP
+support: there is no session for it to open, which is a limitation of the
+platform rather than of the test. It says so in its evidence line, and the
+skip is what the CI's evidence annotations show.
 
 The inventory check compares three things: every documented command has a
 dispatcher entry, every dispatched command is in the abbreviation table

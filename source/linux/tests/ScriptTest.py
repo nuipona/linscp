@@ -466,10 +466,16 @@ class ScriptTests(unittest.TestCase):
 
         The curl-backed protocols have no connection of their own - every
         command runs its own transfer - so a dead port would otherwise be
-        reported as a successful open and each command would fail on its
-        own. Both engines are checked: 'sftp' goes through PuTTY where that
-        exists and through curl on Windows, 'scp' always through curl.
+        reported as a successful open and each command would fail on its own.
+        Only the native engine is checked, because on Windows curl refuses
+        'sftp' and 'scp' before it ever reaches the port (the curl.exe built
+        into Windows has neither protocol), so a failure there would prove
+        nothing about reachability. The classification of an endpoint that
+        does answer is covered for both platforms by
+        test_open_accepts_a_server_that_refuses_the_start_directory.
         """
+        if os.name != "posix":
+            self.skipTest("no SFTP-capable curl on this platform to test with")
         for protocol in ("sftp", "scp"):
             with self.subTest(protocol=protocol):
                 result = self.run_commands(

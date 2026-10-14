@@ -102,6 +102,14 @@ Linux. The command surface is identical (`open`, `cd`, `ls`, `get`,
 `-resume`, `-preservetime`, ...). The differences that follow from the
 backend are:
 
+* **The in-box `curl.exe` cannot speak SFTP at all.** The build in
+  `%SystemRoot%\System32` has no SSH support in it, so `sftp://` and
+  `scp://` are *unsupported protocols* there rather than unreachable
+  servers. `open` reports that and fails; it does not start a session that
+  cannot transfer anything. Check with `curl --version` - a usable build
+  lists `SSH` among its features - and put that curl earlier on `PATH` if
+  you have one. Everything below assumes such a build.
+
 * **Host keys.** curl/libssh2 verifies against the OpenSSH
   `known_hosts` file (`%USERPROFILE%\.ssh\known_hosts`) — the same
   trust store as the Windows OpenSSH client. `-hostkey=*` skips

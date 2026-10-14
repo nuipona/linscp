@@ -25,7 +25,7 @@ SSH library is required for native POSIX SFTP.
 On Windows: Windows 10 (1803) or later with CMake and Visual Studio
 2022 or MinGW-w64. The resulting `linuxscp.exe` needs a protocol-capable
 `curl.exe` at run time (plus Python 3 for the GUI). The in-box curl build
-may not provide SSH protocols. See
+has no SFTP or SCP support, so `open sftp://` reports that instead of starting a session that cannot transfer; a `curl.exe` whose `curl --version` output lists `SSH` is what makes SFTP usable there. See
 [`docs/windows.md`](docs/windows.md).
 
 ## Building
