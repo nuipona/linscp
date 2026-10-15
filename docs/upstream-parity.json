@@ -33,7 +33,7 @@
      "unit": "linuxscp-unittest.exe, the same C++ checks, built and run by the MSVC and MinGW jobs.",
      "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, the upstream-shaped console outputs (help's two columns, lls columns, no-match sentences, exit/quit/end and the lcd/lpwd/session-offline refusals), which is where a Windows path or separator difference shows. The same suite carries the transfer-preset checks on Windows: savepreset/option preset/rmspreset, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. It also carries the synchronization criteria (every word and list '-criteria=' takes, and the refusals) and the raw proxy settings of 'open' and 'savesession', neither of which needs a server: each upstream proxy name applied, an unknown or incomplete one refused, a proxy the curl transport cannot use refused, and the password masked.",
      "live-dav": "LiveDavTest.py against TestDavServer.py, the same throwaway WebDAV endpoint the Linux job runs: the suite checks PROPFIND listings, stat, mkdir/rmdir/rename/remove, upload/download, session/close output, aliases, and transfer presets. It also asserts single-file cp uses the server's COPY method (rather than GET/PUT streaming), with exact readback and the source preserved, plus a 405 refusal that verifies the streamed fallback. Portable keepuptodate tests assert local-to-remote direction and exercise the native recursive notification watcher (ReadDirectoryChangesW on Windows; inotify on Linux). The Windows MSVC CI CTest run passed this suite on 2026-10-15.",
-     "gui-search": "source/gui/tests/RemoteSearchTest.py - platform-neutral backend tests for the GUI remote content-search limits and matching. CTest includes this suite; Windows evidence is not recorded for this change."
+     "gui-search": "source/gui/tests/RemoteSearchTest.py - platform-neutral backend tests for the GUI remote content-search limits and matching. The Windows MSVC CTest run passed this suite on 2026-10-15 (4 tests)."
     },
     "cannot_prove": "No SFTP or S3 session of any kind. The native PuTTY SFTP transport is not built for Windows, and the curl.exe that ships with Windows 10 and 11 has no SFTP or SCP support, so the Windows job cannot open an SFTP session against the test server; a curl built with libssh2 would change that, and the live S3 suite skips for the want of a listener there. WebDAV, which Windows curl does speak, is run live instead and is cited wherever a connection-level behaviour needs Windows evidence. What stays unproven on Windows: the SFTP transport itself, S3, permissions and timestamps on SFTP uploads, a POSIX server's path semantics, and every extension whose answer only an SFTP server can give (ln, chmod, checksum and friends)."
    }
@@ -632,6 +632,9 @@
    "verified_on": {
     "linux": [
      "gui",
+     "gui-search"
+    ],
+    "windows": [
      "gui-search"
     ]
    }
