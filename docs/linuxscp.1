@@ -228,12 +228,49 @@ or of a command that fits several names is refused and answered with the list
 of what it could mean, because guessing would run a different command than the
 one that was typed.
 .TP
-.BI open " site"
+.BI open " site [ switches ]"
 Connect to
 .IR site ,
 which is either a URL or the name of a stored session (see
 .B STORED SESSIONS
-above).
+above). The switches are
+.BR \-hostkey= ,
+.BR \-password= ,
+.BR \-username= ,
+.BR \-privatekey= " and"
+.BR \-rawsettings ;
+they apply to a stored session exactly as they apply to a URL, so
+.I open webserver \-password=secret
+authenticates the stored site with that password without storing it.
+.IP
+.B \-rawsettings
+takes
+.I name=value
+session settings under the names upstream uses, either to the end of the
+command or, with
+.BR \-rawsettings= N,
+exactly
+.I N
+of them. This build applies the proxy settings
+.BR ProxyMethod= None|SOCKS4|SOCKS5|HTTP|Telnet|Cmd,
+.BR ProxyHost= ,
+.BR ProxyPort= ,
+.BR ProxyUsername= ,
+.BR ProxyPassword= ,
+.BR ProxyTelnetCommand= ,
+.BR ProxyLocalCommand= ,
+.BR ProxyDNS= 0|1|2
+(off, automatic, on),
+.B ProxyLocalhost=
+0|1 and
+.BR ProxyExcludeList= ,
+and refuses any other setting by name rather than accepting one it would
+drop. The native SFTP transport negotiates every method; a protocol served
+through curl uses SOCKS4, SOCKS5 and HTTP proxies and refuses a telnet or
+local-command proxy instead of connecting around it.
+.I ProxyLocalhost=1
+is needed to send a connection to localhost through a proxy, as upstream
+does not proxy it otherwise.
 .TP
 .B close
 Disconnect the open session, or the session at the 1-based
@@ -454,12 +491,20 @@ The options are
 .BR \-privatekey= ,
 .BR \-hostkey= ,
 .BR \-remotedir= ,
-.BR \-localdir= " and"
-.BR \-preset= .
+.BR \-localdir= ,
+.BR \-preset= " and"
+.BR \-rawsettings .
 .I \-preset=
 stores the transfer preset the site loads when it is opened (an empty
 value clears a stored one), so a site keeps its copy settings like the
 rest of its session data.
+.I \-rawsettings
+stores session settings with the site \- the proxy settings described
+under
+.B open
+above \- and a proxy password is encrypted under the same key file as a
+session password. A re-save that gives neither keeps the proxy the site
+was stored with.
 The password is stored only when
 .I \-password=
 is given, and a host key is stored only when

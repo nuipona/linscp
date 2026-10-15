@@ -1430,6 +1430,167 @@ void TestS3SigV4()
  * Stored sessions                                                     *
  * ------------------------------------------------------------------ */
 
+/*
+ * The proxy of a session: upstream's setting names, its method vocabulary,
+ * and the checks that stop a configuration the transport cannot honour
+ * before a connection is attempted.
+ */
+void TestProxySettings()
+{
+    /* Upstream's names - and the numbers it stores them as. */
+    const struct { const char * text; ProxyMethod method; } names[] = {
+        { "None", ProxyMethod::None },
+        { "socks4", ProxyMethod::Socks4 },
+        { "SOCKS5", ProxyMethod::Socks5 },
+        { "http", ProxyMethod::Http },
+        { "Telnet", ProxyMethod::Telnet },
+        { "Cmd", ProxyMethod::Local },
+        { "local", ProxyMethod::Local },
+        { "0", ProxyMethod::None },
+        { "1", ProxyMethod::Socks4 },
+        { "2", ProxyMethod::Socks5 },
+        { "3", ProxyMethod::Http },
+        { "4", ProxyMethod::Telnet },
+        { "5", ProxyMethod::Local }
+    };
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+    {
+        ProxyMethod parsed = ProxyMethod::None;
+        CHECK_TRUE(ParseProxyMethod(names[i].text, parsed));
+        CHECK_TRUE(parsed == names[i].method);
+    }
+    const char * invalid[] = { "", "socks9", "6", "-1", "http proxy", "None2" };
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+    {
+        ProxyMethod parsed = ProxyMethod::None;
+        CHECK_FALSE(ParseProxyMethod(invalid[i], parsed));
+    }
+    CHECK_EQ(ProxyMethodName(ProxyMethod::Socks5), "SOCKS5");
+    CHECK_EQ(ProxyMethodName(ProxyMethod::Local), "Cmd");
+    CHECK_EQ(ProxyMethodName(ProxyMethod::Http), "HTTP");
+    CHECK_TRUE(ProxyDefaultPort(ProxyMethod::Socks5) == 1080);
+    CHECK_TRUE(ProxyDefaultPort(ProxyMethod::Socks4) == 1080);
+    CHECK_TRUE(ProxyDefaultPort(ProxyMethod::Http) == 80);
+    CHECK_TRUE(ProxyDefaultPort(ProxyMethod::Telnet) == 23);
+
+    /* The port actually used, and who resolves the destination name: the
+     * rule PuTTY applies, where SOCKS4 is the one method that cannot take
+     * a name. */
+    ProxySettings proxy;
+    CHECK_FALSE(proxy.Active());
+    CHECK_TRUE(proxy.dns == 1);
+    proxy.method = ProxyMethod::Socks5;
+    CHECK_TRUE(proxy.Active());
+    CHECK_TRUE(proxy.EffectivePort() == 1080);
+    proxy.port = 3128;
+    CHECK_TRUE(proxy.EffectivePort() == 3128);
+    CHECK_TRUE(proxy.ResolvesRemotely());
+    proxy.method = ProxyMethod::Socks4;
+    CHECK_FALSE(proxy.ResolvesRemotely());
+    proxy.dns = 2;
+    CHECK_TRUE(proxy.ResolvesRemotely());
+    proxy.dns = 0;
+    CHECK_FALSE(proxy.ResolvesRemotely());
+
+    /* The raw settings, under upstream's names and case-insensitively. */
+    ProxySettings settings;
+    std::string error;
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyMethod", "socks5", settings, error));
+    CHECK_TRUE(settings.method == ProxyMethod::Socks5);
+    CHECK_TRUE(ApplyProxyRawSetting("proxyhost", " proxy.example.com ",
+        settings, error));
+    CHECK_EQ(settings.host, "proxy.example.com");
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyPort", "3128", settings, error));
+    CHECK_TRUE(settings.port == 3128);
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyUsername", "proxyuser", settings,
+        error));
+    CHECK_EQ(settings.userName, "proxyuser");
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyDNS", "on", settings, error));
+    CHECK_TRUE(settings.dns == 2);
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyLocalhost", "1", settings, error));
+    CHECK_TRUE(settings.evenLocalhost);
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyExcludeList", ".local internal",
+        settings, error));
+    CHECK_EQ(settings.excludeList, ".local internal");
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyLocalCommand", "nc %host %port",
+        settings, error));
+    CHECK_EQ(settings.command, "nc %host %port");
+
+    /* A password keeps the spaces inside it. */
+    ProxySettings spaces;
+    CHECK_TRUE(ApplyProxyRawSetting("ProxyPassword", " keep  me ", spaces,
+        error));
+    CHECK_EQ(spaces.password, "keep  me");
+
+    /* A setting this build does not apply is refused by name, together
+     * with the names it does apply: accepting it would be a session that
+     * silently ignores part of its own configuration. */
+    CHECK_FALSE(ApplyProxyRawSetting("SFTPDownloadQueue", "4", settings,
+        error));
+    CHECK_TRUE(error.find("SFTPDownloadQueue") != std::string::npos);
+    CHECK_TRUE(error.find("ProxyMethod") != std::string::npos);
+
+    /* A value that does not parse is refused with the value named. */
+    const char * badValues[] = { "ProxyMethod=carrier-pigeon",
+        "ProxyPort=70000", "ProxyPort=0", "ProxyDNS=sometimes",
+        "ProxyLocalhost=maybe" };
+    for (size_t i = 0; i < sizeof(badValues) / sizeof(badValues[0]); i++)
+    {
+        const std::string setting = badValues[i];
+        const size_t equals = setting.find('=');
+        ProxySettings rejected;
+        CHECK_FALSE(ApplyProxyRawSetting(setting.substr(0, equals),
+            setting.substr(equals + 1), rejected, error));
+        CHECK_TRUE(error.find(setting.substr(equals + 1)) != std::string::npos);
+    }
+
+    /* An incomplete configuration is refused before a connection. */
+    std::string why;
+    ProxySettings none;
+    CHECK_TRUE(ValidateProxySettings(none, why));
+    ProxySettings incomplete;
+    incomplete.method = ProxyMethod::Socks5;
+    CHECK_FALSE(ValidateProxySettings(incomplete, why));
+    CHECK_TRUE(why.find("ProxyHost") != std::string::npos);
+    incomplete.host = "proxy.example.com";
+    CHECK_TRUE(ValidateProxySettings(incomplete, why));
+    ProxySettings telnet;
+    telnet.method = ProxyMethod::Telnet;
+    telnet.host = "proxy.example.com";
+    CHECK_FALSE(ValidateProxySettings(telnet, why));
+    CHECK_TRUE(why.find("ProxyTelnetCommand") != std::string::npos);
+    telnet.command = "connect %host %port\\n";
+    CHECK_TRUE(ValidateProxySettings(telnet, why));
+    ProxySettings local;
+    local.method = ProxyMethod::Local;
+    CHECK_FALSE(ValidateProxySettings(local, why));
+    local.command = "nc %host %port";
+    CHECK_TRUE(ValidateProxySettings(local, why));
+
+    /* curl speaks SOCKS and HTTP; a telnet or local command proxy has no
+     * curl option, and the refusal names the reason instead of connecting
+     * around the proxy the session asked for. */
+    ProxySettings socks;
+    socks.method = ProxyMethod::Socks5;
+    socks.host = "proxy.example.com";
+    CHECK_TRUE(ProxyUsableByCurl(socks, why));
+    ProxySettings http;
+    http.method = ProxyMethod::Http;
+    http.host = "proxy.example.com";
+    CHECK_TRUE(ProxyUsableByCurl(http, why));
+    CHECK_FALSE(ProxyUsableByCurl(telnet, why));
+    CHECK_TRUE(why.find("curl") != std::string::npos);
+    CHECK_FALSE(ProxyUsableByCurl(local, why));
+    CHECK_TRUE(ProxyUsableByCurl(none, why));
+
+    /* The settings a session carries reach the options of a connection. */
+    SessionOptions options;
+    CHECK_FALSE(options.proxy.Active());
+    options.proxy = socks;
+    CHECK_TRUE(options.proxy.Active());
+    CHECK_TRUE(options.proxy == socks);
+}
+
 void TestSessionStore()
 {
     const std::string temporary = MakeTempDirectory();
@@ -1716,6 +1877,120 @@ void TestSessionStore()
         CHECK_EQ(again != NULL ? again->password : std::string("missing"),
             "hunter2-plain");
     }
+
+    /*
+     * A stored proxy round-trips with the site: its settings under the keys
+     * the graphical client reads too, and its password encrypted like a
+     * session password rather than written in the clear.
+     */
+    {
+        const std::string proxiedIni = temporary + "/proxied/sessions.ini";
+        const std::string proxiedKey = temporary + "/proxied/sessions.key";
+        {
+            SessionStore store(proxiedIni);
+            StoredSession session;
+            session.name = "behind-a-proxy";
+            session.protocol = "sftp";
+            session.hostName = "files.example.com";
+            session.proxy.method = ProxyMethod::Socks5;
+            session.proxy.host = "proxy.example.com";
+            session.proxy.port = 1080;
+            session.proxy.userName = "proxyuser";
+            session.proxy.password = "proxy-secret";
+            session.proxy.dns = 2;
+            session.proxy.evenLocalhost = true;
+            session.proxy.excludeList = ".local internal";
+            std::string error;
+            CHECK_TRUE(store.AddOrUpdate(session, error));
+            CHECK_TRUE(store.Save(error));
+        }
+
+        FILE * file = fopen(proxiedIni.c_str(), "rb");
+        CHECK_TRUE(file != NULL);
+        std::string content;
+        if (file != NULL)
+        {
+            char buffer[4096];
+            size_t got;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                content.append(buffer, got);
+            }
+            fclose(file);
+        }
+        CHECK_TRUE(content.find("proxy-secret") == std::string::npos);
+        CHECK_TRUE(content.find("proxy_method=SOCKS5") != std::string::npos);
+        CHECK_TRUE(content.find("proxy_host=proxy.example.com") !=
+            std::string::npos);
+        CHECK_TRUE(content.find("proxy_password=lscp1$") != std::string::npos);
+        CHECK_TRUE(std::filesystem::exists(proxiedKey));
+
+        SessionStore reread(proxiedIni);
+        const StoredSession * found = reread.Find("behind-a-proxy");
+        CHECK_TRUE(found != NULL);
+        CHECK_TRUE(found != NULL && found->proxy.method == ProxyMethod::Socks5);
+        CHECK_EQ(found != NULL ? found->proxy.host : std::string("missing"),
+            "proxy.example.com");
+        CHECK_TRUE(found != NULL && found->proxy.port == 1080);
+        CHECK_TRUE(found != NULL && found->proxy.dns == 2);
+        CHECK_TRUE(found != NULL && found->proxy.evenLocalhost);
+        CHECK_EQ(found != NULL ? found->proxy.excludeList : std::string(),
+            ".local internal");
+        CHECK_EQ(found != NULL ? found->proxy.password : std::string("missing"),
+            "proxy-secret");
+        CHECK_TRUE(found != NULL && found->proxyError.empty());
+
+        /* The options of a connection carry the proxy of the site. */
+        SessionOptions defaults;
+        SessionOptions options =
+            SessionStore::ToSessionOptions(*found, defaults);
+        CHECK_TRUE(options.proxy.Active());
+        CHECK_TRUE(options.proxy.method == ProxyMethod::Socks5);
+        CHECK_EQ(options.proxy.password, "proxy-secret");
+
+        /* A site without a proxy stores no proxy keys at all. */
+        StoredSession direct = *found;
+        direct.name = "direct";
+        direct.proxy = ProxySettings();
+        std::string error;
+        CHECK_TRUE(reread.AddOrUpdate(direct, error));
+        CHECK_TRUE(reread.Save(error));
+        file = fopen(proxiedIni.c_str(), "rb");
+        content.clear();
+        if (file != NULL)
+        {
+            char buffer[8192];
+            size_t got;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                content.append(buffer, got);
+            }
+            fclose(file);
+        }
+        const size_t directSection = content.find("[direct]");
+        CHECK_TRUE(directSection != std::string::npos);
+        CHECK_TRUE(directSection != std::string::npos &&
+            content.find("proxy_method", directSection) == std::string::npos);
+
+        /* Without the key file the proxy password stays locked: the
+         * ciphertext survives a save and the reason is reported, because a
+         * site must not be opened around the proxy it was stored with. */
+        CHECK_TRUE(remove(proxiedKey.c_str()) == 0);
+        SessionStore withoutKey(proxiedIni);
+        const StoredSession * locked = withoutKey.Find("behind-a-proxy");
+        CHECK_TRUE(locked != NULL);
+        CHECK_TRUE(locked != NULL && locked->proxy.password.empty());
+        CHECK_TRUE(locked != NULL && !locked->proxyError.empty());
+        const std::string blob = locked != NULL ?
+            locked->proxyPasswordRaw : std::string();
+        CHECK_TRUE(blob.compare(0, 6, "lscp1$") == 0);
+        CHECK_TRUE(withoutKey.Save(error));
+        SessionStore afterSave(proxiedIni);
+        const StoredSession * stillLocked = afterSave.Find("behind-a-proxy");
+        CHECK_TRUE(stillLocked != NULL &&
+            stillLocked->proxyPasswordRaw == blob);
+    }
+
 
     /* Names are validated. */
     CHECK_FALSE(SessionStore::IsValidName(""));
@@ -2168,6 +2443,7 @@ int main()
     TestSyncPlannerConflictsAndState();
     TestSyncPlanOrder();
     TestSyncStateFile();
+    TestProxySettings();
     TestSessionStore();
     TestS3SigV4();
     TestEditorHelpers();

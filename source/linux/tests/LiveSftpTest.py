@@ -89,10 +89,13 @@ class LiveSftpTests(unittest.TestCase):
         cls.addClassCleanup(cls.workdir.cleanup)
 
     def setUp(self):
+        self.proxies = []
         self.start_server()
 
     def tearDown(self):
         self.stop_server()
+        while self.proxies:
+            self.stop_proxy(*self.proxies.pop())
 
     # -- the server ---------------------------------------------------------
     def start_server(self):
@@ -137,13 +140,73 @@ class LiveSftpTests(unittest.TestCase):
         self.server = None
         self.port = None
 
+    # -- the proxy ----------------------------------------------------------
+    def start_proxy(self, kind="socks5", credentials=""):
+        """Start TestProxyServer.py and collect what it reports.
+
+        The proxy prints one line per request, which is the only way to tell
+        a session that went through it from one that quietly went around it:
+        a successful transfer proves nothing about the path it took.
+        """
+        env = dict(os.environ, LSCP_TEST_PORT="0", LSCP_TEST_PROXY_KIND=kind,
+                   LSCP_TEST_PROXY_AUTH=credentials)
+        popen_args = dict(env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True)
+        if os.name == "posix":
+            popen_args["start_new_session"] = True
+        proxy = subprocess.Popen(
+            [sys.executable, str(HERE / "TestProxyServer.py")], **popen_args)
+        lines = []
+        port = []
+        ready = threading.Event()
+
+        def collect():
+            for line in proxy.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                lines.append(line)
+                if line.startswith("READY ") and not port:
+                    port.append(int(line.split()[1]))
+                    ready.set()
+
+        reader = threading.Thread(target=collect, daemon=True)
+        reader.start()
+        if not ready.wait(30.0):
+            self.stop_proxy(proxy, reader)
+            self.fail("the test proxy did not start")
+        self.proxies.append((proxy, reader))
+        return port[0], lines
+
+    def stop_proxy(self, proxy, reader):
+        if proxy.poll() is None:
+            if os.name == "posix":
+                try:
+                    os.killpg(os.getpgid(proxy.pid), signal.SIGTERM)
+                except (OSError, ProcessLookupError):
+                    proxy.terminate()
+            else:
+                proxy.terminate()
+            try:
+                proxy.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proxy.kill()
+                proxy.wait(timeout=10)
+        if proxy.stdout is not None:
+            proxy.stdout.close()
+        reader.join(timeout=5)
+
     # -- the client ---------------------------------------------------------
-    def run_script(self, commands, extra_args=(), timeout=60):
+    def run_script(self, commands, extra_args=(), timeout=60, open_args=()):
+        """Run one script. 'extra_args' are switches of the client itself,
+        'open_args' switches of the 'open' command it starts with - the
+        difference matters, because a session setting such as a proxy belongs
+        to 'open' and not to the process."""
         argv = [BINARY, "-batch", "-hostkey=*",
                 "-log=" + str(self.config / "session.log")]
         argv += list(extra_args)
-        argv.append("-command=open sftp://%s:%s@127.0.0.1:%d/ ; %s" %
-                    (USER, PASSWORD, self.port, commands))
+        argv.append("-command=open sftp://%s:%s@127.0.0.1:%d/ %s ; %s" %
+                    (USER, PASSWORD, self.port, " ".join(open_args), commands))
         env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env)
@@ -572,6 +635,87 @@ class LiveSftpTests(unittest.TestCase):
         result = self.run_script("put -preservetime %s /up.txt" % upload)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(int((self.root / "up.txt").stat().st_mtime), when)
+
+
+    def test_a_socks5_proxy_carries_the_session(self):
+        """'-rawsettings ProxyMethod=SOCKS5 ...' has to change the path the
+        connection takes, not just be accepted: the proxy must see the
+        destination, and a transfer through it must still be byte for byte."""
+        proxy_port, proxy_lines = self.start_proxy()
+        source = self.write_in_jail("through-proxy.bin", 256 << 10)
+        digest = sha256_of(source)
+        target = self.local / "through-proxy.bin"
+        result = self.run_script(
+            "get /through-proxy.bin %s" % target,
+            open_args=["-rawsettings", "ProxyMethod=SOCKS5",
+                       "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port,
+                       # Upstream leaves a localhost destination alone
+                       # unless the session asks for it explicitly.
+                       "ProxyLocalhost=1"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sha256_of(target), digest)
+        self.assertIn("CONNECT 127.0.0.1:%d" % self.port, proxy_lines,
+                      "the session did not go through the proxy: %s" %
+                      (proxy_lines,))
+
+    def test_proxy_credentials_are_used_and_a_wrong_one_is_refused(self):
+        """A proxy that authenticates has to be given the credentials, and a
+        wrong password has to stop the session with the proxy named rather
+        than fall back to a direct connection."""
+        proxy_port, proxy_lines = self.start_proxy(
+            credentials="proxyuser:proxypass")
+        settings = ["-rawsettings", "ProxyMethod=SOCKS5",
+                    "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port,
+                    "ProxyLocalhost=1", "ProxyUsername=proxyuser"]
+
+        result = self.run_script("pwd", open_args=settings +
+                                 ["ProxyPassword=nonsense"])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        combined = result.stdout + result.stderr
+        self.assertIn("Cannot open session", combined)
+        self.assertNotIn("Connected", result.stdout)
+        self.assertTrue(any(line.startswith("REJECT") for line in proxy_lines),
+                        proxy_lines)
+
+        del proxy_lines[:]
+        result = self.run_script("pwd", open_args=settings +
+                                 ["ProxyPassword=proxypass"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("AUTH proxyuser", proxy_lines)
+        self.assertIn("CONNECT 127.0.0.1:%d" % self.port, proxy_lines)
+
+    def test_a_stored_session_keeps_its_proxy(self):
+        """'savesession -rawsettings' stores the proxy encrypted, 'open'
+        brings it back, and the stored site still goes through it - which is
+        what makes a proxy a session setting rather than a switch."""
+        proxy_port, proxy_lines = self.start_proxy()
+        store = self.config / "sessions.ini"
+        self.clean_sessions()
+        try:
+            save = subprocess.run(
+                [BINARY, "-batch",
+                 "-command=savesession proxied -host=127.0.0.1 -port=%d "
+                           "-username=%s -protocol=sftp -hostkey=* "
+                           "-password=%s -rawsettings ProxyMethod=SOCKS5 "
+                           "ProxyHost=127.0.0.1 ProxyPort=%d ProxyLocalhost=1"
+                 % (self.port, USER, PASSWORD, proxy_port)],
+                capture_output=True, text=True, timeout=60,
+                env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+            self.assertEqual(save.returncode, 0, save.stdout + save.stderr)
+            text = store.read_text()
+            self.assertIn("proxy_method=SOCKS5", text)
+            self.assertIn("proxy_port=%d" % proxy_port, text)
+            self.assertNotIn("proxypass", text)
+
+            result = subprocess.run(
+                [BINARY, "-batch", "-command=open proxied ; pwd ; exit"],
+                capture_output=True, text=True, timeout=60,
+                env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("CONNECT 127.0.0.1:%d" % self.port, proxy_lines,
+                          proxy_lines)
+        finally:
+            self.clean_sessions()
 
 
 def run_and_report():

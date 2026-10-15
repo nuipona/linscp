@@ -783,6 +783,135 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("speed", result.stderr)
 
 
+    def test_rawsettings_refuse_a_setting_this_build_would_drop(self):
+        """Upstream's '-rawsettings' names session settings. One this build
+        does not apply is refused by name - with the names it does apply -
+        before any connection is attempted, because a setting silently
+        dropped is a session that connects somewhere else than asked."""
+        result = self.run_commands(
+            "open sftp://alice@example.com/ -rawsettings SFTPUploadQueue=2 ; "
+            "echo SHOULD_NOT_RUN")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("SFTPUploadQueue", result.stderr)
+        self.assertIn("ProxyMethod", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+    def test_rawsettings_validate_their_values(self):
+        cases = {
+            "ProxyMethod=SOCKS9": "proxy method",
+            "ProxyPort=99999": "proxy port",
+            "ProxyDNS=maybe": "ProxyDNS",
+            "ProxyLocalhost=perhaps": "ProxyLocalhost",
+        }
+        for setting, expected in cases.items():
+            with self.subTest(setting=setting):
+                result = self.run_commands(
+                    "open sftp://alice@example.com/ -rawsettings %s ; "
+                    "echo SHOULD_NOT_RUN" % setting)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(expected, result.stderr)
+                self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+        # A method that needs a host has to have one: the alternative is a
+        # connection attempt that fails with a message about the network.
+        result = self.run_commands(
+            "open sftp://alice@example.com/ -rawsettings ProxyMethod=SOCKS5")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ProxyHost", result.stderr)
+
+        # '-rawsettings=N' takes exactly N parameters, the way upstream's
+        # list switches do.
+        result = self.run_commands(
+            "open sftp://alice@example.com/ -rawsettings=2 ProxyHost=proxy")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("-rawsettings=2", result.stderr)
+
+    def test_a_proxy_curl_cannot_speak_is_refused(self):
+        """The curl-backed protocols translate SOCKS4, SOCKS5 and HTTP
+        proxies into curl options. A telnet or local-command proxy has no
+        curl option, and going direct instead would send the session
+        somewhere it did not ask to go."""
+        for method in ("Telnet", "Cmd"):
+            with self.subTest(method=method):
+                result = self.run_commands(
+                    "open ftp://alice@example.com/ -rawsettings "
+                    "ProxyMethod=%s ProxyHost=proxy.example.com "
+                    "ProxyTelnetCommand=nc ; echo SHOULD_NOT_RUN" % method)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("curl", result.stderr)
+                self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+    def test_a_stored_session_keeps_its_proxy(self):
+        """'savesession -rawsettings' stores the proxy with the site, its
+        password encrypted like a session password, a re-save without the
+        switch keeps it, and 'ProxyMethod=None' clears it."""
+        result = self.run_commands(
+            "savesession proxied -host=demo.example.com -username=alice "
+            "-rawsettings ProxyMethod=SOCKS5 ProxyHost=proxy.example.com "
+            "ProxyPort=1080 ProxyUsername=proxyuser "
+            "ProxyPassword=proxy-secret")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        stored = pathlib.Path(self.config) / "sessions.ini"
+        text = stored.read_text(encoding="utf-8")
+        self.assertIn("proxy_method=SOCKS5", text)
+        self.assertIn("proxy_host=proxy.example.com", text)
+        self.assertIn("proxy_port=1080", text)
+        self.assertIn("proxy_username=proxyuser", text)
+        self.assertIn("proxy_password=lscp1$", text)
+        self.assertNotIn("proxy-secret", text)
+
+        # A re-save that says nothing about the proxy keeps it, and keeps a
+        # password value the file holds.
+        result = self.run_commands(
+            "savesession proxied -host=demo.example.com -username=alice")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = stored.read_text(encoding="utf-8")
+        self.assertIn("proxy_method=SOCKS5", text)
+        self.assertIn("proxy_password=lscp1$", text)
+
+        # The settings of a stored site are refused by name just the same.
+        result = self.run_commands(
+            "open proxied -rawsettings Nope=1 ; echo SHOULD_NOT_RUN")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Nope", result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+
+        result = self.run_commands(
+            "savesession proxied -host=demo.example.com "
+            "-rawsettings ProxyMethod=None")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = stored.read_text(encoding="utf-8")
+        self.assertNotIn("proxy_method", text)
+        self.assertNotIn("proxy_password", text)
+
+    def test_proxy_passwords_are_masked_in_logs(self):
+        """A proxy password authenticates, so it is masked wherever the
+        command is repeated: the echoed line, the session log and the XML
+        action log."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "session.log"
+            actions = pathlib.Path(tmp) / "actions.xml"
+            result = subprocess.run(
+                [BINARY, "-batch", "-log=" + str(log),
+                 "-xmllog=" + str(actions),
+                 "-command=option echo on ; open sftp://alice@example.com/ "
+                           "-rawsettings ProxyMethod=SOCKS5 "
+                           "ProxyHost=127.0.0.1 ProxyPort=1 "
+                           "ProxyPassword=proxy-secret ; exit"],
+                capture_output=True, text=True, timeout=30,
+                env=self.environment())
+            self.assertNotEqual(result.returncode, 0, result.stdout)
+            # The echoed line is masked, and so is the command the XML
+            # action log records.
+            self.assertIn("ProxyPassword=***", result.stdout)
+            for path in (log, actions):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                self.assertTrue(text.strip(), path)
+                self.assertNotIn("proxy-secret", text)
+            recorded = actions.read_text(encoding="utf-8", errors="replace")
+            self.assertIn("ProxyPassword=***", recorded)
+
+
 def run_and_report():
     """Run the suite, then print one line that says what was actually run.
 

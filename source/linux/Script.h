@@ -8,6 +8,7 @@
 #define LINUXSCP_SCRIPT_H
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "Editor.h"
@@ -30,6 +31,35 @@ namespace linuxscp {
  * upstream uses before moving the completed file into place.
  */
 enum class ResumeMode { Automatic, On, Off };
+
+/*
+ * One 'name=value' pair of upstream's '-rawsettings' switch ('open' and
+ * 'savesession'). They are collected before they are applied so that the
+ * settings a stored session already carries are the base they change.
+ */
+typedef std::pair<std::string, std::string> RawSetting;
+
+/*
+ * The switches of an 'open' command. They apply to a stored site as well
+ * as to a URL - upstream parses both through the same code, so
+ * 'open <site> -password=...' authenticates the stored site with that
+ * password - and each one is only applied when it was actually given.
+ */
+struct OpenSwitches
+{
+    bool hostKeyGiven;
+    bool passwordGiven;
+    bool userNameGiven;
+    bool privateKeyGiven;
+    std::string hostKey;
+    std::string password;
+    std::string userName;
+    std::string privateKeyFile;
+    std::vector<RawSetting> rawSettings;
+
+    OpenSwitches() : hostKeyGiven(false), passwordGiven(false),
+        userNameGiven(false), privateKeyGiven(false) {}
+};
 
 struct TransferFlags
 {
@@ -278,8 +308,11 @@ private:
     bool ListPresetsCommand(const std::vector<std::string> & args);
     bool RemoveStoredSessionEntry(const std::vector<std::string> & args);
     /* Opens a stored session by name; false when there is no such
-     * session, in which case the caller falls back to a URL. */
-    bool OpenStoredSite(const std::string & name);
+     * session, in which case the caller falls back to a URL. The
+     * switches of the 'open' command are applied on top of the settings
+     * the site was stored with, as upstream applies them. */
+    bool OpenStoredSite(const std::string & name,
+        const OpenSwitches & switches = OpenSwitches());
     bool RemoveRemote(const std::vector<std::string> & args);
     bool RemoveRemoteDirectory(const std::vector<std::string> & args);
     bool MakeRemoteDirectory(const std::vector<std::string> & args);

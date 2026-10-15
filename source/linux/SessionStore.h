@@ -68,6 +68,22 @@ struct StoredSession
     /* Transfer preset selected for this site ('savesession -preset='),
      * empty = none; 'open <name>' makes it the session's preset. */
     std::string preset;
+    /*
+     * The proxy of this site, in upstream's session-setting vocabulary
+     * ('open <name> -rawsettings ProxyMethod=SOCKS5 ProxyHost=...').
+     * Its password is stored encrypted under the same key file as the
+     * session password; a value this machine cannot decrypt stays in
+     * 'proxyPasswordRaw' - so that re-saving the site does not destroy
+     * it - with the reason in 'proxyPasswordError'.
+     */
+    ProxySettings proxy;
+    std::string proxyPasswordRaw;
+    /* Why the stored proxy cannot be used: a password this machine cannot
+     * decrypt, or a method name the file does not hold any more. Empty
+     * when the proxy is usable; 'open <name>' refuses a site that has one,
+     * because connecting without the proxy the site was stored with would
+     * send the session somewhere else than its user asked for. */
+    std::string proxyError;
 
     StoredSession() : portNumber(0), passwordStored(false), lastUsed(0) {}
 };
