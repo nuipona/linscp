@@ -412,6 +412,381 @@ SessionOptions::SessionOptions() :
 
 namespace {
 
+std::string LowerAscii(const std::string & text)
+{
+    std::string result = text;
+    for (size_t i = 0; i < result.size(); i++)
+    {
+        result[i] = static_cast<char>(
+            tolower(static_cast<unsigned char>(result[i])));
+    }
+    return result;
+}
+
+std::string TrimAscii(const std::string & text)
+{
+    const size_t start = text.find_first_not_of(" \t\r\n");
+    if (start == std::string::npos)
+    {
+        return std::string();
+    }
+    const size_t end = text.find_last_not_of(" \t\r\n");
+    return text.substr(start, end - start + 1);
+}
+
+/* The methods by their upstream names, in upstream's numeric order. */
+struct ProxyMethodEntry
+{
+    ProxyMethod method;
+    const char * name;
+    int defaultPort;
+};
+
+/* 'a, b and c', for the names a message offers. */
+std::string JoinNames(const std::vector<std::string> & names)
+{
+    std::string result;
+    for (size_t i = 0; i < names.size(); i++)
+    {
+        if (i > 0)
+        {
+            result += i + 1 == names.size() ? " and " : ", ";
+        }
+        result += names[i];
+    }
+    return result;
+}
+
+const ProxyMethodEntry kProxyMethods[] = {
+    { ProxyMethod::None,   "None",   0 },
+    { ProxyMethod::Socks4, "SOCKS4", 1080 },
+    { ProxyMethod::Socks5, "SOCKS5", 1080 },
+    { ProxyMethod::Http,   "HTTP",   80 },
+    { ProxyMethod::Telnet, "Telnet", 23 },
+    { ProxyMethod::Local,  "Cmd",    0 }
+};
+
+const size_t kProxyMethodCount =
+    sizeof(kProxyMethods) / sizeof(kProxyMethods[0]);
+
+/* 'ProxyDNS' as upstream stores it: 0 = off, 1 = automatic, 2 = on. */
+bool ParseAutoSwitch(const std::string & text, int & value)
+{
+    const std::string lower = LowerAscii(TrimAscii(text));
+    if (lower == "0" || lower == "off" || lower == "no" || lower == "false")
+    {
+        value = 0;
+    }
+    else if (lower == "1" || lower == "auto" || lower == "automatic")
+    {
+        value = 1;
+    }
+    else if (lower == "2" || lower == "on" || lower == "yes" || lower == "true")
+    {
+        value = 2;
+    }
+    else
+    {
+        return false;
+    }
+    return true;
+}
+
+bool ParseToggle(const std::string & text, bool & value)
+{
+    int parsed = 0;
+    if (!ParseAutoSwitch(text, parsed))
+    {
+        return false;
+    }
+    value = parsed != 0;
+    return true;
+}
+
+bool ParsePortValue(const std::string & text, int & port)
+{
+    const std::string trimmed = TrimAscii(text);
+    if (trimmed.empty())
+    {
+        return false;
+    }
+    unsigned int value = 0;
+    for (size_t i = 0; i < trimmed.size(); i++)
+    {
+        const unsigned char c = static_cast<unsigned char>(trimmed[i]);
+        if (c < '0' || c > '9')
+        {
+            return false;
+        }
+        const unsigned int digit = c - '0';
+        if (value > (65535U - digit) / 10U)
+        {
+            return false;
+        }
+        value = value * 10U + digit;
+    }
+    if (value == 0 || value > 65535U)
+    {
+        return false;
+    }
+    port = static_cast<int>(value);
+    return true;
+}
+
+} // namespace
+
+const char * ProxyMethodName(ProxyMethod method)
+{
+    for (size_t i = 0; i < kProxyMethodCount; i++)
+    {
+        if (kProxyMethods[i].method == method)
+        {
+            return kProxyMethods[i].name;
+        }
+    }
+    return "None";
+}
+
+int ProxyDefaultPort(ProxyMethod method)
+{
+    for (size_t i = 0; i < kProxyMethodCount; i++)
+    {
+        if (kProxyMethods[i].method == method)
+        {
+            return kProxyMethods[i].defaultPort;
+        }
+    }
+    return 0;
+}
+
+bool ParseProxyMethod(const std::string & text, ProxyMethod & method)
+{
+    const std::string lower = LowerAscii(TrimAscii(text));
+    if (lower.empty())
+    {
+        return false;
+    }
+    for (size_t i = 0; i < kProxyMethodCount; i++)
+    {
+        if (lower == LowerAscii(kProxyMethods[i].name))
+        {
+            method = kProxyMethods[i].method;
+            return true;
+        }
+    }
+    /* Upstream also stores the method as its number, and 'local' is what
+     * the local-command proxy is called outside PuTTY's own table. */
+    if (lower == "local" || lower == "command")
+    {
+        method = ProxyMethod::Local;
+        return true;
+    }
+    if (lower == "socks")
+    {
+        method = ProxyMethod::Socks5;
+        return true;
+    }
+    /* Upstream stores the method as its number as well as its name, and
+     * the numbers are the indices of the table above: 0 through 5. */
+    if (lower.size() == 1 && lower[0] >= '0' &&
+        static_cast<size_t>(lower[0] - '0') < kProxyMethodCount)
+    {
+        method = kProxyMethods[static_cast<size_t>(lower[0] - '0')].method;
+        return true;
+    }
+    return false;
+}
+
+bool ProxySettings::operator==(const ProxySettings & other) const
+{
+    return method == other.method && host == other.host && port == other.port &&
+        userName == other.userName && password == other.password &&
+        command == other.command && excludeList == other.excludeList &&
+        dns == other.dns && evenLocalhost == other.evenLocalhost;
+}
+
+std::vector<std::string> ProxyRawSettingNames()
+{
+    std::vector<std::string> names;
+    names.push_back("ProxyMethod");
+    names.push_back("ProxyHost");
+    names.push_back("ProxyPort");
+    names.push_back("ProxyUsername");
+    names.push_back("ProxyPassword");
+    names.push_back("ProxyTelnetCommand");
+    names.push_back("ProxyLocalCommand");
+    names.push_back("ProxyDNS");
+    names.push_back("ProxyLocalhost");
+    names.push_back("ProxyExcludeList");
+    return names;
+}
+
+bool IsProxyRawSettingName(const std::string & name)
+{
+    const std::string lower = LowerAscii(TrimAscii(name));
+    const std::vector<std::string> names = ProxyRawSettingNames();
+    for (size_t i = 0; i < names.size(); i++)
+    {
+        if (lower == LowerAscii(names[i]))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ApplyProxyRawSetting(const std::string & name, const std::string & value,
+    ProxySettings & proxy, std::string & error)
+{
+    error.clear();
+    const std::string lower = LowerAscii(TrimAscii(name));
+    const std::string text = TrimAscii(value);
+
+    if (lower == "proxymethod")
+    {
+        if (!ParseProxyMethod(text, proxy.method))
+        {
+            error = "Unknown proxy method '" + value + "' (use None, SOCKS4, "
+                "SOCKS5, HTTP, Telnet or Cmd).";
+            return false;
+        }
+        return true;
+    }
+    if (lower == "proxyhost")
+    {
+        proxy.host = text;
+        return true;
+    }
+    if (lower == "proxyport")
+    {
+        int port = 0;
+        if (!ParsePortValue(text, port))
+        {
+            error = "The proxy port '" + value +
+                "' is not a number between 1 and 65535.";
+            return false;
+        }
+        proxy.port = port;
+        return true;
+    }
+    if (lower == "proxyusername")
+    {
+        proxy.userName = text;
+        return true;
+    }
+    if (lower == "proxypassword")
+    {
+        /* Not trimmed beyond the ends: a password may hold spaces. */
+        size_t start = value.find_first_not_of(" \t\r\n");
+        size_t end = value.find_last_not_of(" \t\r\n");
+        proxy.password = start == std::string::npos ? std::string() :
+            value.substr(start, end - start + 1);
+        return true;
+    }
+    if (lower == "proxytelnetcommand" || lower == "proxylocalcommand")
+    {
+        /* Upstream keeps one setting for both and reads it into the local
+         * command when the method is 'Cmd'; the value is used verbatim, so
+         * a trailing '\n' stays the two characters the user wrote. */
+        proxy.command = value;
+        return true;
+    }
+    if (lower == "proxydns")
+    {
+        int dns = 1;
+        if (!ParseAutoSwitch(text, dns))
+        {
+            error = "The value of 'ProxyDNS' must be 0 (off), 1 (automatic) "
+                "or 2 (on), not '" + value + "'.";
+            return false;
+        }
+        proxy.dns = dns;
+        return true;
+    }
+    if (lower == "proxylocalhost")
+    {
+        bool toggle = false;
+        if (!ParseToggle(text, toggle))
+        {
+            error = "The value of 'ProxyLocalhost' must be 0 or 1, not '" +
+                value + "'.";
+            return false;
+        }
+        proxy.evenLocalhost = toggle;
+        return true;
+    }
+    if (lower == "proxyexcludelist")
+    {
+        proxy.excludeList = text;
+        return true;
+    }
+
+    error = "The session setting '" + name + "' is not one this build "
+        "applies (it applies " + JoinNames(ProxyRawSettingNames()) +
+        "); it would be dropped.";
+    return false;
+}
+
+bool ValidateProxySettings(const ProxySettings & proxy, std::string & error)
+{
+    error.clear();
+    if (!proxy.Active())
+    {
+        return true;
+    }
+    if (proxy.method == ProxyMethod::Local)
+    {
+        if (TrimAscii(proxy.command).empty())
+        {
+            error = "A local (Cmd) proxy needs a command: set "
+                "ProxyTelnetCommand=COMMAND with %host and %port where the "
+                "destination belongs.";
+            return false;
+        }
+        return true;
+    }
+    if (TrimAscii(proxy.host).empty())
+    {
+        error = std::string("The ") + ProxyMethodName(proxy.method) +
+            " proxy has no host: set ProxyHost=HOST.";
+        return false;
+    }
+    if (proxy.port != 0 && (proxy.port < 1 || proxy.port > 65535))
+    {
+        error = "The proxy port must be between 1 and 65535.";
+        return false;
+    }
+    if (proxy.method == ProxyMethod::Telnet && TrimAscii(proxy.command).empty())
+    {
+        error = "A telnet proxy needs its command: set "
+            "ProxyTelnetCommand=COMMAND (upstream's default is "
+            "'connect %host %port\\n').";
+        return false;
+    }
+    return true;
+}
+
+bool ProxyUsableByCurl(const ProxySettings & proxy, std::string & error)
+{
+    error.clear();
+    if (!proxy.Active())
+    {
+        return true;
+    }
+    if (proxy.method == ProxyMethod::Telnet || proxy.method == ProxyMethod::Local)
+    {
+        error = std::string("This protocol connects through curl, which cannot "
+            "run a ") +
+            (proxy.method == ProxyMethod::Telnet ? "telnet" : "local command") +
+            " proxy; use SOCKS4, SOCKS5 or HTTP, or a protocol this build "
+            "serves with its own transport.";
+        return false;
+    }
+    return true;
+}
+
+namespace {
+
 bool ParsePortNumber(const std::string & text, int & port)
 {
     if (text.empty())
@@ -919,6 +1294,15 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
 
 bool Session::Open(const SessionOptions & options, std::string & error)
 {
+    /*
+     * A proxy is checked before anything is connected: a configuration the
+     * transport cannot honour would otherwise turn into a direct connection
+     * the session never asked for.
+     */
+    if (!ValidateProxySettings(options.proxy, error))
+    {
+        return false;
+    }
     if (!UseNativeSftp(options.protocol))
     {
         /* A curl-backed session has no connection of its own; it must
@@ -927,6 +1311,10 @@ bool Session::Open(const SessionOptions & options, std::string & error)
         if (options.hostName.empty())
         {
             error = "No host name was specified.";
+            return false;
+        }
+        if (!ProxyUsableByCurl(options.proxy, error))
+        {
             return false;
         }
         /*
@@ -972,6 +1360,10 @@ bool Session::Connect(const SessionOptions & options, const char * program,
     if (options.timeoutSecs <= 0 || options.timeoutSecs > INT_MAX / 1000)
     {
         error = "The connection timeout must be a positive number of seconds.";
+        return false;
+    }
+    if (!ValidateProxySettings(options.proxy, error))
+    {
         return false;
     }
 
@@ -1030,6 +1422,42 @@ bool Session::Connect(const SessionOptions & options, const char * program,
     conf_set_int(conf, CONF_connect_timeout, mOptions.timeoutSecs * 1000);
     conf_set_bool(conf, CONF_ssh_show_banner, true);
     conf_set_int(conf, CONF_proxy_log_to_term, FORCE_OFF);
+
+    /*
+     * The proxy of the session, under the same names upstream's session
+     * settings use. PuTTY's core does the negotiation (SOCKS 4 and 5, HTTP
+     * CONNECT, a telnet command or a local command), so this is only a
+     * translation of the settings into the core's configuration.
+     */
+    if (mOptions.proxy.Active())
+    {
+        const ProxySettings & proxy = mOptions.proxy;
+        int type = PROXY_NONE;
+        switch (proxy.method)
+        {
+        case ProxyMethod::Socks4: type = PROXY_SOCKS4; break;
+        case ProxyMethod::Socks5: type = PROXY_SOCKS5; break;
+        case ProxyMethod::Http:   type = PROXY_HTTP;   break;
+        case ProxyMethod::Telnet: type = PROXY_TELNET; break;
+        case ProxyMethod::Local:  type = PROXY_CMD;    break;
+        default:                  type = PROXY_NONE;   break;
+        }
+        conf_set_int(conf, CONF_proxy_type, type);
+        conf_set_str(conf, CONF_proxy_host, proxy.host.c_str());
+        conf_set_int(conf, CONF_proxy_port, proxy.EffectivePort());
+        conf_set_str(conf, CONF_proxy_username, proxy.userName.c_str());
+        conf_set_str(conf, CONF_proxy_password, proxy.password.c_str());
+        conf_set_str(conf, CONF_proxy_telnet_command, proxy.command.c_str());
+        conf_set_str(conf, CONF_proxy_exclude_list, proxy.excludeList.c_str());
+        conf_set_int(conf, CONF_proxy_dns,
+            proxy.dns == 0 ? FORCE_OFF : proxy.dns == 2 ? FORCE_ON : AUTO);
+        conf_set_bool(conf, CONF_even_proxy_localhost, proxy.evenLocalhost);
+
+        Console::Instance().LogEvent(std::string("Connecting through the ") +
+            ProxyMethodName(proxy.method) + " proxy " +
+            (proxy.method == ProxyMethod::Local ?
+                proxy.command : proxy.host + ":" + std::to_string(proxy.EffectivePort())));
+    }
 
     mLogCtx = log_init(static_cast<LogPolicy *>(mLogPolicy), conf);
 

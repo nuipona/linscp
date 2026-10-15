@@ -145,11 +145,41 @@ std::string ValueOf(const StoredSession & session, const std::string & key,
     if (key == "local_directory") { return session.localDirectory; }
     if (key == "preset") { return session.preset; }
     /* 'password' never comes through here: Save computes its encrypted
-     * value before the file is opened (see the loop that writes). */
+     * value before the file is opened (see the loop that writes). The
+     * proxy password is written the same way, as 'proxy_password'. */
     if (key == "port")
     {
         *isNumber = true;
         return session.portNumber > 0 ? std::to_string(session.portNumber) : std::string();
+    }
+    /* The proxy keys are only written for a site that has a proxy at
+     * all, so that a direct connection stores no proxy section. */
+    if (session.proxy.Active())
+    {
+        if (key == "proxy_method")
+        {
+            return ProxyMethodName(session.proxy.method);
+        }
+        if (key == "proxy_host") { return session.proxy.host; }
+        if (key == "proxy_username") { return session.proxy.userName; }
+        if (key == "proxy_command") { return session.proxy.command; }
+        if (key == "proxy_exclude") { return session.proxy.excludeList; }
+        if (key == "proxy_port")
+        {
+            *isNumber = true;
+            return session.proxy.port > 0 ?
+                std::to_string(session.proxy.port) : std::string();
+        }
+        if (key == "proxy_dns")
+        {
+            *isNumber = true;
+            return std::to_string(session.proxy.dns);
+        }
+        if (key == "proxy_localhost")
+        {
+            *isNumber = true;
+            return std::string(session.proxy.evenLocalhost ? "1" : "0");
+        }
     }
     if (key == "last_used")
     {
@@ -836,6 +866,106 @@ bool SessionStore::Load(std::string & error)
         {
             current.preset = value;
         }
+        else if (key == "proxy_method")
+        {
+            ProxyMethod method = ProxyMethod::None;
+            if (ParseProxyMethod(value, method))
+            {
+                current.proxy.method = method;
+            }
+            else if (current.proxyError.empty())
+            {
+                current.proxyError = "the stored proxy method '" + value +
+                    "' is not one this build knows";
+            }
+        }
+        else if (key == "proxy_host") { current.proxy.host = value; }
+        else if (key == "proxy_username") { current.proxy.userName = value; }
+        else if (key == "proxy_command") { current.proxy.command = value; }
+        else if (key == "proxy_exclude") { current.proxy.excludeList = value; }
+        else if (key == "proxy_port")
+        {
+            const int port = atoi(value.c_str());
+            if (port > 0 && port <= 65535)
+            {
+                current.proxy.port = port;
+            }
+        }
+        else if (key == "proxy_dns")
+        {
+            const int dns = atoi(value.c_str());
+            if (dns >= 0 && dns <= 2)
+            {
+                current.proxy.dns = dns;
+            }
+        }
+        else if (key == "proxy_localhost")
+        {
+            current.proxy.evenLocalhost = value == "1" || Lower(value) == "on" ||
+                Lower(value) == "true";
+        }
+        else if (key == "proxy_password")
+        {
+            if (!StartsWith(value, kPasswordPrefix))
+            {
+                /* A plaintext value from a hand-edited file is used as it
+                 * stands and rewritten encrypted on the next save, exactly
+                 * like the session password. */
+                current.proxy.password = value;
+            }
+            else
+            {
+                current.proxyPasswordRaw = value;
+                if (!keyTried)
+                {
+                    keyTried = true;
+                    const KeyReadResult read =
+                        ReadKeyFile(mKeyPath, keyBytes, keyError);
+                    keyOk = read == KeyReadOk;
+                    if (read == KeyReadInvalid)
+                    {
+                        /* keyError explains the file itself. */
+                    }
+                    else if (read == KeyReadMissing)
+                    {
+                        keyError = "the encryption key file '" + mKeyPath +
+                            "' does not exist (it is created when the first "
+                            "password is stored); restore it from a copy or "
+                            "store the proxy password again";
+                    }
+                }
+                std::string proxyPassword;
+                std::string decryptError;
+                if (!keyOk)
+                {
+                    if (current.proxyError.empty())
+                    {
+                        current.proxyError = keyError;
+                    }
+                }
+                else if (!DecryptPassword(value, keyBytes, proxyPassword,
+                             decryptError))
+                {
+                    if (current.proxyError.empty())
+                    {
+                        current.proxyError = decryptError;
+                    }
+                }
+                else if (proxyPassword.empty())
+                {
+                    if (current.proxyError.empty())
+                    {
+                        current.proxyError =
+                            "the stored proxy password in the file is empty";
+                    }
+                }
+                else
+                {
+                    current.proxy.password = proxyPassword;
+                    current.proxyPasswordRaw.clear();
+                }
+            }
+        }
         else if (key == "password")
         {
             if (StartsWith(value, kPasswordPrefix))
@@ -944,6 +1074,11 @@ bool SessionStore::Save(std::string & error) const
 
     std::vector<std::string> passwordValues(sorted.size());
     std::vector<bool> hasPasswordValue(sorted.size(), false);
+    /* The proxy password is a password too: it is encrypted under the same
+     * key file, and a ciphertext this machine cannot read is written back
+     * unchanged rather than dropped. */
+    std::vector<std::string> proxyPasswordValues(sorted.size());
+    std::vector<bool> hasProxyPasswordValue(sorted.size(), false);
     bool anyPassword = false;
     for (size_t i = 0; i < sorted.size(); i++)
     {
@@ -975,6 +1110,35 @@ bool SessionStore::Save(std::string & error) const
             hasPasswordValue[i] = true;
             anyPassword = true;
         }
+
+        if (!sorted[i].proxy.password.empty())
+        {
+            std::string key;
+            if (!LoadOrCreateKeyFile(mKeyPath, key, error))
+            {
+                return false;
+            }
+            std::string encoded;
+            const bool ok = EncryptPassword(sorted[i].proxy.password, key,
+                encoded, error);
+            BurnKey(
+                reinterpret_cast<unsigned char *>(&key[0]), key.size());
+            if (!ok)
+            {
+                error = "Cannot encrypt the stored proxy password of '" +
+                    sorted[i].name + "': " + error;
+                return false;
+            }
+            proxyPasswordValues[i] = encoded;
+            hasProxyPasswordValue[i] = true;
+            anyPassword = true;
+        }
+        else if (!sorted[i].proxyPasswordRaw.empty())
+        {
+            proxyPasswordValues[i] = sorted[i].proxyPasswordRaw;
+            hasProxyPasswordValue[i] = true;
+            anyPassword = true;
+        }
     }
 
     FILE * file = fopen(mPath.c_str(), "wb");
@@ -992,7 +1156,9 @@ bool SessionStore::Save(std::string & error) const
         static const char * const keys[] = {
             "protocol", "host", "port", "username", "private_key", "hostkey",
             "remote_directory", "local_directory", "password", "last_used",
-            "preset"
+            "preset", "proxy_method", "proxy_host", "proxy_port",
+            "proxy_username", "proxy_password", "proxy_command",
+            "proxy_exclude", "proxy_dns", "proxy_localhost"
         };
         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
         {
@@ -1005,6 +1171,18 @@ bool SessionStore::Save(std::string & error) const
                     continue;
                 }
                 value = passwordValues[i];
+            }
+            else if (strcmp(keys[k], "proxy_password") == 0)
+            {
+                /* A site that no longer has a proxy stores no credential
+                 * for one: 'ProxyMethod=None' has to take the encrypted
+                 * value with it, not leave a secret behind that nothing
+                 * uses. */
+                if (!hasProxyPasswordValue[i] || !sorted[i].proxy.Active())
+                {
+                    continue;
+                }
+                value = proxyPasswordValues[i];
             }
             else
             {
@@ -1104,6 +1282,13 @@ SessionOptions SessionStore::ToSessionOptions(const StoredSession & session,
     {
         options.password = session.password;
     }
+    /* The proxy of the site, unless the file could not be read: a site
+     * whose proxy is unusable is refused by 'open' rather than connected
+     * around. */
+    if (session.proxy.Active())
+    {
+        options.proxy = session.proxy;
+    }
     return options;
 }
 
@@ -1121,6 +1306,7 @@ StoredSession SessionStore::FromSessionOptions(const std::string & name,
     session.hostKey = options.hostKey;
     session.remoteDirectory = remoteDirectory;
     session.localDirectory = localDirectory;
+    session.proxy = options.proxy;
     session.lastUsed = static_cast<unsigned long long>(time(NULL));
     return session;
 }

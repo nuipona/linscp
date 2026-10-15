@@ -272,6 +272,68 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
         args.push_back("--connect-timeout");
         args.push_back(std::to_string(options.timeoutSecs));
     }
+
+    /*
+     * The proxy of the session as curl's own options. Only the methods curl
+     * speaks are translated here; a telnet or local-command proxy is refused
+     * before a connection is attempted (ProxyUsableByCurl), because going
+     * direct when the session asked for a proxy would send traffic where the
+     * user did not want it.
+     */
+    if (options.proxy.Active())
+    {
+        const ProxySettings & proxy = options.proxy;
+        const char * scheme = NULL;
+        switch (proxy.method)
+        {
+        case ProxyMethod::Socks4: scheme = "socks4"; break;
+        case ProxyMethod::Socks5:
+            /* 'socks5h' leaves the name to the proxy, which is what
+             * ProxyDNS=on (and, except for SOCKS4, automatic) means. */
+            scheme = proxy.ResolvesRemotely() ? "socks5h" : "socks5";
+            break;
+        case ProxyMethod::Http:   scheme = "http";   break;
+        default: break;
+        }
+        if (scheme != NULL)
+        {
+            args.push_back("--proxy");
+            args.push_back(std::string(scheme) + "://" + proxy.host + ":" +
+                std::to_string(proxy.EffectivePort()));
+        }
+        if (!proxy.userName.empty())
+        {
+            args.push_back("--proxy-user");
+            args.push_back(proxy.userName + ":" + proxy.password);
+        }
+        if (!proxy.excludeList.empty())
+        {
+            /* PuTTY separates the entries by white space or comma, curl by
+             * comma alone. */
+            std::string list;
+            for (size_t i = 0; i < proxy.excludeList.size(); i++)
+            {
+                const char c = proxy.excludeList[i];
+                if (c == ',' || c == ';' || c == '\n' || c == '\r' ||
+                    c == ' ' || c == '\t')
+                {
+                    if (!list.empty() && list[list.size() - 1] != ',')
+                    {
+                        list += ",";
+                    }
+                }
+                else
+                {
+                    list += c;
+                }
+            }
+            if (!list.empty())
+            {
+                args.push_back("--noproxy");
+                args.push_back(list);
+            }
+        }
+    }
 }
 
 struct ListingEntry

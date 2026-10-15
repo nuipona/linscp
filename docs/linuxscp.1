@@ -228,12 +228,49 @@ or of a command that fits several names is refused and answered with the list
 of what it could mean, because guessing would run a different command than the
 one that was typed.
 .TP
-.BI open " site"
+.BI open " site [ switches ]"
 Connect to
 .IR site ,
 which is either a URL or the name of a stored session (see
 .B STORED SESSIONS
-above).
+above). The switches are
+.BR \-hostkey= ,
+.BR \-password= ,
+.BR \-username= ,
+.BR \-privatekey= " and"
+.BR \-rawsettings ;
+they apply to a stored session exactly as they apply to a URL, so
+.I open webserver \-password=secret
+authenticates the stored site with that password without storing it.
+.IP
+.B \-rawsettings
+takes
+.I name=value
+session settings under the names upstream uses, either to the end of the
+command or, with
+.BR \-rawsettings= N,
+exactly
+.I N
+of them. This build applies the proxy settings
+.BR ProxyMethod= None|SOCKS4|SOCKS5|HTTP|Telnet|Cmd,
+.BR ProxyHost= ,
+.BR ProxyPort= ,
+.BR ProxyUsername= ,
+.BR ProxyPassword= ,
+.BR ProxyTelnetCommand= ,
+.BR ProxyLocalCommand= ,
+.BR ProxyDNS= 0|1|2
+(off, automatic, on),
+.B ProxyLocalhost=
+0|1 and
+.BR ProxyExcludeList= ,
+and refuses any other setting by name rather than accepting one it would
+drop. The native SFTP transport negotiates every method; a protocol served
+through curl uses SOCKS4, SOCKS5 and HTTP proxies and refuses a telnet or
+local-command proxy instead of connecting around it.
+.I ProxyLocalhost=1
+is needed to send a connection to localhost through a proxy, as upstream
+does not proxy it otherwise.
 .TP
 .B close
 Disconnect the open session, or the session at the 1-based
@@ -361,16 +398,42 @@ synchronization. Both directories default to the current local and remote
 directories. The following switches are supported:
 .RS
 .TP
-.BI \-criteria= time|size|either|none
+.BI \-criteria= criteria
 How to decide whether a file changed. The default is
-.BR time :
-size and time are compared with a one\-second tolerance,
-.B size
-compares sizes only,
-.B either
-synchronizes when either differs, and
+.BR time ,
+which copies a file the source has newer (in
+.B \-mirror
+mode any difference in the timestamps counts). Three words name a whole set
+of criteria on their own:
+.B time
+compares the modification times,
 .B none
-copies every file.
+copies every file, and
+.B either
+\- whose synonym is
+.B both
+\- compares the modification time and the size. The three comparisons
+.BR time ,
+.B size
+and
+.B checksum
+may also be listed, separated by commas, as in
+.IR time,checksum ;
+whatever the list names is compared and nothing else.
+.B checksum
+reads the contents of the file on both sides, so it sees a change that left
+the timestamp and the size alone; the server computes the digest when it has
+a checksum extension and a downloaded copy is hashed otherwise, which the
+client says once per synchronization. A file that cannot be hashed stops the
+synchronization with the reason instead of counting as equal to the other
+side. In the
+.B both
+direction the record of the previous synchronization decides, and it records
+timestamps and sizes, so
+.B checksum
+and
+.B none
+are refused there rather than quietly ignored.
 .TP
 .BI \-filemask= masks
 Only synchronize files matching one of the masks. Separate several masks with
@@ -454,12 +517,20 @@ The options are
 .BR \-privatekey= ,
 .BR \-hostkey= ,
 .BR \-remotedir= ,
-.BR \-localdir= " and"
-.BR \-preset= .
+.BR \-localdir= ,
+.BR \-preset= " and"
+.BR \-rawsettings .
 .I \-preset=
 stores the transfer preset the site loads when it is opened (an empty
 value clears a stored one), so a site keeps its copy settings like the
 rest of its session data.
+.I \-rawsettings
+stores session settings with the site \- the proxy settings described
+under
+.B open
+above \- and a proxy password is encrypted under the same key file as a
+session password. A re-save that gives neither keeps the proxy the site
+was stored with.
 The password is stored only when
 .I \-password=
 is given, and a host key is stored only when

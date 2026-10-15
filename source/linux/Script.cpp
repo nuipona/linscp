@@ -116,29 +116,43 @@ std::string CensoredForLog(const std::string & line)
         from = colon + 4;
     }
 
-    /* '-password=value' -> '-password=***' (also quoted values). */
-    const std::string lowered = ToLower(result);
-    size_t switchAt = 0;
-    while ((switchAt = lowered.find("-password=", switchAt)) != std::string::npos)
+    /*
+     * The values that authenticate are masked wherever they appear: as the
+     * '-password=' switch and as the 'ProxyPassword=' session setting of a
+     * '-rawsettings' switch (also quoted values).
+     */
+    static const char * const secrets[] = { "-password=", "proxypassword=" };
+    for (size_t secret = 0;
+         secret < sizeof(secrets) / sizeof(secrets[0]); secret++)
     {
-        const size_t value = switchAt + strlen("-password=");
-        if (value < result.size() && result[value] == '"')
+        const std::string needle = secrets[secret];
+        /* 'result' changes length as values are masked, so the
+         * case-insensitive search restarts from the current position. */
+        std::string lowered = ToLower(result);
+        size_t switchAt = 0;
+        while ((switchAt = lowered.find(needle, switchAt)) != std::string::npos)
         {
-            const size_t quote = result.find('"', value + 1);
-            if (quote != std::string::npos)
+            const size_t value = switchAt + needle.size();
+            if (value < result.size() && result[value] == '"')
             {
-                result.replace(value + 1, quote - value - 1, "***");
-                switchAt = quote + 1;
-                continue;
+                const size_t quote = result.find('"', value + 1);
+                if (quote != std::string::npos)
+                {
+                    result.replace(value + 1, quote - value - 1, "***");
+                    lowered = ToLower(result);
+                    switchAt = quote + 1;
+                    continue;
+                }
             }
+            size_t end = result.find(' ', value);
+            if (end == std::string::npos)
+            {
+                end = result.size();
+            }
+            result.replace(value, end - value, "***");
+            lowered = ToLower(result);
+            switchAt = value + 3;
         }
-        size_t end = result.find(' ', value);
-        if (end == std::string::npos)
-        {
-            end = result.size();
-        }
-        result.replace(value, end - value, "***");
-        switchAt = value + 3;
     }
     return result;
 }
@@ -323,6 +337,109 @@ bool ParseOctalPermissions(const std::string & text, unsigned long & permissions
     }
     permissions = value;
     return true;
+}
+
+/*
+ * Reads the parameters of a '-rawsettings[=N]' switch: the 'name=value'
+ * parameters that follow it, at most N of them when the switch carries a
+ * number, which is upstream's idiom for a switch that takes a list. 'index'
+ * is the position of the switch and is advanced past the parameters it took.
+ */
+bool CollectRawSettings(const std::vector<std::string> & args, size_t & index,
+    std::vector<RawSetting> & settings, std::string & error)
+{
+    const std::string & arg = args[index];
+    int cap = -1;
+    const size_t equals = arg.find('=');
+    if (equals != std::string::npos)
+    {
+        const std::string count = arg.substr(equals + 1);
+        char * end = NULL;
+        const long parsed = count.empty() ? -1 :
+            strtol(count.c_str(), &end, 10);
+        if (end == NULL || *end != '\0' || parsed < 0 ||
+            static_cast<long>(static_cast<int>(parsed)) != parsed)
+        {
+            error = "The value of '-rawsettings' is the number of settings "
+                "that follow it, as in '-rawsettings=2'.";
+            return false;
+        }
+        cap = static_cast<int>(parsed);
+    }
+    int taken = 0;
+    while (index + 1 < args.size() && (cap < 0 || taken < cap))
+    {
+        const std::string & next = args[index + 1];
+        if (next.empty() || next[0] == '-' ||
+            next.find('=') == std::string::npos)
+        {
+            if (cap < 0)
+            {
+                break;
+            }
+            error = "'" + next + "' is not a 'name=value' session setting.";
+            return false;
+        }
+        const size_t eq = next.find('=');
+        settings.push_back(RawSetting(next.substr(0, eq), next.substr(eq + 1)));
+        index++;
+        taken++;
+    }
+    if (cap >= 0 && taken < cap)
+    {
+        error = "'-rawsettings=" + std::to_string(cap) + "' was given, but "
+            "only " + std::to_string(taken) + " setting parameter(s) follow.";
+        return false;
+    }
+    return true;
+}
+
+/*
+ * Applies collected settings to a proxy configuration. The first setting
+ * this build does not apply stops it and is named, because a session that
+ * silently ignores a proxy setting connects somewhere else than the user
+ * asked for.
+ */
+bool ApplyRawSettings(const std::vector<RawSetting> & settings,
+    ProxySettings & proxy, std::string & error)
+{
+    for (size_t i = 0; i < settings.size(); i++)
+    {
+        if (!ApplyProxyRawSetting(settings[i].first, settings[i].second,
+                proxy, error))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * The switches of 'open' onto the options of the site they open, whether
+ * that site came from a URL or from the store. Only a switch that was given
+ * changes anything, so the defaults of the command line and the settings a
+ * stored site was saved with survive.
+ */
+bool ApplyOpenSwitches(const OpenSwitches & switches, SessionOptions & options,
+    std::string & error)
+{
+    if (switches.hostKeyGiven)
+    {
+        options.hostKey = switches.hostKey;
+    }
+    if (switches.passwordGiven)
+    {
+        options.password = switches.password;
+    }
+    if (switches.userNameGiven)
+    {
+        options.userName = switches.userName;
+    }
+    if (switches.privateKeyGiven)
+    {
+        options.privateKeyFile = switches.privateKeyFile;
+    }
+    return ApplyRawSettings(switches.rawSettings, options.proxy, error);
 }
 
 } // namespace
@@ -762,23 +879,46 @@ bool Script::OpenSite(const std::vector<std::string> & args)
     options.initialDirectory.clear();
 
     std::string url;
+    /*
+     * The switches are collected before the target of 'open' is known,
+     * because they apply to a stored site exactly as they apply to a URL:
+     * a URL brings no session settings of its own, a stored site brings the
+     * ones it was saved with, and the command's switches change either.
+     */
+    OpenSwitches switches;
     for (size_t i = 0; i < args.size(); i++)
     {
         if (StartsWith(args[i], "-hostkey="))
         {
-            options.hostKey = args[i].substr(strlen("-hostkey="));
+            switches.hostKey = args[i].substr(strlen("-hostkey="));
+            switches.hostKeyGiven = true;
         }
         else if (StartsWith(args[i], "-password="))
         {
-            options.password = args[i].substr(strlen("-password="));
+            switches.password = args[i].substr(strlen("-password="));
+            switches.passwordGiven = true;
         }
         else if (StartsWith(args[i], "-username="))
         {
-            options.userName = args[i].substr(strlen("-username="));
+            switches.userName = args[i].substr(strlen("-username="));
+            switches.userNameGiven = true;
         }
         else if (StartsWith(args[i], "-privatekey="))
         {
-            options.privateKeyFile = args[i].substr(strlen("-privatekey="));
+            switches.privateKeyFile = args[i].substr(strlen("-privatekey="));
+            switches.privateKeyGiven = true;
+        }
+        else if (args[i] == "-rawsettings" ||
+            StartsWith(args[i], "-rawsettings="))
+        {
+            std::string rawError;
+            if (!CollectRawSettings(args, i, switches.rawSettings, rawError))
+            {
+                Console::Instance().Error(Texts::WrongArguments("open",
+                    rawError));
+                mErrors++;
+                return false;
+            }
         }
         else if (StartsWith(args[i], "-"))
         {
@@ -812,13 +952,19 @@ bool Script::OpenSite(const std::vector<std::string> & args)
      * session that was saved under that name. */
     if (url.find("://") == std::string::npos && mSessions.Find(url) != NULL)
     {
-        return OpenStoredSite(mSessions.Find(url)->name);
+        return OpenStoredSite(mSessions.Find(url)->name, switches);
     }
 
     std::string error;
     if (!ParseSiteUrl(url, options, error))
     {
         Console::Instance().Error(error);
+        mErrors++;
+        return false;
+    }
+    if (!ApplyOpenSwitches(switches, options, error))
+    {
+        Console::Instance().Error(Texts::WrongArguments("open", error));
         mErrors++;
         return false;
     }
@@ -3539,6 +3685,11 @@ bool Script::PutFiles(const std::vector<std::string> & args)
 namespace {
 
 /* The local side of a synchronization. */
+/* Upstream compares the contents of two files with SHA-256 (SHA-1 when a
+ * server cannot do SHA-256); this build asks for SHA-256 and falls back to
+ * hashing a downloaded copy when the server has no checksum extension. */
+const char * const kSyncChecksumAlgorithm = "sha-256";
+
 class LocalSyncFileSystem : public SyncFileSystem
 {
 public:
@@ -3565,13 +3716,28 @@ public:
     }
 
     virtual const char * Label() const { return "local"; }
+
+    virtual bool HashFile(const std::string & path, std::string & hash,
+        std::string & error)
+    {
+        char digest[LSCP_HASH_HEX_SIZE];
+        if (lscp_hash_file(kSyncChecksumAlgorithm, path.c_str(), digest,
+            sizeof(digest)) != 0)
+        {
+            error = lscp_hash_error();
+            return false;
+        }
+        hash = digest;
+        return true;
+    }
 };
 
 /* The remote side: whatever protocol this session speaks. */
 class RemoteSyncFileSystem : public SyncFileSystem
 {
 public:
-    explicit RemoteSyncFileSystem(Script & script) : mScript(script) {}
+    explicit RemoteSyncFileSystem(Script & script) : mScript(script),
+        mNoteShown(false) {}
 
     virtual bool ListDirectory(const std::string & path,
         std::vector<SyncEntry> & entries, std::string & error)
@@ -3581,8 +3747,31 @@ public:
 
     virtual const char * Label() const { return "remote"; }
 
+    /* The contents of a remote file, as the checksum the 'checksum' command
+     * would print: the server's own when it can, a downloaded copy
+     * otherwise. Whatever the two were, the user is told once rather than
+     * once per file. */
+    virtual bool HashFile(const std::string & path, std::string & hash,
+        std::string & error)
+    {
+        std::string note;
+        if (!mScript.RemoteChecksumFile(path, kSyncChecksumAlgorithm, hash,
+            note, error))
+        {
+            return false;
+        }
+        if (!note.empty() && !mNoteShown)
+        {
+            mNoteShown = true;
+            Console::Instance().Status(note + " Comparing the contents of a "
+                "synchronization downloads every file it reaches.");
+        }
+        return true;
+    }
+
 private:
     Script & mScript;
+    bool mNoteShown;
 };
 
 std::string DescribeTime(unsigned long value)
@@ -3706,6 +3895,7 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
     count = 0;
     continueOnError = false;
     bool modeGiven = false;
+    bool criteriaGiven = false;
     /* 'option synchdelete on' is the persistent form of '-delete'. */
     options.deleteObsolete = mSyncDeleteDefault;
     options.transferMode = mTransferMode;
@@ -3765,29 +3955,14 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
         }
         else if (StartsWith(lower, "-criteria="))
         {
-            const std::string value = lower.substr(strlen("-criteria="));
-            if (value == "time")
+            /* Upstream takes one of 'none', 'either' and 'both', or a
+             * comma-separated list of 'time', 'size' and 'checksum'. */
+            const std::string value = a.substr(strlen("-criteria="));
+            if (!ParseSyncCriteria(value, options.criteria, error))
             {
-                options.criteria = SyncCriteria::Time;
-            }
-            else if (value == "size")
-            {
-                options.criteria = SyncCriteria::Size;
-            }
-            else if (value == "either")
-            {
-                options.criteria = SyncCriteria::Either;
-            }
-            else if (value == "none")
-            {
-                options.criteria = SyncCriteria::None;
-            }
-            else
-            {
-                error = "Unsupported criteria '" + value +
-                    "' (use time, size, either or none).";
                 return false;
             }
+            criteriaGiven = true;
         }
         else if (StartsWith(lower, "-filemask="))
         {
@@ -3836,7 +4011,7 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
             (modeOptional ? std::string(" [LOCAL [REMOTE]]") :
                 std::string(" local|remote|both [LOCAL [REMOTE]]")) +
             " [-delete] [-nodelete] [-mirror] [-preview] [-nonrecursive] "
-            "[-criteria=time|size|either|none] [-filemask=MASK] "
+            "[-criteria=time|size|checksum|either|both|none] [-filemask=MASK] "
             "[-transfer=binary|ascii|automatic] [-interval=SECS] [-count=N] "
             "[-continue].";
         return false;
@@ -3845,6 +4020,30 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
     {
         error = "'-mirror' cannot be combined with the 'both' direction.";
         return false;
+    }
+    /*
+     * In the 'both' direction the record of the previous synchronization
+     * decides what changed, and it records timestamps and sizes - upstream
+     * drops the criteria for smBoth the same way. A value this branch could
+     * not honour is refused rather than quietly ignored.
+     */
+    if (criteriaGiven && options.mode == SyncMode::Both)
+    {
+        if (options.criteria.checksum)
+        {
+            error = "'-criteria=checksum' cannot be combined with the 'both' "
+                "direction, which compares the record of the previous "
+                "synchronization instead of the files; synchronize 'local' or "
+                "'remote' to compare contents.";
+            return false;
+        }
+        if (options.criteria.Empty())
+        {
+            error = "'-criteria=none' cannot be combined with the 'both' "
+                "direction: with nothing compared there is no way to tell "
+                "which side changed.";
+            return false;
+        }
     }
     return true;
 }
@@ -4804,7 +5003,8 @@ bool Script::StoredSessionsCommand(const std::vector<std::string> & args)
     return true;
 }
 
-bool Script::OpenStoredSite(const std::string & name)
+bool Script::OpenStoredSite(const std::string & name,
+    const OpenSwitches & switches)
 {
     const StoredSession * stored = mSessions.Find(name);
     if (stored == NULL)
@@ -4824,7 +5024,27 @@ bool Script::OpenStoredSite(const std::string & name)
         CloseSite(std::vector<std::string>());
     }
 
+    if (!stored->proxyError.empty())
+    {
+        Console::Instance().Error("The proxy of the stored session '" +
+            stored->name + "' cannot be used: " + stored->proxyError +
+            ". The site is not opened without the proxy it was stored with; "
+            "store the proxy again with 'savesession " + stored->name +
+            " -rawsettings ProxyMethod=... ProxyHost=...'.");
+        mErrors++;
+        return false;
+    }
+
     SessionOptions options = SessionStore::ToSessionOptions(*stored, mDefaults);
+    /* The switches of the command change the settings of the site: a
+     * password typed for this connection, a host key accepted for it, or a
+     * proxy given as raw settings. */
+    if (!ApplyOpenSwitches(switches, options, error))
+    {
+        Console::Instance().Error(Texts::WrongArguments("open", error));
+        mErrors++;
+        return false;
+    }
     if (options.userName.empty())
     {
         options.userName = CurrentUserName();
@@ -4913,7 +5133,7 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
             "Syntax: savesession <name> [-host=HOST] [-port=N] [-username=NAME] "
             "[-protocol=SCHEME] [-privatekey=FILE] [-hostkey=KEY] "
             "[-remotedir=DIR] [-localdir=DIR] [-preset=NAME] "
-            "[-password] [-password=PWD]."));
+            "[-rawsettings NAME=VALUE...] [-password] [-password=PWD]."));
         mErrors++;
         return false;
     }
@@ -4946,6 +5166,10 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
     bool savePassword = false;
     std::string explicitPassword;
     bool passwordGiven = false;
+    /* Upstream's session settings, applied on top of the proxy the site
+     * already has: 'savesession <name> -rawsettings ProxyMethod=SOCKS5
+     * ProxyHost=proxy.example.com'. */
+    std::vector<RawSetting> rawSettings;
 
     for (size_t i = 1; i < args.size(); i++)
     {
@@ -4987,6 +5211,16 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
         {
             storedPreset = a.substr(strlen("-preset="));
             presetGiven = true;
+        }
+        else if (a == "-rawsettings" || StartsWith(lower, "-rawsettings="))
+        {
+            std::string rawError;
+            if (!CollectRawSettings(args, i, rawSettings, rawError))
+            {
+                console.Error(Texts::WrongArguments("savesession", rawError));
+                mErrors++;
+                return false;
+            }
         }
         else if (lower == "-password")
         {
@@ -5058,6 +5292,37 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
     {
         const StoredSession * previous = mSessions.Find(name);
         session.preset = previous != NULL ? previous->preset : std::string();
+    }
+    /*
+     * The proxy of this site. '-rawsettings' changes it, an open connection
+     * brings the proxy it connected through, and a re-save with neither
+     * keeps what the site was stored with - a proxy password this machine
+     * cannot decrypt included, so that an unrelated save does not destroy
+     * it (the same rule the session password follows).
+     */
+    if (!connected)
+    {
+        const StoredSession * previous = mSessions.Find(name);
+        if (previous != NULL)
+        {
+            session.proxy = previous->proxy;
+            session.proxyPasswordRaw = previous->proxyPasswordRaw;
+            session.proxyError = previous->proxyError;
+        }
+    }
+    if (!rawSettings.empty())
+    {
+        std::string rawError;
+        if (!ApplyRawSettings(rawSettings, session.proxy, rawError))
+        {
+            console.Error(Texts::WrongArguments("savesession", rawError));
+            mErrors++;
+            return false;
+        }
+        /* What the switch states replaces the stored value, so a
+         * ciphertext nobody could read does not survive it. */
+        session.proxyPasswordRaw.clear();
+        session.proxyError.clear();
     }
     if (savePassword)
     {
@@ -5791,74 +6056,101 @@ bool Script::ChecksumRemote(const std::vector<std::string> & args)
         return false;
     }
 
+    std::string hex;
+    std::string note;
+    std::string failure;
+    if (!RemoteChecksumFile(path, requested, hex, note, failure))
+    {
+        Console::Instance().Error(failure);
+        mErrors++;
+        return false;
+    }
+    if (!note.empty())
+    {
+        Console::Instance().Status(note);
+    }
+    Console::Instance().WriteLine(hex + " " + path);
+    return true;
+}
+
+/*
+ * One remote file's checksum, as lowercase hexadecimal. The server computes
+ * it when the backend can ask it to; otherwise the file is downloaded to a
+ * temporary file and hashed here, which is the same fallback the 'checksum'
+ * command has always used. 'note' receives the line a command tells the user
+ * about which of the two happened, and stays empty when the server answered.
+ *
+ * The synchronization planner calls this for '-criteria=checksum', where
+ * there is no command to print to: it collects the note itself and says it
+ * once.
+ */
+bool Script::RemoteChecksumFile(const std::string & path,
+    const std::string & algorithm, std::string & hex, std::string & note,
+    std::string & error)
+{
     /* 1. Ask the server, when the backend can. */
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        const std::string serverAlgorithm = ServerChecksumAlgorithm(requested);
+        const std::string serverAlgorithm = ServerChecksumAlgorithm(algorithm);
         if (!serverAlgorithm.empty())
         {
             char used[64];
-            char hex[LSCP_HASH_HEX_SIZE];
+            char digest[LSCP_HASH_HEX_SIZE];
             const int result = lscp_sftp_checksum(serverAlgorithm.c_str(),
-                path.c_str(), used, sizeof(used), hex, sizeof(hex));
+                path.c_str(), used, sizeof(used), digest, sizeof(digest));
             if (result == 0)
             {
-                Console::Instance().WriteLine(std::string(hex) + " " + path);
+                hex = digest;
                 return true;
             }
             if (result == -1)
             {
-                Console::Instance().Error(Texts::RemoteError(
-                    "calculate the checksum of", path, lscp_sftp_error()));
-                mErrors++;
+                error = Texts::RemoteError("calculate the checksum of", path,
+                    lscp_sftp_error());
                 return false;
             }
-            Console::Instance().Status("The server cannot calculate "
-                "checksums; '" + requested + "' is computed from the "
-                "downloaded file.");
+            note = "The server cannot calculate checksums; '" + algorithm +
+                "' is computed from the downloaded file.";
         }
         else
         {
-            Console::Instance().Status("'" + requested + "' is not a server-"
-                "side algorithm; it is computed from the downloaded file.");
+            note = "'" + algorithm + "' is not a server-side algorithm; it is "
+                "computed from the downloaded file.";
         }
     }
     else
     {
-        Console::Instance().Status("The '" + mSession.Options().protocol +
-            "' backend cannot run a server-side checksum; '" + requested +
-            "' is computed from the downloaded file.");
+        note = "The '" + mSession.Options().protocol + "' backend cannot run a "
+            "server-side checksum; '" + algorithm + "' is computed from the "
+            "downloaded file.";
     }
 
     /* 2. Fallback: hash the file as it is downloaded. */
     const std::string temp = MakeTempPath("sum");
     if (temp.empty())
     {
-        Console::Instance().Error("Cannot create a temporary file for the "
-            "checksum.");
-        mErrors++;
+        error = "Cannot create a temporary file for the checksum.";
         return false;
     }
     unsigned long long size = 0;
-    if (RemoteGet(path, temp, 0, false, &size, NULL, NULL, error) != 0)
+    std::string transferError;
+    if (RemoteGet(path, temp, 0, false, &size, NULL, NULL, transferError) != 0)
     {
         remove(temp.c_str());
-        Console::Instance().Error(Texts::TransferFailed(path, error));
-        mErrors++;
+        error = Texts::TransferFailed(path, transferError);
         return false;
     }
-    char hex[LSCP_HASH_HEX_SIZE];
-    const bool hashed = lscp_hash_file(requested.c_str(), temp.c_str(),
-        hex, sizeof(hex)) == 0;
+    char digest[LSCP_HASH_HEX_SIZE];
+    const bool hashed = lscp_hash_file(algorithm.c_str(), temp.c_str(),
+        digest, sizeof(digest)) == 0;
     remove(temp.c_str());
     if (!hashed)
     {
-        Console::Instance().Error(Texts::RemoteError("calculate the checksum of",
-            path, lscp_hash_error()));
-        mErrors++;
+        error = Texts::RemoteError("calculate the checksum of", path,
+            lscp_hash_error());
         return false;
     }
-    Console::Instance().WriteLine(std::string(hex) + " " + path);
+    hex = digest;
     return true;
 }
 
@@ -6907,8 +7199,16 @@ const struct ScriptCommandHelpEntry
         { "mv", "mv <source> [ <source>... ] <target>\n"
             "  Moves or renames remote files; with several sources the\n"
             "  target must be an existing directory." },
-        { "open", "open <site>\n"
-            "  Connects to a site given as a URL or a stored session name." },
+        { "open", "open <site> [-hostkey=KEY] [-password=PWD] [-username=NAME]\n"
+            "        [-privatekey=FILE] [-rawsettings NAME=VALUE...]\n"
+            "  Connects to a site given as a URL or a stored session name;\n"
+            "  the switches apply to a stored site as well as to a URL.\n"
+            "  -rawsettings sets session settings by upstream's names: the\n"
+            "  proxy ones this build applies are ProxyMethod=None|SOCKS4|\n"
+            "  SOCKS5|HTTP|Telnet|Cmd, ProxyHost, ProxyPort, ProxyUsername,\n"
+            "  ProxyPassword, ProxyTelnetCommand, ProxyLocalCommand,\n"
+            "  ProxyDNS=0|1|2, ProxyLocalhost=0|1 and ProxyExcludeList;\n"
+            "  any other setting is refused rather than dropped." },
         { "option", "option [ <name> [ <value> ] ]\n"
             "  Shows or changes a setting: echo, batch, confirm, resume,\n"
             "  transfer, include, exclude, failonnomatch, synchdelete,\n"
@@ -6950,7 +7250,10 @@ const struct ScriptCommandHelpEntry
         { "savesession", "savesession <name> [ options ]\n"
             "  Stores the current session, or the one the options\n"
             "  describe, under <name>; -preset=NAME also stores the\n"
-            "  transfer preset the site should load (-preset= clears it)." },
+            "  transfer preset the site should load (-preset= clears it),\n"
+            "  and -rawsettings NAME=VALUE... stores session settings with\n"
+            "  it (the proxy ones 'open -rawsettings' applies; a proxy\n"
+            "  password is encrypted like a session password)." },
         { "show", "show\n"
             "  Not available in this build: the connection runs the SFTP\n"
             "  subsystem, so remote shell commands cannot be shown." },
@@ -6965,8 +7268,16 @@ const struct ScriptCommandHelpEntry
             "  it. The key/value breakdown of attr stays available there." },
         { "synchronize", "synchronize local|remote|both [ <localdir> [ <remotedir> ] ]\n"
             "  [ -delete ] [-nodelete] [-mirror] [-preview]\n"
-            "  [-criteria=time|size|either|none] [-filemask=<mask>]\n"
-            "  [-transfer=binary|ascii|automatic] [-nonrecursive]" },
+            "  [-criteria=time|size|checksum|either|both|none] [-filemask=<mask>]\n"
+            "  [-transfer=binary|ascii|automatic] [-nonrecursive]\n"
+            "  The criteria say what counts as a change: 'time' (the\n"
+            "  default) copies a file the source has newer, 'size' one of\n"
+            "  a different size, 'checksum' one whose contents differ and\n"
+            "  'none' every file. 'either' and its synonym 'both' compare\n"
+            "  the time and the size, and the three comparisons may also\n"
+            "  be listed, as in -criteria=time,checksum. In the 'both'\n"
+            "  direction the record of the previous synchronization\n"
+            "  decides, so 'checksum' and 'none' are refused there." },
         { "symlink", "symlink <target> <link>\n"
             "  Same as 'ln'." },
         { "terminal", "terminal\n"

@@ -128,6 +128,17 @@ backend are:
 * **Passwords** work exactly as elsewhere: `-password=`,
   `LINUXSCP_PASSWORD`, or an interactive prompt (echo is disabled via
   the console API).
+* **Proxies.** `-rawsettings ProxyMethod=SOCKS5 ProxyHost=proxy.example.com
+  ProxyPort=1080` (plus `ProxyUsername`/`ProxyPassword` when it
+  authenticates) becomes `--proxy socks5h://proxy.example.com:1080` and
+  `--proxy-user`, `ProxyExcludeList` becomes `--noproxy`, and
+  `ProxyDNS=0` asks for `socks5://` so that this machine resolves the
+  name instead of the proxy. `ProxyMethod=Telnet` and `Cmd` are refused
+  on Windows rather than connected around: they need the native
+  transport, which this platform does not build. curl sends every host
+  through the proxy, so `ProxyLocalhost=0` has no effect here. The live
+  WebDAV suite drives a SOCKS5 proxy through this path on any platform;
+  the SFTP proxy tests are Linux-only, like the rest of that suite.
 * **Directory metadata.** SFTP listings come from curl's `ls -l`-style
   output: names, sizes and permissions are exact, modification times
   are not reported, so `-neweronly` comparisons against SFTP targets

@@ -28,6 +28,7 @@ Evidence convention (same as every other suite):
 import hashlib
 import os
 import pathlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -63,10 +64,13 @@ class LiveDavTests(unittest.TestCase):
         cls.addClassCleanup(cls.workdir.cleanup)
 
     def setUp(self):
+        self.proxies = []
         self.start_server()
 
     def tearDown(self):
         self.stop_server()
+        while self.proxies:
+            self.stop_proxy(*self.proxies.pop())
 
     # -- the server ---------------------------------------------------------
     def start_server(self):
@@ -102,13 +106,70 @@ class LiveDavTests(unittest.TestCase):
             self.server.wait(timeout=5)
         self.server = None
 
+    # -- the proxy ----------------------------------------------------------
+    def start_proxy(self, kind="socks5", credentials=""):
+        """Start TestProxyServer.py and collect the requests it reports.
+
+        This suite is the one that also runs where the native transport does
+        not, so it is where the proxy support of the curl paths is proved:
+        a listing that arrives is not evidence on its own, the proxy has to
+        have seen the connection.
+        """
+        env = dict(os.environ, LSCP_TEST_PORT="0", LSCP_TEST_PROXY_KIND=kind,
+                   LSCP_TEST_PROXY_AUTH=credentials)
+        popen_args = dict(env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True)
+        if os.name == "posix":
+            popen_args["start_new_session"] = True
+        proxy = subprocess.Popen(
+            [sys.executable, str(HERE / "TestProxyServer.py")], **popen_args)
+        lines = []
+        port = []
+        ready = threading.Event()
+
+        def collect():
+            for line in proxy.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                lines.append(line)
+                if line.startswith("READY ") and not port:
+                    port.append(int(line.split()[1]))
+                    ready.set()
+
+        reader = threading.Thread(target=collect, daemon=True)
+        reader.start()
+        if not ready.wait(30.0):
+            self.stop_proxy(proxy, reader)
+            self.fail("the test proxy did not start")
+        self.proxies.append((proxy, reader))
+        return port[0], lines
+
+    def stop_proxy(self, proxy, reader):
+        if proxy.poll() is None:
+            if os.name == "posix":
+                try:
+                    os.killpg(os.getpgid(proxy.pid), signal.SIGTERM)
+                except (OSError, ProcessLookupError):
+                    proxy.terminate()
+            else:
+                proxy.terminate()
+            try:
+                proxy.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proxy.kill()
+                proxy.wait(timeout=10)
+        if proxy.stdout is not None:
+            proxy.stdout.close()
+        reader.join(timeout=5)
+
     # -- driving the client -------------------------------------------------
-    def run_script(self, commands, creds=None, timeout=60):
+    def run_script(self, commands, creds=None, timeout=60, open_args=()):
         user, secret = creds if creds else (USER, PASSWORD)
         argv = [BINARY, "-batch", "-hostkey=*",
                 "-log=" + str(self.config / "session.log"),
-                "-command=open dav://%s:%s@127.0.0.1:%d/ ; %s" %
-                (user, secret, self.port, commands)]
+                "-command=open dav://%s:%s@127.0.0.1:%d/ %s ; %s" %
+                (user, secret, self.port, " ".join(open_args), commands)]
         env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env)
@@ -428,6 +489,40 @@ class LiveDavTests(unittest.TestCase):
         self.assertNotIn("a.txt", listing.stdout)
         self.assertNotIn("b.txt", listing.stdout)
         self.assertNotIn("c.txt", listing.stdout)
+
+
+    def test_the_curl_path_goes_through_a_proxy(self):
+        """A SOCKS5 proxy set with '-rawsettings' carries a WebDAV session
+        too: curl is given the proxy, the requests reach the server through
+        it, and a proxy method curl cannot speak is refused instead of
+        silently connecting around it."""
+        proxy_port, proxy_lines = self.start_proxy()
+        source = self.root / "proxied.txt"
+        source.write_bytes(b"through the proxy\n")
+        downloaded = self.root / "proxied-back.txt"
+        result = self.run_script(
+            "mkdir /proxied ; put %s /proxied/file.txt ; "
+            "get /proxied/file.txt %s ; echo PROXY_OK" % (source, downloaded),
+            open_args=["-rawsettings", "ProxyMethod=SOCKS5",
+                       "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PROXY_OK", result.stdout)
+        self.assertEqual(sha256_of(source), sha256_of(downloaded))
+        self.assertTrue(
+            any(line.startswith("CONNECT 127.0.0.1:%d" % self.port)
+                for line in proxy_lines),
+            "no request reached the server through the proxy: %s" %
+            (proxy_lines,))
+
+        refused = self.run_script(
+            "echo SHOULD_NOT_RUN",
+            open_args=["-rawsettings", "ProxyMethod=Telnet",
+                       "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port,
+                       "ProxyTelnetCommand=nc"])
+        self.assertEqual(refused.returncode, 1,
+                         refused.stdout + refused.stderr)
+        self.assertIn("curl", refused.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", refused.stdout)
 
 
 def run_and_report():

@@ -409,5 +409,12 @@ implementation includes:
 * Stored sessions shared with the GUI (`session`, `savesession`, `rmsession`,
   export and import), including the encrypted stored-password format both
   clients read.
+* Proxy sessions under upstream's setting names (`open -rawsettings
+  ProxyMethod=SOCKS4|SOCKS5|HTTP|Telnet|Cmd ProxyHost= ProxyPort=
+  ProxyUsername= ProxyPassword= ProxyTelnetCommand= ProxyLocalCommand=
+  ProxyDNS= ProxyLocalhost= ProxyExcludeList=`), stored with a site by
+  `savesession -rawsettings` and encrypted like a session password; SOCKS and
+  HTTP proxies reach the curl-backed protocols as `--proxy`, and a proxy or
+  setting this build cannot use is refused rather than ignored.
 * Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
 * Native Debian `.deb` packaging with standard menu launchers and icons.

@@ -28,6 +28,86 @@ inline bool UseNativeSftp(const std::string & protocol)
     return kHasNativeSftp && protocol == "sftp";
 }
 
+/*
+ * The proxy of a session, under the names upstream's session settings use
+ * ('None;SOCKS4;SOCKS5;HTTP;Telnet;Cmd'). 'Local' is upstream's pmCmd: a
+ * command run locally whose standard input and output carry the connection.
+ */
+enum class ProxyMethod
+{
+    None,
+    Socks4,
+    Socks5,
+    Http,
+    Telnet,
+    Local
+};
+
+/* Upstream's spelling of a method, as 'ProxyMethod=' accepts it. */
+const char * ProxyMethodName(ProxyMethod method);
+/* The port a method uses when the session does not name one. */
+int ProxyDefaultPort(ProxyMethod method);
+/* Accepts upstream's names ('socks5', 'Cmd') and its numbers ('0'..'5'). */
+bool ParseProxyMethod(const std::string & text, ProxyMethod & method);
+
+struct ProxySettings
+{
+    ProxyMethod method;
+    std::string host;
+    int port;               /* 0: use ProxyDefaultPort(method) */
+    std::string userName;
+    std::string password;
+    /* 'ProxyTelnetCommand': the telnet command, or - for the 'Local'
+     * method - the command to run. '%host' and '%port' are substituted. */
+    std::string command;
+    /* 'ProxyExcludeList': destinations reached without the proxy. */
+    std::string excludeList;
+    /* 'ProxyDNS': 0 = resolve here, 1 = automatic, 2 = let the proxy
+     * resolve. Automatic follows the transport: everything but SOCKS4
+     * leaves the name to the proxy. */
+    int dns;
+    /* 'ProxyLocalhost': send localhost through the proxy too. */
+    bool evenLocalhost;
+
+    ProxySettings() : method(ProxyMethod::None), port(0), dns(1),
+        evenLocalhost(false) {}
+
+    bool Active() const { return method != ProxyMethod::None; }
+    /* The port actually used: the one given, or the method's default. */
+    int EffectivePort() const
+        { return port > 0 ? port : ProxyDefaultPort(method); }
+    /* Whether the proxy resolves the destination name, which is what
+     * decides between curl's 'socks5' and 'socks5h'. */
+    bool ResolvesRemotely() const
+        { return dns == 2 || (dns == 1 && method != ProxyMethod::Socks4); }
+    bool operator==(const ProxySettings & other) const;
+};
+
+/*
+ * One 'name=value' pair of a '-rawsettings' switch. The names are
+ * upstream's session setting names; this build applies the proxy ones and
+ * refuses the rest by name rather than accepting a setting it would drop.
+ * Returns false with 'error' explaining the refusal.
+ */
+bool ApplyProxyRawSetting(const std::string & name, const std::string & value,
+    ProxySettings & proxy, std::string & error);
+/* The setting names '-rawsettings' accepts, for error messages and help. */
+std::vector<std::string> ProxyRawSettingNames();
+/* True when 'name' is a raw setting this build applies. */
+bool IsProxyRawSettingName(const std::string & name);
+/*
+ * Checks a proxy configuration before a connection is made: a method that
+ * needs a host has one, a port is in range, and the command of a telnet or
+ * local proxy is there. Returns false with 'error' saying what is missing.
+ */
+bool ValidateProxySettings(const ProxySettings & proxy, std::string & error);
+/*
+ * Whether a curl-backed protocol can use this proxy. SOCKS and HTTP proxies
+ * are curl options; a telnet or local command is not, and connecting
+ * without the proxy the session asked for is worse than refusing.
+ */
+bool ProxyUsableByCurl(const ProxySettings & proxy, std::string & error);
+
 struct SessionOptions
 {
     std::string protocol;
@@ -42,6 +122,8 @@ struct SessionOptions
     std::string initialDirectory;
     int timeoutSecs;
     bool verbose;
+    /* The proxy this session connects through, if any. */
+    ProxySettings proxy;
 
     SessionOptions();
 };

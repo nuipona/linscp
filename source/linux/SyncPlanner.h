@@ -46,17 +46,41 @@ enum class SyncMode
     Both
 };
 
-/* What counts as a difference. */
-enum class SyncCriteria
+/*
+ * What counts as a difference, as the three comparisons upstream's
+ * synchronize flags carry (spNotByTime, spBySize, spByChecksum). A
+ * '-criteria=' value switches them on and off, so every combination of
+ * them is expressible: 'time' alone, 'size' alone, 'checksum' alone,
+ * 'either' (time and size), or a list such as 'time,checksum'.
+ *
+ * With none of them set nothing is compared and every file counts as
+ * different, which is upstream's '-criteria=none'.
+ */
+struct SyncCriteria
 {
-    Time,    /* the source timestamp is newer than the target's */
-    Size,    /* the sizes differ (regardless of the timestamps) */
-    Either,  /* the timestamps or the sizes differ */
-    None     /* always copy */
+    bool time;      /* the source timestamp is newer than the target's */
+    bool size;      /* the sizes differ, whatever the timestamps say */
+    bool checksum;  /* the contents differ, compared when the rest agree */
+
+    SyncCriteria() : time(true), size(false), checksum(false) {}
+
+    bool Empty() const { return !time && !size && !checksum; }
+    bool operator==(const SyncCriteria & other) const
+        { return time == other.time && size == other.size &&
+            checksum == other.checksum; }
+    bool operator!=(const SyncCriteria & other) const
+        { return !(*this == other); }
 };
 
 const char * SyncModeName(SyncMode mode);
-const char * SyncCriteriaName(SyncCriteria criteria);
+/* The criteria as the word or list '-criteria=' takes: 'time', 'size',
+ * 'either', 'checksum', 'none', 'time,checksum', ... */
+std::string SyncCriteriaName(const SyncCriteria & criteria);
+/* Parses upstream's value: 'none', 'either' (or 'both'), one of 'time',
+ * 'size' and 'checksum', or a comma-separated list of those three. An
+ * unknown word is refused with the words that are known. */
+bool ParseSyncCriteria(const std::string & text, SyncCriteria & criteria,
+    std::string & error);
 
 /* One comparison attached to a mask token, WinSCP's extended mask
  * syntax: '*.tmp>1M' or '*.log>=2026-01-01'. */
@@ -72,7 +96,7 @@ struct MaskCriterion
  *
  *   name mask       "*.tmp"         matches file names
  *   directory mask  "any/build/"      matches directories (trailing '/')
- *   path mask       "docs/*.txt"    matches paths relative to the root
+ *   path mask       "docs/\*.txt"   matches paths relative to the root
  *
  * plus any number of size/time criteria. */
 struct FileMaskToken
@@ -146,6 +170,22 @@ public:
         std::vector<SyncEntry> & entries, std::string & error) = 0;
     /* "local" or "remote": used in messages only. */
     virtual const char * Label() const = 0;
+    /*
+     * The checksum of one file as lowercase hexadecimal, for the
+     * 'checksum' criteria. A side that cannot hash reports false with
+     * 'error', and the planner then refuses the synchronization instead of
+     * treating two files it could not read as equal: a difference it does
+     * not see is a file it does not copy.
+     */
+    virtual bool HashFile(const std::string & path, std::string & hash,
+        std::string & error)
+    {
+        (void)path;
+        (void)hash;
+        error = std::string(Label()) + " files cannot be compared by "
+            "checksum in this build.";
+        return false;
+    }
 };
 
 enum class SyncAction
@@ -222,8 +262,8 @@ struct SyncOptions
      * side. */
     class SyncState * state;
 
-    SyncOptions() : mode(SyncMode::Local), criteria(SyncCriteria::Time),
-        deleteObsolete(false), recursive(true), mirror(false),
+    SyncOptions() : mode(SyncMode::Local), deleteObsolete(false),
+        recursive(true), mirror(false),
         transferMode(TransferMode::Binary), state(NULL) {}
 };
 

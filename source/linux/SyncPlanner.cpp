@@ -11,6 +11,7 @@
 
 #include "SyncPlanner.h"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -45,16 +46,167 @@ const char * SyncModeName(SyncMode mode)
     return "local";
 }
 
-const char * SyncCriteriaName(SyncCriteria criteria)
+std::string SyncCriteriaName(const SyncCriteria & criteria)
 {
-    switch (criteria)
+    if (criteria.Empty())
     {
-        case SyncCriteria::Time:   return "time";
-        case SyncCriteria::Size:   return "size";
-        case SyncCriteria::Either: return "either";
-        case SyncCriteria::None:   return "none";
+        return "none";
     }
-    return "time";
+    /* The single word upstream and this console use for the pair. */
+    if (criteria.time && criteria.size && !criteria.checksum)
+    {
+        return "either";
+    }
+    std::string name;
+    if (criteria.time)
+    {
+        name = "time";
+    }
+    if (criteria.size)
+    {
+        name += name.empty() ? std::string("size") : std::string(",size");
+    }
+    if (criteria.checksum)
+    {
+        name += name.empty() ? std::string("checksum") :
+            std::string(",checksum");
+    }
+    return name;
+}
+
+namespace {
+
+/* True when 'word' is 'name', whatever the case of 'word'. */
+bool SameWord(const std::string & word, const char * name)
+{
+    if (word.size() != strlen(name))
+    {
+        return false;
+    }
+    for (size_t i = 0; i < word.size(); i++)
+    {
+        if (tolower(static_cast<unsigned char>(word[i])) != name[i])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The words '-criteria=' takes. 'both' is upstream's synonym of 'either',
+ * and 'none' switches every comparison off. */
+struct CriteriaWord
+{
+    const char * name;
+    bool time;
+    bool size;
+    bool checksum;
+    /* True for the words that name a whole set of criteria: they stand on
+     * their own, so a list cannot add to them. */
+    bool whole;
+};
+
+const CriteriaWord kCriteriaWords[] =
+{
+    { "none",     false, false, false, true  },
+    { "either",   true,  true,  false, true  },
+    { "both",     true,  true,  false, true  },
+    { "time",     true,  false, false, false },
+    { "size",     false, true,  false, false },
+    { "checksum", false, false, true,  false },
+};
+
+const size_t kCriteriaWordCount = sizeof(kCriteriaWords) /
+    sizeof(kCriteriaWords[0]);
+
+} // namespace
+
+bool ParseSyncCriteria(const std::string & text, SyncCriteria & criteria,
+    std::string & error)
+{
+    std::string trimmed;
+    if (!TrimString(text, trimmed))
+    {
+        /* '-criteria=' on its own has no value to parse. */
+        error = "'-criteria=' needs a value: none, either, both, or a "
+            "comma-separated list of time, size and checksum.";
+        return false;
+    }
+
+    SyncCriteria result;
+    result.time = false;
+    result.size = false;
+    result.checksum = false;
+
+    size_t start = 0;
+    bool seen = false;
+    std::string whole;
+    for (size_t i = 0; i <= text.size(); i++)
+    {
+        if (i < text.size() && text[i] != ',')
+        {
+            continue;
+        }
+        std::string item;
+        TrimString(text.substr(start, i - start), item);
+        start = i + 1;
+        if (!whole.empty())
+        {
+            error = "'" + whole + "' already names the whole set of "
+                "criteria, so " + (item.empty() ?
+                    std::string("nothing may follow it in the list.") :
+                    "'" + item + "' cannot follow it in the list.");
+            return false;
+        }
+        if (item.empty())
+        {
+            /* 'time,' and 'time,,size' have an empty item where a name
+             * belongs; refusing them keeps the list honest. */
+            error = "The criteria list has an empty item; it takes 'time', "
+                "'size' and 'checksum' separated by commas.";
+            return false;
+        }
+        bool known = false;
+        for (size_t w = 0; w < kCriteriaWordCount; w++)
+        {
+            if (!SameWord(item, kCriteriaWords[w].name))
+            {
+                continue;
+            }
+            known = true;
+            if (kCriteriaWords[w].whole)
+            {
+                if (seen)
+                {
+                    error = "'" + item + "' already names the whole set of "
+                        "criteria, so it cannot follow another item of the "
+                        "list.";
+                    return false;
+                }
+                whole = item;
+                result.time = kCriteriaWords[w].time;
+                result.size = kCriteriaWords[w].size;
+                result.checksum = kCriteriaWords[w].checksum;
+            }
+            else
+            {
+                result.time = result.time || kCriteriaWords[w].time;
+                result.size = result.size || kCriteriaWords[w].size;
+                result.checksum = result.checksum || kCriteriaWords[w].checksum;
+            }
+            seen = true;
+            break;
+        }
+        if (!known)
+        {
+            error = "Unsupported criteria '" + item + "' (use none, either, "
+                "both, time, size or checksum, or a comma-separated list of "
+                "time, size and checksum).";
+            return false;
+        }
+    }
+    criteria = result;
+    return true;
 }
 
 const char * SyncActionName(SyncAction action)
@@ -779,7 +931,19 @@ public:
 
     bool Run(std::string & error)
     {
-        return PlanDirectory(std::string(), error);
+        if (!PlanDirectory(std::string(), error))
+        {
+            return false;
+        }
+        /* A checksum that could not be computed is not an agreement between
+         * two files: refusing the plan is safer than reporting as equal a
+         * file nobody managed to read. */
+        if (!mHashError.empty())
+        {
+            error = mHashError;
+            return false;
+        }
+        return true;
     }
 
 private:
@@ -1087,7 +1251,7 @@ private:
 
         if (mOptions.mode == SyncMode::Local)
         {
-            if (Differs(remote, local))
+            if (Differs(relative, remote, local))
             {
                 item.action = SyncAction::Download;
                 item.reason = Reason(remote, local, "remote", "local");
@@ -1101,7 +1265,7 @@ private:
         }
         if (mOptions.mode == SyncMode::Remote)
         {
-            if (Differs(local, remote))
+            if (Differs(relative, local, remote))
             {
                 item.action = SyncAction::Upload;
                 item.reason = Reason(local, remote, "local", "remote");
@@ -1114,7 +1278,12 @@ private:
             return;
         }
 
-        /* Both directions. */
+        /*
+         * Both directions. The record of the previous synchronization
+         * decides, and the criteria are not consulted - upstream enforces
+         * the same rule for smBoth, and 'synchronize' refuses a criteria
+         * value this branch could not honour.
+         */
         SyncStateEntry recorded;
         const bool known = mOptions.state != NULL &&
             mOptions.state->Lookup(relative, recorded);
@@ -1172,30 +1341,116 @@ private:
         mPlan.items.push_back(item);
     }
 
-    bool Differs(const SyncEntry & source, const SyncEntry & target) const
+    /*
+     * True when the source has to be copied over the target. What is
+     * compared is what the criteria asked for, in upstream's order: the
+     * timestamps first, then the sizes, and the contents last, because
+     * reading two whole files is the expensive comparison of the three.
+     */
+    bool Differs(const std::string & relative, const SyncEntry & source,
+        const SyncEntry & target) const
     {
-        switch (mOptions.criteria)
+        const SyncCriteria & criteria = mOptions.criteria;
+        if (criteria.Empty())
         {
-            case SyncCriteria::Time:
-                /* Mirror mode resolves any difference toward the
-                 * source, including a newer target. */
-                return mOptions.mirror ? source.mtime != target.mtime :
-                    source.mtime > target.mtime;
-            case SyncCriteria::Size:
-                return source.size != target.size;
-            case SyncCriteria::Either:
-                return source.mtime != target.mtime || source.size != target.size;
-            case SyncCriteria::None:
-                return true;
+            return true;
         }
-        return false;
+        bool differs = false;
+        if (criteria.time)
+        {
+            /* Mirror mode resolves any difference toward the source,
+             * including a newer target. */
+            differs = mOptions.mirror ? source.mtime != target.mtime :
+                source.mtime > target.mtime;
+        }
+        if (!differs && criteria.size)
+        {
+            differs = source.size != target.size;
+        }
+        if (!differs && criteria.checksum)
+        {
+            differs = !SameChecksum(relative);
+        }
+        return differs;
     }
 
-    static std::string Reason(const SyncEntry & source, const SyncEntry & target,
-        const char * sourceLabel, const char * targetLabel)
+    /* Compares the contents of the two files through their checksums. When a
+     * side cannot be hashed the answer is "not the same", and the first
+     * reason is remembered so that the plan is refused with it. */
+    bool SameChecksum(const std::string & relative) const
     {
-        std::string reason = std::string("the ") + sourceLabel + " file is newer";
-        if (source.size != target.size)
+        std::string localHash;
+        std::string remoteHash;
+        const bool localOk = Hash(mLocalFs,
+            LocalPathForRelative(mLocalRoot, relative), localHash);
+        const bool remoteOk = Hash(mRemoteFs,
+            RemotePathForRelative(mRemoteRoot, relative), remoteHash);
+        return localOk && remoteOk && localHash == remoteHash;
+    }
+
+    /* One file's checksum, cached: the same file is read once however many
+     * times the walk reaches it. */
+    bool Hash(SyncFileSystem & fs, const std::string & path,
+        std::string & hash) const
+    {
+        std::map<std::string, std::string> & cache =
+            (&fs == &mLocalFs) ? mLocalHashes : mRemoteHashes;
+        const std::map<std::string, std::string>::const_iterator found =
+            cache.find(path);
+        if (found != cache.end())
+        {
+            hash = found->second;
+            return true;
+        }
+        std::string error;
+        if (!fs.HashFile(path, hash, error))
+        {
+            if (mHashError.empty())
+            {
+                mHashError = "Cannot compare the checksum of '" + path +
+                    "': " + error;
+            }
+            return false;
+        }
+        cache[path] = hash;
+        return true;
+    }
+
+    /*
+     * Why the source is copied over the target: the comparison the criteria
+     * asked for that found the difference, with the sizes alongside because
+     * they are the part of a plan worth reading.
+     */
+    std::string Reason(const SyncEntry & source, const SyncEntry & target,
+        const char * sourceLabel, const char * targetLabel) const
+    {
+        const SyncCriteria & criteria = mOptions.criteria;
+        const bool newer = mOptions.mirror ?
+            source.mtime != target.mtime : source.mtime > target.mtime;
+        std::string reason;
+        if (criteria.time && newer)
+        {
+            reason = std::string("the ") + sourceLabel + " file is newer";
+        }
+        else if (criteria.size && source.size != target.size)
+        {
+            reason = "the sizes differ";
+        }
+        else if (criteria.checksum)
+        {
+            reason = std::string("the contents differ (the ") + sourceLabel +
+                " checksum is not the " + targetLabel + " one)";
+        }
+        else if (criteria.Empty())
+        {
+            reason = std::string("every file is copied when the criteria are "
+                "'none'");
+        }
+        else
+        {
+            reason = std::string("the ") + sourceLabel + " file differs";
+        }
+        if (source.size != target.size && reason != "the sizes differ")
         {
             char buffer[64];
             snprintf(buffer, sizeof(buffer), " (%llu against %llu bytes)",
@@ -1203,7 +1458,6 @@ private:
                 static_cast<unsigned long long>(target.size));
             reason += buffer;
         }
-        (void)targetLabel;
         return reason;
     }
 
@@ -1213,6 +1467,12 @@ private:
     std::string mRemoteRoot;
     const SyncOptions & mOptions;
     SyncPlan & mPlan;
+
+    /* The checksums already computed on each side, and the first failure.
+     * Mutable because comparing two files does not change the plan. */
+    mutable std::map<std::string, std::string> mLocalHashes;
+    mutable std::map<std::string, std::string> mRemoteHashes;
+    mutable std::string mHashError;
 };
 
 } // namespace
