@@ -49,7 +49,7 @@ build on any of them:
 * A platform record without a `how`, a dated `date` and described suites is an
   error, because evidence nobody can reproduce is not evidence.
 
-As it stands: 50 entries have evidence recorded on Linux, 44 on Windows,
+As it stands: 50 entries have evidence recorded on Linux, 45 on Windows,
 and **34 are `verified`**. The gap is not timidity - Windows has no way to test the
 native PuTTY transport, permissions on uploads, or a POSIX server's path
 semantics, and the ledger says so per entry instead of rounding the whole
@@ -215,7 +215,8 @@ python3 tools/check_upstream_parity.py   # the inventory and its evidence rules
 
 On Windows, the CMake/CTest workflow runs the Windows-portable script and DAV
 suites. The MSVC CI run on 2026-10-15 passed the live DAV checks, including the
-local-to-remote watcher and server-side COPY assertions. The live SFTP suite
+local-to-remote watcher and server-side COPY assertions, and the bounded GUI
+search backend suite. The live SFTP suite
 skips its connection cases because the `curl.exe` built into Windows has no
 SFTP support; the live S3 TLS mock is POSIX-only. Those are transport/test
 limitations, not a blanket skip of Windows live testing.
