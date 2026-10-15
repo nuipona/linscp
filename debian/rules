@@ -1,5 +1,5 @@
 #!/usr/bin/make -f
-# Debian build rules for LinuxSCP.
+# Debian build rules for LinSCP.
 #
 # This package deliberately does not use debhelper: the whole build is one
 # plain Makefile (source/linux/Makefile), so the few targets are written out

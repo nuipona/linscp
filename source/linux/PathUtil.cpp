@@ -630,7 +630,7 @@ std::string ResolveLocalPath(const std::string & cwd, const std::string & path)
     }
     std::string joined = JoinLocalPath(cwd, expanded);
     // Collapse './' and '../' the same way as for remote paths; the local
-    // tree of a LinuxSCP transfer is always POSIX on this platform.
+    // tree of a LinSCP transfer is always POSIX on this platform.
     return ResolveRemotePath(cwd, joined);
 #endif
 }

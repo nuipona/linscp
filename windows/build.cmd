@@ -1,5 +1,5 @@
 @echo off
-rem Builds LinuxSCP for Windows with CMake.
+rem Builds LinSCP for Windows with CMake.
 rem
 rem Usage:  windows\build.cmd [build-directory]
 rem

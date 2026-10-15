@@ -759,7 +759,7 @@ void linuxscp_critical_section_leave(CRITICAL_SECTION * cs)
  * Windows build this comes from utils/version.c; there it is left out of
  * FORK_BUILD, so the front end provides it. ssh.h declares it without
  * 'const' when MPEXT is set. */
-char sshver[] = "LinuxSCP-1.0";
+char sshver[] = "LinSCP-1.0";
 
 /* Connection sharing is supported by the vendored unix/sharing.c. */
 const bool share_can_be_upstream = true;

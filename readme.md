@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="logo/linuxscp-mark.png" alt="LinuxSCP logo" width="160" height="160" />
+  <img src="logo/linuxscp-mark.png" alt="LinSCP logo" width="160" height="160" />
 </p>
 
-# LinuxSCP
+# LinSCP
 
-LinuxSCP is a free, open-source file transfer client for Debian GNU/Linux. It
+LinSCP is a free, open-source file transfer client for Debian GNU/Linux. It
 connects to SFTP servers over SSH and transfers files from a command line, a
 script or an interactive prompt. The client is built from source with `make`
 and packaged as a `.deb`.
@@ -52,14 +52,16 @@ feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
     linuxscp -batch -script=script.txt
     linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 
-## Linux port scope and upstream parity
+## Commander interface and upstream parity
 
-LinuxSCP implements a subset of WinSCP workflows, **not full upstream feature
+LinSCP implements a subset of WinSCP workflows, **not full upstream feature
 parity**. It has a command-line interpreter, native SFTP on POSIX, curl-backed
 transfer paths, basic recursive transfers/resume/synchronization, and a
-browser-based dual-pane Commander interface (`linuxscp-gui`) with bounded
-UTF-8 full-text search of remote files. The `keepuptodate` command reflects
-local changes onto the remote side; Linux watches recursively with inotify
+browser-based dual-pane Commander interface (`linuxscp-gui`) with a dark theme,
+WinSCP-style menu and F1–F10 layout, local and remote file viewing/editing,
+a transfer queue and bounded UTF-8 full-text search of remote files. The
+`keepuptodate` command reflects local changes onto the remote side; Linux watches
+recursively with inotify
 and Windows uses `ReadDirectoryChangesW`, with interval polling as a fallback.
 
 Protocol URL acceptance is not proof of complete support: WebDAV lists and
@@ -107,9 +109,10 @@ The supported commands and validation history are listed in
 
 ## Naming
 
-Everything is branded `LinuxSCP`: the `linuxscp` executable, the `linuxscp(1)`
-manual page and the Debian package. The upstream PuTTY and WinSCP code keeps
-its original attribution, see [`license.txt`](license.txt).
+The product is branded **LinSCP**. The established `linuxscp` executable,
+`linuxscp(1)` manual page, `linuxscp-gui` launcher, package name and on-disk
+configuration paths are retained for compatibility. The upstream PuTTY and
+WinSCP code keeps its original attribution; see [`license.txt`](license.txt).
 
 ## Licence
 

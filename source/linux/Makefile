@@ -1,4 +1,4 @@
-# Native POSIX (Debian/Linux) build of LinuxSCP.
+# Native POSIX (Debian/Linux) build of LinSCP.
 #
 # This builds the console client `linuxscp` for Linux out of:
 #
@@ -6,7 +6,7 @@
 #   * a POSIX platform layer vendored from upstream PuTTY 0.85
 #     (libs/putty/unix, libs/putty/charset),
 #   * the upstream PuTTY SFTP client library (libs/putty/ssh/sftp.c),
-#   * the LinuxSCP front end in this directory.
+#   * the LinSCP front end in this directory.
 #
 # Usage:
 #   make -C source/linux            # builds build/linuxscp
@@ -189,7 +189,7 @@ $(OBJDIR)/source/%.o: $(TOP)/source/%.c
 # be_list.c is compiled once per application and takes its name from the
 # command line. SSH/SERIAL/OTHERBACKENDS already come from defs.h under
 # FORK_BUILD, so only APPNAME is missing here.
-$(OBJDIR)/source/putty/be_list.o: CFLAGS_PUTTY += -DAPPNAME=LinuxSCP
+$(OBJDIR)/source/putty/be_list.o: CFLAGS_PUTTY += -DAPPNAME=LinSCP
 
 $(OBJDIR)/libs/%.o: $(TOP)/libs/%.c
 	@mkdir -p $(dir $@)
@@ -224,6 +224,7 @@ check-live: $(BINDIR)/linuxscp
 	python3 tests/LiveS3Test.py $(BINDIR)/linuxscp
 	python3 tests/LiveDavTest.py $(BINDIR)/linuxscp
 	python3 ../../source/gui/tests/RemoteSearchTest.py
+	python3 ../../source/gui/tests/LocalEditorTest.py
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-LinuxSCP Graphical Commander Interface Server
-Provides a web-based dual-pane Norton/WinSCP Commander interface
-backed by the LinuxSCP protocol engine.
+LinSCP Graphical Commander Interface Server
+Provides a web-based dual-pane WinSCP Commander-style interface
+backed by the LinSCP protocol engine.
 
 Architecture
 ------------
@@ -351,7 +351,7 @@ def run_linuxscp(command_script, session=None, timeout=300):
     try:
         proc = subprocess.Popen(cmd, **popen_kwargs())
     except OSError as exc:
-        message = ("Cannot start the LinuxSCP core binary '%s': %s. "
+        message = ("Cannot start the LinSCP core binary '%s': %s. "
                    "Build it first (windows\\build.cmd or make -C source/linux) "
                    "or put linuxscp%s on PATH." % (bin_path, exc, EXE_SUFFIX))
         add_log(message, "error")
@@ -361,7 +361,7 @@ def run_linuxscp(command_script, session=None, timeout=300):
     except subprocess.TimeoutExpired:
         proc.kill()
         stdout, stderr = proc.communicate()
-        add_log("LinuxSCP core timed out after %d seconds." % timeout, "error")
+        add_log("LinSCP core timed out after %d seconds." % timeout, "error")
         return 1, stdout or "", "Timed out."
     if stderr.strip():
         add_log(stderr.strip(), "error")
@@ -604,7 +604,7 @@ def require_tab(tab_id=None):
 
 class Task(object):
     def __init__(self, task_id, kind, command, session, source, destination,
-                 tab_id, progress_path=None, progress_remote=None):
+                 tab_id, progress_path=None, progress_remote=None, move_source=None):
         self.id = task_id
         self.kind = kind
         self.command = command
@@ -622,6 +622,8 @@ class Task(object):
         self.proc = None
         self.progress_path = progress_path      # local file that grows
         self.progress_remote = progress_remote  # (tab_id, remote path)
+        # A move removes its source only after the copied file is complete.
+        self.move_source = move_source
 
     def as_dict(self):
         percent = 0
@@ -669,10 +671,11 @@ class TaskManager(object):
         threading.Thread(target=self._worker, daemon=True).start()
 
     def submit(self, kind, command, session, source, destination, tab_id,
-               progress_path=None, progress_remote=None):
+               progress_path=None, progress_remote=None, move_source=None):
         with STATE_LOCK:
             task = Task(STATE["next_task"], kind, command, session, source,
-                        destination, tab_id, progress_path, progress_remote)
+                        destination, tab_id, progress_path, progress_remote,
+                        move_source=move_source)
             STATE["next_task"] += 1
             STATE["tasks"].insert(0, task)
         with self.condition:
@@ -759,10 +762,16 @@ class TaskManager(object):
             task.finished = time.strftime("%H:%M:%S")
             add_log("%s cancelled: %s" % (task.kind, task.source), "info")
             return
+        move_error = ""
+        if code == 0 and task.move_source:
+            task.detail = "Transfer complete; removing the source..."
+            move_error = self._remove_move_source(task)
+            if move_error:
+                code = 1
         task.status = "Completed" if code == 0 else "Failed"
         task.finished = time.strftime("%H:%M:%S")
         if code != 0:
-            task.error = "\n".join(captured[-6:]) or "The operation failed."
+            task.error = move_error or "\n".join(captured[-6:]) or "The operation failed."
         add_log("%s %s: %s" % (task.kind, task.status.lower(), task.source),
                 "success" if code == 0 else "error")
         # Refresh the panes of the tab this task belongs to.
@@ -774,6 +783,47 @@ class TaskManager(object):
                     if line.startswith("/"):
                         tab.remote_dir = line.strip()
                         break
+
+    def _remove_move_source(self, task):
+        """Remove a moved file only if its source still matches the queued file."""
+        source = task.move_source or {}
+        side = source.get("side")
+        path = source.get("path") or ""
+        if side == "local":
+            try:
+                current = os.stat(path)
+                if os.path.isdir(path) and not os.path.islink(path):
+                    return "The transfer completed, but directories are not moved; the source was kept."
+                if current.st_size != source.get("size") or \
+                        getattr(current, "st_mtime_ns", int(current.st_mtime * 1000000000)) != source.get("mtime_ns"):
+                    return "The transfer completed, but the local source changed; it was kept."
+                os.remove(path)
+            except OSError as exc:
+                return "The transfer completed, but the local source could not be removed: %s" % exc
+            add_log("Removed moved local file: %s" % path, "success")
+            return ""
+
+        if side == "remote":
+            with STATE_LOCK:
+                tab = next((candidate for candidate in STATE["tabs"]
+                            if str(candidate.id) == str(task.tab_id)), None)
+            if tab is None or not tab.connected:
+                return "The transfer completed, but its session closed; the remote source was kept."
+            info = remote_stat(tab, path, timeout=30)
+            if info is None:
+                return "The transfer completed, but the remote source could not be checked; it was kept."
+            if info.get("is_dir") or info.get("size") != source.get("size") or \
+                    info.get("mtime") != source.get("mtime"):
+                return "The transfer completed, but the remote source changed; it was kept."
+            command = "open %s ; rm %s" % (
+                session_url(task.session), quote_remote(path))
+            code, stdout, stderr = run_linuxscp(command, task.session, timeout=300)
+            if code != 0:
+                return "The transfer completed, but the remote source could not be removed: %s" % (
+                    stderr.strip() or stdout.strip() or "remove failed")
+            add_log("Removed moved remote file: %s" % path, "success")
+            return ""
+        return "The transfer completed, but its source could not be identified; it was kept."
 
     # -- queue controls ----------------------------------------------------
 
@@ -1193,6 +1243,24 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_json({"success": True, "path": req_path, "entries": entries})
             return
 
+        if path == "/api/local/edit":
+            tab = get_tab(query.get("tab", [None])[0])
+            local_path = query.get("path", [""])[0]
+            if not local_path:
+                self.send_json({"success": False, "error": "No file given"}, status=400)
+                return
+            local_path, path_error = resolve_local_file(tab, local_path)
+            if path_error:
+                self.send_json({"success": False, "error": path_error}, status=400)
+                return
+            content, info, error = read_local_text(local_path)
+            if error:
+                self.send_json({"success": False, "error": error}, status=400)
+                return
+            self.send_json({"success": True, "path": local_path,
+                            "content": content, "info": info})
+            return
+
         if path == "/api/remote/list":
             tab = require_tab(query.get("tab", [None])[0])
             if tab is None:
@@ -1471,6 +1539,43 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_json({"success": False, "error": str(exc)}, status=400)
             return
 
+        if path == "/api/local/chmod":
+            tab = get_tab(body.get("tab"))
+            base = tab.local_dir if tab else os.path.expanduser("~")
+            name = body.get("name") or ""
+            mode_text = str(body.get("permissions") or "")
+            if not name or not mode_text or any(ch not in "01234567" for ch in mode_text) or len(mode_text) > 4:
+                self.send_json({"success": False,
+                                "error": "Permissions must be an octal mode such as 644."},
+                               status=400)
+                return
+            try:
+                os.chmod(os.path.join(base, name), int(mode_text, 8))
+                add_log("Changed local permissions: %s" % name, "success")
+                self.send_json({"success": True})
+            except OSError as exc:
+                self.send_json({"success": False, "error": str(exc)}, status=400)
+            return
+
+        if path == "/api/local/save":
+            tab = get_tab(body.get("tab"))
+            local_path = body.get("path") or ""
+            if not local_path:
+                self.send_json({"success": False, "error": "No file given"}, status=400)
+                return
+            local_path, path_error = resolve_local_file(tab, local_path)
+            if path_error:
+                self.send_json({"success": False, "error": path_error}, status=400)
+                return
+            ok, message, info = write_local_text(
+                local_path, body.get("content"), body.get("base_mtime_ns"))
+            if ok:
+                add_log("Saved local file: %s" % local_path, "success")
+                self.send_json({"success": True, "info": info})
+            else:
+                self.send_json({"success": False, "error": message}, status=400)
+            return
+
         if path == "/api/remote/mkdir":
             tab = require_tab(body.get("tab"))
             if tab is None:
@@ -1597,7 +1702,8 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             ok, error = upload_remote_text(tab, remote_path, content,
                                            body.get("base_mtime"))
             if ok:
-                self.send_json({"success": True})
+                self.send_json({"success": True,
+                                "info": remote_stat(tab, remote_path) or {}})
             else:
                 self.send_json({"success": False, "error": error}, status=400)
             return
@@ -1645,6 +1751,102 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                     task.bytes_total = os.path.getsize(local_path)
                 except OSError:
                     task.bytes_total = 0
+            self.send_json({"success": True})
+            return
+
+        if path == "/api/transfer/move":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            direction = body.get("direction")
+            if direction not in ("upload", "download"):
+                self.send_json({"success": False,
+                                "error": "Move direction must be upload or download."}, status=400)
+                return
+            names = body.get("names") or []
+            if not isinstance(names, list) or not names:
+                self.send_json({"success": False, "error": "Select one or more files to move."},
+                               status=400)
+                return
+            local_dir = os.path.abspath(body.get("local_dir") or tab.local_dir)
+            remote_dir = body.get("remote_dir") or tab.remote_dir
+            if not os.path.isdir(local_dir):
+                self.send_json({"success": False, "error": "The local directory no longer exists."},
+                               status=400)
+                return
+            records = []
+            for name in names:
+                if not isinstance(name, str) or not name or name in (".", "..") or \
+                        "/" in name or (IS_WINDOWS and "\\" in name):
+                    self.send_json({"success": False,
+                                    "error": "A move can only select file names from the current panel."},
+                                   status=400)
+                    return
+                if direction == "upload":
+                    source_path = os.path.abspath(os.path.join(local_dir, name))
+                    try:
+                        if os.path.commonpath([local_dir, source_path]) != local_dir or \
+                                os.path.islink(source_path) or not os.path.isfile(source_path):
+                            raise ValueError("Cross-panel move supports regular files only.")
+                        source_info = os.stat(source_path)
+                    except (OSError, ValueError) as exc:
+                        self.send_json({"success": False, "error": str(exc)}, status=400)
+                        return
+                    records.append({"name": name, "source": source_path,
+                                    "source_info": source_info,
+                                    "destination": posixpath.join(remote_dir, name)})
+                else:
+                    remote_path = posixpath.join(remote_dir, name)
+                    source_info = remote_stat(tab, remote_path)
+                    if source_info is None:
+                        self.send_json({"success": False,
+                                        "error": "Cannot read remote source: %s" % name},
+                                       status=400)
+                        return
+                    if source_info.get("is_dir"):
+                        self.send_json({"success": False,
+                                        "error": "Cross-panel move supports files only; copy folders instead."},
+                                       status=400)
+                        return
+                    records.append({"name": name, "source": remote_path,
+                                    "source_info": source_info,
+                                    "destination": os.path.join(local_dir, name)})
+
+            switches = transfer_switches({
+                "resume": body.get("resume", True),
+                "recursive": False,
+                "preserve_time": body.get("preserve_time", True),
+            })
+            for record in records:
+                name = record["name"]
+                if direction == "upload":
+                    source_info = record["source_info"]
+                    command = 'lcd "%s" ; cd %s ; put %s %s' % (
+                        local_dir.replace('"', '\\"'), quote_remote(remote_dir),
+                        switches, quote_remote(name))
+                    task = TASKS.submit(
+                        "Move to remote", command, tab.session, record["source"],
+                        record["destination"], tab.id,
+                        progress_remote=(tab.id, record["destination"]),
+                        move_source={"side": "local", "path": record["source"],
+                                     "size": source_info.st_size,
+                                     "mtime_ns": getattr(source_info, "st_mtime_ns",
+                                                          int(source_info.st_mtime * 1000000000))})
+                    task.bytes_total = source_info.st_size
+                else:
+                    source_info = record["source_info"]
+                    command = 'lcd "%s" ; cd %s ; get %s %s' % (
+                        local_dir.replace('"', '\\"'), quote_remote(remote_dir),
+                        switches, quote_remote(name))
+                    task = TASKS.submit(
+                        "Move to local", command, tab.session, record["source"],
+                        record["destination"], tab.id,
+                        progress_path=record["destination"],
+                        move_source={"side": "remote", "path": record["source"],
+                                     "size": source_info.get("size", 0),
+                                     "mtime": source_info.get("mtime", 0)})
+                    task.bytes_total = source_info.get("size", 0)
             self.send_json({"success": True})
             return
 
@@ -1965,6 +2167,98 @@ def temp_path_for(remote_path):
     return os.path.join(edit_temp_root(), "%d-%s" % (int(time.time()), safe[-64:]))
 
 
+MAX_GUI_EDIT_BYTES = 8 * 1024 * 1024
+
+
+def resolve_local_file(tab, path):
+    """Resolve a local edit path beneath the active local panel directory."""
+    base = tab.local_dir if tab else os.path.expanduser("~")
+    candidate = path if os.path.isabs(path) else os.path.join(base, path)
+    candidate = os.path.abspath(candidate)
+    real_base = os.path.realpath(base)
+    real_target = os.path.realpath(candidate)
+    try:
+        if os.path.commonpath([real_base, real_target]) != real_base:
+            return "", "The file is outside the current local panel directory."
+    except ValueError:
+        return "", "The file is outside the current local panel directory."
+    return candidate, ""
+
+
+def read_local_text(local_path, max_size=MAX_GUI_EDIT_BYTES):
+    """Read a bounded UTF-8 local file for the Commander viewer/editor."""
+    try:
+        before = os.stat(local_path)
+        if not os.path.isfile(local_path):
+            return None, {}, "That is not a regular file."
+        if before.st_size > max_size:
+            return None, {}, "The file is %d bytes, too large for the editor (limit %d)." % (
+                before.st_size, max_size)
+        with open(local_path, "rb") as handle:
+            data = handle.read(max_size + 1)
+        current = os.stat(local_path)
+    except OSError as exc:
+        return None, {}, str(exc)
+    before_ns = getattr(before, "st_mtime_ns", int(before.st_mtime * 1000000000))
+    current_ns = getattr(current, "st_mtime_ns", int(current.st_mtime * 1000000000))
+    if current_ns != before_ns:
+        return None, {}, "The file changed while it was being read; try again."
+    if len(data) > max_size:
+        return None, {}, "The file is too large for the editor (limit %d bytes)." % max_size
+    if b"\0" in data:
+        return None, {}, "The file is binary; the editor can only view text files."
+    info = {"size": len(data), "mtime": current.st_mtime, "mtime_ns": current_ns}
+    return data.decode("utf-8", "replace"), info, ""
+
+
+def write_local_text(local_path, content, base_mtime_ns,
+                     max_size=MAX_GUI_EDIT_BYTES):
+    """Atomically save a local text edit only if the original is unchanged."""
+    if not isinstance(content, str):
+        return False, "The file content must be text.", {}
+    data = content.encode("utf-8")
+    if len(data) > max_size:
+        return False, "The edited file is too large (limit %d bytes)." % max_size, {}
+    if not base_mtime_ns:
+        return False, "The original file timestamp is missing; reload before saving.", {}
+    if os.path.islink(local_path):
+        return False, "Editing a symbolic link is not supported; open its target instead.", {}
+    try:
+        current = os.stat(local_path)
+        if not os.path.isfile(local_path):
+            return False, "That is not a regular file.", {}
+        expected = int(base_mtime_ns)
+        current_ns = getattr(current, "st_mtime_ns", int(current.st_mtime * 1000000000))
+        if current_ns != expected:
+            return False, "The file changed while it was open; reload it before saving.", {}
+        mode = stat.S_IMODE(current.st_mode)
+        fd, temporary = tempfile.mkstemp(prefix=".linscp-edit-",
+                                          dir=os.path.dirname(os.path.abspath(local_path)))
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temporary, mode)
+            latest = os.stat(local_path)
+            latest_ns = getattr(latest, "st_mtime_ns", int(latest.st_mtime * 1000000000))
+            if latest_ns != expected:
+                return False, "The file changed while it was open; reload it before saving.", {}
+            os.replace(temporary, local_path)
+            saved = os.stat(local_path)
+        finally:
+            try:
+                if os.path.exists(temporary):
+                    os.remove(temporary)
+            except OSError:
+                pass
+    except (OSError, ValueError) as exc:
+        return False, str(exc), {}
+    info = {"size": len(data), "mtime": saved.st_mtime,
+            "mtime_ns": getattr(saved, "st_mtime_ns", int(saved.st_mtime * 1000000000))}
+    return True, "", info
+
+
 def download_remote_text(tab, remote_path, max_size=8 * 1024 * 1024):
     """Download a remote file for the editor. Returns (content, info, error)."""
     info = remote_stat(tab, remote_path)
@@ -2067,9 +2361,9 @@ def main():
     except OSError as exc:
         print("Cannot listen on %s:%d: %s" % (host, port, exc), file=sys.stderr)
         return 1
-    print("LinuxSCP Commander GUI running at http://localhost:%d/" % port)
+    print("LinSCP Commander GUI running at http://localhost:%d/" % port)
     print("Serving web client from: %s" % WEB_DIR)
-    print("LinuxSCP core binary: %s" % LINUXSCP_BIN)
+    print("LinSCP core binary: %s" % LINUXSCP_BIN)
     print("Stored sessions: %s" % session_store_path())
     if REQUIRE_TOKEN:
         print("API calls need this run's token (X-LSCP-Token header); the")
@@ -2091,7 +2385,7 @@ def main():
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\nStopping LinuxSCP GUI server...")
+        print("\nStopping LinSCP GUI server...")
         TASKS.cancel_all()
         for tab in list(STATE["tabs"]):
             tab.terminate()

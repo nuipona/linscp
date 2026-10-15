@@ -1,5 +1,5 @@
 @echo off
-rem LinuxSCP graphical Commander interface launcher (Windows).
+rem LinSCP graphical Commander interface launcher (Windows).
 rem Starts the web-based dual-pane GUI with the system Python 3.
 setlocal
 set "DIR=%~dp0"

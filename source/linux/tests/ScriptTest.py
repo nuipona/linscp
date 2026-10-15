@@ -652,7 +652,7 @@ class ScriptTests(unittest.TestCase):
             self.assertTrue(log.exists(), result.stderr)
             root = ET.parse(log).getroot()
             self.assertEqual(root.tag, "log_session")
-            self.assertIn("LinuxSCP", root.get("client", ""))
+            self.assertIn("LinSCP", root.get("client", ""))
             self.assertTrue(root.get("created"))
             elements = [element.tag for element in root]
             self.assertIn("command", elements)

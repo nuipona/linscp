@@ -8,7 +8,7 @@ challenge round-trip is exercised, and it speaks only what a filesystem
 client needs:
 
   PROPFIND Depth 0/1 with a 207 multi-status (resourcetype,
-  getcontentlength, getlastmodified - the properties LinuxSCP's parser
+  getcontentlength, getlastmodified - the properties LinSCP's parser
   reads), MKCOL, GET/HEAD with ranges, PUT, DELETE (409 on a
   non-empty collection, the conflict rmdir depends on), MOVE, and COPY
   with absolute-URI Destination and Overwrite semantics.

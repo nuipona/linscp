@@ -1,560 +1,149 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LinuxSCP Commander - Dual Pane File Transfer</title>
-  <style>
-    :root {
-      --win-bg: #ece9d8;
-      --win-panel: #f5f5f5;
-      --win-header: #0055ea;
-      --win-header-grad: linear-gradient(180deg, #0a246a 0%, #a6caf0 100%);
-      --win-border: #999999;
-      --win-border-light: #ffffff;
-      --win-border-dark: #808080;
-      --win-blue: #0b61a4;
-      --text-main: #111111;
-      --table-header: #e0dfe3;
-      --sel-bg: #316ac5;
-      --sel-color: #ffffff;
-      --font-family: "Segoe UI", Tahoma, Arial, sans-serif;
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: var(--font-family);
-      font-size: 12px;
-      color: var(--text-main);
-      background-color: var(--win-bg);
-      height: 100vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      user-select: none;
-    }
-    /* Menu Bar */
-    .menu-bar {
-      background: #f0f0f0;
-      border-bottom: 1px solid #d0d0d0;
-      display: flex;
-      padding: 2px 4px;
-      font-size: 11px;
-    }
-    .menu-item {
-      padding: 2px 8px;
-      cursor: pointer;
-      border-radius: 2px;
-    }
-    .menu-item:hover {
-      background: #3399ff;
-      color: white;
-    }
-    /* Toolbar / Quick Connect */
-    .toolbar {
-      background: linear-gradient(to bottom, #fdfdfd, #e6e6e6);
-      border-bottom: 1px solid #b0b0b0;
-      padding: 6px 8px;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 6px;
-    }
-    .tool-group {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .tool-label {
-      font-weight: 600;
-      font-size: 11px;
-      color: #333;
-    }
-    .input-field, .select-field {
-      padding: 3px 6px;
-      font-size: 11px;
-      border: 1px solid #7f9db9;
-      border-radius: 2px;
-      background: white;
-    }
-    .btn {
-      padding: 3px 10px;
-      font-size: 11px;
-      font-weight: 500;
-      border: 1px solid #707070;
-      border-radius: 3px;
-      background: linear-gradient(to bottom, #f2f2f2, #ebebeb);
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .btn:hover {
-      background: linear-gradient(to bottom, #eaf2fb, #dbebfc);
-      border-color: #3c7fb1;
-    }
-    .btn:active {
-      background: #cce4f7;
-    }
-    .btn-primary {
-      background: linear-gradient(to bottom, #0078d7, #0063b1);
-      color: white;
-      border-color: #004e8c;
-      font-weight: 600;
-    }
-    .btn-primary:hover {
-      background: linear-gradient(to bottom, #1a88df, #0070c9);
-    }
-    .badge-connected {
-      background: #107c41;
-      color: white;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 10px;
-      font-weight: bold;
-    }
-    .badge-disconnected {
-      background: #d83b01;
-      color: white;
-      padding: 2px 8px;
-      border-radius: 10px;
-      font-size: 10px;
-      font-weight: bold;
-    }
-
-    /* Main Commander Area */
-    .commander-main {
-      flex: 1;
-      display: flex;
-      flex-direction: row;
-      overflow: hidden;
-      padding: 4px;
-      gap: 4px;
-      min-height: 0;
-    }
-    .pane {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      border: 1px solid var(--win-border-dark);
-      background: white;
-      overflow: hidden;
-      border-radius: 2px;
-      min-width: 0;
-    }
-    .pane-header {
-      background: #e8e8e8;
-      border-bottom: 1px solid #c0c0c0;
-      padding: 4px 6px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .pane-title {
-      font-weight: bold;
-      font-size: 11px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      color: #003399;
-    }
-    .path-input-group {
-      flex: 1;
-      display: flex;
-      align-items: center;
-      gap: 2px;
-    }
-    .path-input {
-      flex: 1;
-      padding: 2px 4px;
-      font-size: 11px;
-      border: 1px solid #7f9db9;
-      background: white;
-    }
-    .btn-icon {
-      padding: 2px 6px;
-      font-size: 11px;
-      cursor: pointer;
-      background: #eee;
-      border: 1px solid #aaa;
-      border-radius: 2px;
-    }
-    .btn-icon:hover { background: #ddd; }
-
-    /* File Table */
-    .file-table-container {
-      flex: 1;
-      overflow: auto;
-      background: white;
-    }
-    table.file-table {
-      width: 100%;
-      border-collapse: collapse;
-      table-layout: fixed;
-    }
-    table.file-table th {
-      position: sticky;
-      top: 0;
-      background: var(--table-header);
-      border-bottom: 1px solid #999;
-      border-right: 1px solid #d0d0d0;
-      padding: 3px 6px;
-      text-align: left;
-      font-weight: 600;
-      font-size: 11px;
-      cursor: pointer;
-    }
-    table.file-table td {
-      padding: 2px 6px;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      border-bottom: 1px solid #f0f0f0;
-      font-size: 11px;
-    }
-    table.file-table tr.selected {
-      background-color: var(--sel-bg) !important;
-      color: var(--sel-color) !important;
-    }
-    table.file-table tr:hover:not(.selected) {
-      background-color: #f2f7fd;
-    }
-    .file-icon {
-      display: inline-block;
-      width: 14px;
-      height: 14px;
-      vertical-align: middle;
-      margin-right: 4px;
-    }
-
-    /* Central Splitter Action Column */
-    .commander-actions {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 6px;
-      padding: 2px;
-    }
-    .action-btn {
-      padding: 8px 6px;
-      font-size: 12px;
-      font-weight: bold;
-      cursor: pointer;
-      border: 1px solid #888;
-      border-radius: 3px;
-      background: linear-gradient(to bottom, #fff, #e0e0e0);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 2px;
-    }
-    .action-btn:hover {
-      background: #d0e4f7;
-      border-color: #3399ff;
-    }
-
-    /* Lower Panel / Tabs */
-    .lower-panel {
-      height: 160px;
-      display: flex;
-      flex-direction: column;
-      background: #f0f0f0;
-      border-top: 1px solid #aaa;
-    }
-    .tabs {
-      display: flex;
-      background: #e0e0e0;
-      border-bottom: 1px solid #bbb;
-      padding-left: 6px;
-    }
-    .tab {
-      padding: 4px 12px;
-      cursor: pointer;
-      font-size: 11px;
-      font-weight: 500;
-      border-top-left-radius: 3px;
-      border-top-right-radius: 3px;
-      margin-top: 2px;
-      margin-right: 2px;
-      background: #d8d8d8;
-      border: 1px solid #bbb;
-      border-bottom: none;
-    }
-    .tab.active {
-      background: white;
-      font-weight: bold;
-      border-bottom: 1px solid white;
-      margin-bottom: -1px;
-    }
-    .tab-content {
-      flex: 1;
-      overflow: auto;
-      background: white;
-      padding: 4px;
-      display: none;
-      font-family: Consolas, monospace;
-      font-size: 11px;
-    }
-    .tab-content.active {
-      display: block;
-    }
-    .log-line {
-      line-height: 1.4;
-      white-space: pre-wrap;
-    }
-    .log-time { color: #666; margin-right: 6px; }
-    .log-cmd { color: #0000aa; font-weight: bold; }
-    .log-error { color: #cc0000; font-weight: bold; }
-    .log-success { color: #008800; font-weight: bold; }
-
-    /* Commander Bottom Function Keys Bar */
-    .function-keys {
-      display: flex;
-      background: #2b3a42;
-      color: white;
-      padding: 2px;
-      gap: 2px;
-      border-top: 1px solid #1a242a;
-    }
-    .fn-key {
-      flex: 1;
-      background: linear-gradient(to bottom, #445661, #2b3a42);
-      border: 1px solid #5a6e7c;
-      border-radius: 2px;
-      padding: 4px 2px;
-      text-align: center;
-      cursor: pointer;
-      font-size: 10px;
-    }
-    .fn-key:hover {
-      background: linear-gradient(to bottom, #5a6e7c, #3d4f5b);
-      border-color: #8da4b6;
-    }
-    .fn-key strong {
-      color: #ffd700;
-      margin-right: 2px;
-    }
-
-    /* Modal Dialog */
-    .modal-overlay {
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.4);
-      display: none;
-      align-items: center;
-      justify-content: center;
-      z-index: 1000;
-    }
-    .modal-overlay.open {
-      display: flex;
-    }
-    .modal-box {
-      width: 440px;
-      background: #f0f0f0;
-      border: 2px solid #0055ea;
-      border-radius: 4px;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.3);
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .modal-header {
-      background: var(--win-header-grad);
-      color: white;
-      font-weight: bold;
-      padding: 6px 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .modal-body {
-      padding: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      background: #f7f7f7;
-    }
-    .modal-footer {
-      padding: 8px 12px;
-      background: #ece9d8;
-      border-top: 1px solid #ccc;
-      display: flex;
-      justify-content: flex-end;
-      gap: 6px;
-    }
-    .form-row {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .form-row label {
-      width: 90px;
-      font-weight: 500;
-    }
-    .form-row input, .form-row select {
-      flex: 1;
-    }
-    /* Session tabs */
-    .tabs-bar {
-      display: flex;
-      align-items: stretch;
-      background: linear-gradient(to bottom, #fdfdfd, #e6e6e6);
-      border-bottom: 1px solid #b0b0b0;
-    }
-    .tab-strip { display: flex; flex: 1; overflow-x: auto; }
-    .session-tab {
-      display: flex; align-items: center; gap: 6px;
-      padding: 4px 10px; font-size: 11px; cursor: pointer;
-      border-right: 1px solid #ccc; border-top: 2px solid transparent;
-      white-space: nowrap;
-    }
-    .session-tab.active {
-      background: white; font-weight: bold; border-top-color: #0078d7;
-    }
-    .session-tab:hover { background: #dbebfc; }
-    .tab-close { color: #888; padding: 0 2px; border-radius: 2px; }
-    .tab-close:hover { background: #d83b01; color: white; }
-    .tab-new {
-      border: none; border-left: 1px solid #ccc; background: #f4f4f4;
-      width: 28px; cursor: pointer; font-size: 14px;
-    }
-    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-    .dot.on { background: #107c41; }
-    .dot.off { background: #d83b01; }
-
-    /* Notice bar (host key) */
-    .notice-bar {
-      display: flex; align-items: center; gap: 8px;
-      background: #fff8d6; border-bottom: 1px solid #e0c068;
-      padding: 4px 8px; font-size: 11px; color: #6b5100;
-    }
-
-    /* Pane footer */
-    .pane-footer {
-      display: flex; align-items: center; justify-content: space-between;
-      gap: 6px; padding: 3px 6px; background: #f4f4f4;
-      border-top: 1px solid #c0c0c0; font-size: 11px; color: #444;
-    }
-    .pane-actions { display: flex; gap: 4px; }
-
-    /* Queue */
-    .queue-controls { display: flex; gap: 4px; align-items: center; padding-right: 6px; }
-    .queue-table th {
-      background: #eee; text-align: left; padding: 4px;
-      border-bottom: 1px solid #ccc; font-size: 11px;
-    }
-    .queue-table td { padding: 3px 4px; border-bottom: 1px solid #f0f0f0; font-size: 11px; }
-    .progress {
-      height: 8px; background: #e8e8e8; border: 1px solid #bbb; border-radius: 2px;
-      overflow: hidden; margin-bottom: 2px;
-    }
-    .progress-bar { height: 100%; background: linear-gradient(to bottom, #6db3f2, #1e6fc4); }
-    .progress-text { font-size: 10px; color: #555; }
-    .status { font-weight: bold; font-size: 10px; }
-    .status-running { color: #0063b1; }
-    .status-completed { color: #107c41; }
-    .status-failed { color: #d83b01; }
-    .status-cancelled, .status-canceled { color: #6b5100; }
-    .status-queued { color: #666; }
-    .btn.tiny { padding: 0 5px; font-size: 10px; }
-
-    /* Site manager */
-    .site-list {
-      width: 190px; border: 1px solid #b0b0b0; background: white;
-      display: flex; flex-direction: column; min-height: 300px;
-    }
-    .site-list-header {
-      background: #e0dfe3; padding: 3px 6px; font-weight: bold; font-size: 11px;
-      border-bottom: 1px solid #b0b0b0;
-    }
-    .site-list-items { flex: 1; overflow: auto; }
-    .site-item { padding: 3px 8px; cursor: pointer; font-size: 11px; }
-    .site-item.selected { background: var(--sel-bg); color: var(--sel-color); }
-    .site-empty { padding: 8px; color: #888; font-size: 11px; }
-    .site-list-footer { display: flex; gap: 4px; padding: 4px; border-top: 1px solid #ddd; }
-    .site-form { flex: 1; display: flex; flex-direction: column; gap: 6px; }
-    .hint { font-size: 10px; color: #666; line-height: 1.4; }
-
-    /* Preview lists (sync, search) */
-    .preview-box {
-      border: 1px solid #b0b0b0; background: white; display: flex; flex-direction: column;
-      max-height: 190px;
-    }
-    .preview-header {
-      background: #e0dfe3; padding: 3px 6px; font-size: 11px; font-weight: bold;
-      border-bottom: 1px solid #b0b0b0;
-    }
-    .preview-list { overflow: auto; font-size: 11px; }
-    .plan-item {
-      display: flex; gap: 6px; padding: 1px 6px; border-bottom: 1px solid #f0f0f0;
-      align-items: baseline;
-    }
-    .plan-item:hover { background: #f2f7fd; }
-    .plan-action { width: 88px; font-weight: bold; flex: none; }
-    .plan-item.download .plan-action { color: #0063b1; }
-    .plan-item.upload .plan-action { color: #107c41; }
-    .plan-item.delete-local .plan-action, .plan-item.delete-remote .plan-action { color: #d83b01; }
-    .plan-item.conflict .plan-action { color: #8a2b06; }
-    .plan-item.unchanged .plan-action { color: #888; }
-    .plan-path { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .plan-reason { color: #666; font-size: 10px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-    /* Editor */
-    .editor-area {
-      flex: 1; width: 100%; resize: none; border: none; outline: none;
-      font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 12px;
-      padding: 6px; line-height: 1.45; background: white;
-    }
-
-    .fingerprint {
-      font-family: Consolas, "DejaVu Sans Mono", monospace; font-size: 11px;
-      background: #fff; border: 1px solid #b0b0b0; padding: 6px;
-      word-break: break-all; user-select: text;
-    }
-
-    /* Toast */
-    .toast {
-      position: fixed; bottom: 12px; right: 12px; max-width: 380px;
-      background: #333; color: white; padding: 8px 12px; border-radius: 4px;
-      font-size: 11px; opacity: 0; pointer-events: none; transition: opacity .2s;
-      z-index: 2000; box-shadow: 0 4px 12px rgba(0,0,0,.3);
-    }
-    .toast.show { opacity: 1; }
-    .toast.error { background: #d83b01; }
-    .action-btn.active {
-      background: #2b5797;
-      color: #fff;
-      border-color: #2b5797;
-    }
-    .pane.drop-target {
-      outline: 3px dashed #2b5797;
-      outline-offset: -3px;
-    }
-    .pane.drop-target .file-table-container {
-      background: rgba(43, 87, 151, 0.08);
-    }
-  </style>
+  <title>LinSCP Commander — Secure File Transfer</title>
+  <meta name="theme-color" content="#0e131a">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">
+  <link rel="stylesheet" href="/theme.css">
 </head>
 <body>
 
-  <!-- Menu Bar -->
-  <div class="menu-bar">
-    <div class="menu-item" onclick="openSiteManager()">Sessions</div>
-    <div class="menu-item" onclick="newTab()">New Tab</div>
-    <div class="menu-item" onclick="actionUpload()">Files</div>
-    <div class="menu-item" onclick="openSynchronize()">Commands</div>
-    <div class="menu-item" onclick="openSearch()">Search</div>
-    <div class="menu-item" onclick="openTerminal()">Terminal</div>
-    <div class="menu-item" onclick="refreshAll()">View</div>
-    <div class="menu-item" onclick="showHelp()">Help</div>
-    <div style="flex:1;"></div>
-    <div id="statusBadge" class="badge-disconnected">Disconnected</div>
-  </div>
+  <header class="app-shell">
+    <nav class="menu-bar" role="menubar" aria-label="Main menu">
+      <div class="menu-brand"><img src="/icon.svg" alt=""><span>LinSCP</span></div>
 
-  <!-- Session tabs -->
-  <div class="tabs-bar">
-    <div id="tabStrip" class="tab-strip"></div>
-    <button class="tab-new" title="Open another session" onclick="newTab()">+</button>
-  </div>
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('localMenu', this)">Local</button>
+        <div class="menu-dropdown" id="localMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(() => $('localPathInput').focus())">Go to directory <span class="shortcut">Ctrl+L</span></button>
+          <button role="menuitem" onclick="menuAction(() => goUp('local'))">Parent directory <span class="shortcut">Backspace</span></button>
+          <button role="menuitem" onclick="menuAction(() => loadLocal(state.local.path))">Refresh</button>
+          <div class="menu-separator"></div>
+          <button role="menuitem" onclick="menuAction(() => newFolderPrompt('local'))">New directory <span class="shortcut">F7</span></button>
+          <button role="menuitem" onclick="menuAction(() => renamePrompt('local'))">Rename <span class="shortcut">F2</span></button>
+          <button role="menuitem" onclick="menuAction(() => deletePrompt('local'))">Delete <span class="shortcut">F8</span></button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('markMenu', this)">Mark</button>
+        <div class="menu-dropdown" id="markMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(selectAllInFocusedPane)">Select all <span class="shortcut">Ctrl+A</span></button>
+          <button role="menuitem" onclick="menuAction(clearFocusedSelection)">Clear selection</button>
+          <button role="menuitem" onclick="menuAction(invertFocusedSelection)">Invert selection</button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('filesMenu', this)">Files</button>
+        <div class="menu-dropdown" id="filesMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(viewSelected)">View <span class="shortcut">F3</span></button>
+          <button role="menuitem" onclick="menuAction(editSelected)">Edit <span class="shortcut">F4</span></button>
+          <button role="menuitem" onclick="menuAction(copyToOtherPane)">Copy to other panel <span class="shortcut">F5</span></button>
+          <button role="menuitem" onclick="menuAction(moveToOtherPane)">Move to other panel <span class="shortcut">F6</span></button>
+          <div class="menu-separator"></div>
+          <button role="menuitem" onclick="menuAction(() => renamePrompt(state.focusPane))">Rename <span class="shortcut">F2</span></button>
+          <button role="menuitem" onclick="menuAction(() => newFolderPrompt(state.focusPane))">New directory <span class="shortcut">F7</span></button>
+          <button role="menuitem" onclick="menuAction(() => deletePrompt(state.focusPane))">Delete <span class="shortcut">F8</span></button>
+          <button role="menuitem" onclick="menuAction(() => permissionsPrompt(state.focusPane))">Properties / rights <span class="shortcut">F9</span></button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('commandsMenu', this)">Commands</button>
+        <div class="menu-dropdown" id="commandsMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(openSynchronize)">Synchronize directories</button>
+          <button role="menuitem" onclick="menuAction(openSearch)">Find files</button>
+          <button role="menuitem" onclick="menuAction(openTerminal)">Open remote terminal</button>
+          <button role="menuitem" onclick="menuAction(() => switchTab('cli'))">LinSCP command console</button>
+          <div class="menu-separator"></div>
+          <button role="menuitem" onclick="menuAction(toggleSyncBrowse)">Toggle synchronized browsing</button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('tabsMenu', this)">Tabs</button>
+        <div class="menu-dropdown" id="tabsMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(openSiteManager)">New session <span class="shortcut">Ctrl+N</span></button>
+          <button role="menuitem" onclick="menuAction(disconnectActiveTab)">Close current session <span class="shortcut">F10</span></button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('optionsMenu', this)">Options</button>
+        <div class="menu-dropdown" id="optionsMenu" role="menu">
+          <button id="themeToggleMenuItem" role="menuitem" onclick="menuAction(toggleTheme)">Switch to light theme</button>
+          <button role="menuitem" onclick="menuAction(() => switchTab('queue'))">Transfer queue</button>
+          <button role="menuitem" onclick="menuAction(() => switchTab('log'))">Command log</button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('remoteMenu', this)">Remote</button>
+        <div class="menu-dropdown" id="remoteMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(() => $('remotePathInput').focus())">Go to directory <span class="shortcut">Ctrl+R</span></button>
+          <button role="menuitem" onclick="menuAction(() => goUp('remote'))">Parent directory</button>
+          <button role="menuitem" onclick="menuAction(() => loadRemote(state.remote.path))">Refresh</button>
+          <div class="menu-separator"></div>
+          <button role="menuitem" onclick="menuAction(() => newFolderPrompt('remote'))">New directory <span class="shortcut">F7</span></button>
+          <button role="menuitem" onclick="menuAction(() => editSelected('remote'))">Edit</button>
+          <button role="menuitem" onclick="menuAction(() => permissionsPrompt('remote'))">Change rights <span class="shortcut">F9</span></button>
+          <button role="menuitem" onclick="menuAction(() => deletePrompt('remote'))">Delete <span class="shortcut">F8</span></button>
+        </div>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" aria-haspopup="true" aria-expanded="false"
+                onclick="toggleMenu('helpMenu', this)">Help</button>
+        <div class="menu-dropdown" id="helpMenu" role="menu">
+          <button role="menuitem" onclick="menuAction(showHelp)">LinSCP Help <span class="shortcut">F1</span></button>
+        </div>
+      </div>
+    </nav>
+
+    <div class="app-toolbar" role="toolbar" aria-label="Quick actions">
+      <div class="brand">
+        <img class="brand-icon" src="/icon.svg" alt="">
+        <div class="brand-copy"><strong>LinSCP</strong><small>Commander · secure file transfer</small></div>
+      </div>
+      <div class="toolbar-divider" aria-hidden="true"></div>
+      <button class="toolbar-button primary" onclick="openSiteManager()" title="Open the session manager">
+        <span class="tool-icon">＋</span><span class="tool-label">New session</span>
+      </button>
+      <button class="toolbar-button" onclick="reconnectTab()" title="Reconnect the active session">
+        <span class="tool-icon">↻</span><span class="tool-label">Reconnect</span>
+      </button>
+      <button class="toolbar-button" onclick="refreshAll()" title="Refresh both file panels">
+        <span class="tool-icon">⟳</span><span class="tool-label">Refresh</span>
+      </button>
+      <button class="toolbar-button" onclick="openSearch()" title="Find remote files">
+        <span class="tool-icon">⌕</span><span class="tool-label">Find</span>
+      </button>
+      <button class="toolbar-button" onclick="openSynchronize()" title="Synchronize the current directories">
+        <span class="tool-icon">⇄</span><span class="tool-label">Synchronize</span>
+      </button>
+      <button class="toolbar-button tertiary" onclick="openTerminal()" title="Open a terminal on the remote server">
+        <span class="tool-icon">&gt;_</span><span class="tool-label">Terminal</span>
+      </button>
+      <span class="toolbar-spacer"></span>
+      <div id="statusBadge" class="badge-disconnected" role="status" aria-live="polite">Disconnected</div>
+    </div>
+
+    <div class="tabs-bar" aria-label="Open sessions">
+      <div id="tabStrip" class="tab-strip" role="tablist"></div>
+      <button class="tab-new" title="Open another session" aria-label="Open another session" onclick="newTab()">+</button>
+    </div>
+  </header>
 
   <!-- Host key notice (trust on first use) -->
   <div id="hostKeyBar" class="notice-bar" style="display:none;">
@@ -607,27 +196,28 @@
       </div>
     </div>
 
-    <!-- CENTER ACTION BUTTONS -->
-    <div class="commander-actions">
-      <button class="action-btn" title="Upload the selected files to the remote pane (F5)" onclick="actionUpload()">
-        <span style="font-size: 16px;">➡</span><span>Upload</span>
+    <!-- Commander file-action band -->
+    <div class="commander-actions" role="toolbar" aria-label="File operations">
+      <button class="action-btn" title="View the selected file (F3)" onclick="viewSelected()">
+        <span class="action-icon">◉</span><span>View</span><span class="action-key">F3</span>
       </button>
-      <button class="action-btn" title="Download the selected files into the local pane (F6)" onclick="actionDownload()">
-        <span style="font-size: 16px;">⬅</span><span>Download</span>
+      <button class="action-btn" title="Edit the selected file (F4)" onclick="editSelected()">
+        <span class="action-icon">✎</span><span>Edit</span><span class="action-key">F4</span>
       </button>
-      <button class="action-btn" title="Synchronize the two directories" onclick="openSynchronize()">
-        <span style="font-size: 14px;">⇄</span><span>Sync</span>
+      <button class="action-btn" title="Copy the selection to the opposite panel (F5)" onclick="copyToOtherPane()">
+        <span class="action-icon">⇄</span><span>Copy</span><span class="action-key">F5</span>
+      </button>
+      <button class="action-btn" title="Move files to the opposite panel (F6)" onclick="moveToOtherPane()">
+        <span class="action-icon">➜</span><span>Move</span><span class="action-key">F6</span>
+      </button>
+      <span class="action-spacer"></span>
+      <button class="action-btn" title="Preview or run a directory synchronization" onclick="openSynchronize()">
+        <span class="action-icon">⟳</span><span>Synchronize</span>
       </button>
       <button class="action-btn" id="syncBrowseBtn"
               title="Synchronized browsing is off: each pane browses on its own"
               onclick="toggleSyncBrowse()">
-        <span style="font-size: 14px;">⇄</span><span>Synchronized</span>
-      </button>
-      <button class="action-btn" title="Edit the selected remote file (F4)" onclick="editSelected()">
-        <span style="font-size: 14px;">✎</span><span>Edit</span>
-      </button>
-      <button class="action-btn" title="Open a terminal on the server" onclick="openTerminal()">
-        <span style="font-size: 12px; font-family: monospace;">&gt;_</span><span>Terminal</span>
+        <span class="action-icon">⇄</span><span>Sync browsing</span>
       </button>
     </div>
 
@@ -667,7 +257,7 @@
         <span class="pane-actions">
           <button class="btn" onclick="newFolderPrompt('remote')">New folder</button>
           <button class="btn" onclick="renamePrompt('remote')">Rename</button>
-          <button class="btn" onclick="permissionsPrompt()">Rights</button>
+          <button class="btn" onclick="permissionsPrompt('remote')">Rights</button>
           <button class="btn" onclick="deletePrompt('remote')">Delete</button>
         </span>
       </div>
@@ -678,9 +268,9 @@
   <!-- Bottom Panel Tabs (Queue, Log, CLI) -->
   <div class="lower-panel">
     <div class="tabs">
-      <div class="tab active" id="tabQueueBtn" onclick="switchTab('queue')">Transfer Queue (0)</div>
-      <div class="tab" id="tabLogBtn" onclick="switchTab('log')">Command Log</div>
-      <div class="tab" id="tabCliBtn" onclick="switchTab('cli')">LinuxSCP CLI Terminal</div>
+      <button class="tab active" id="tabQueueBtn" onclick="switchTab('queue')">Transfer Queue (0)</button>
+      <button class="tab" id="tabLogBtn" onclick="switchTab('log')">Command Log</button>
+      <button class="tab" id="tabCliBtn" onclick="switchTab('cli')">LinSCP command console</button>
       <div style="flex:1;"></div>
       <div class="queue-controls">
         <button class="btn" id="pauseBtn" onclick="togglePause()">Pause</button>
@@ -702,36 +292,39 @@
           </tr>
         </thead>
         <tbody id="queueList">
-          <tr><td colspan="5" style="padding:8px; color:#888;">No transfers in the queue.</td></tr>
+<tr><td colspan="5" class="queue-empty">No transfers in the queue.</td></tr>
         </tbody>
       </table>
     </div>
 
     <!-- Tab 2: Log -->
-    <div class="tab-content" id="tabLog" style="background:#fcfcfc;">
+    <div class="tab-content" id="tabLog">
       <div id="logOutput"></div>
     </div>
 
     <!-- Tab 3: CLI Terminal -->
-    <div class="tab-content" id="tabCli" style="display:none; flex-direction:column; padding:6px; background:#1e1e1e; color:#eee;">
-      <div id="cliOutput" style="flex:1; overflow:auto; margin-bottom:6px; white-space:pre-wrap; font-family:monospace;">LinuxSCP console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').</div>
-      <div style="display:flex; gap:6px;">
-        <span style="color:#00ff00; font-weight:bold;">lscp&gt;</span>
-        <input type="text" id="cliInput" style="flex:1; background:#2d2d2d; color:#fff; border:1px solid #444; padding:3px 6px; font-family:monospace;" onkeydown="if(event.key==='Enter') execCliCommand()">
-        <button class="btn" style="background:#333; color:#fff; border-color:#555;" onclick="execCliCommand()">Run</button>
+    <div class="tab-content" id="tabCli">
+      <div id="cliOutput">LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').</div>
+      <div class="cli-input-row">
+        <span class="cli-prompt">lscp&gt;</span>
+        <input type="text" id="cliInput" onkeydown="if(event.key==='Enter') execCliCommand()">
+        <button class="btn cli-run" onclick="execCliCommand()">Run</button>
       </div>
     </div>
   </div>
 
-  <!-- Classic Commander Function Keys Bar -->
-  <div class="function-keys">
-    <div class="fn-key" onclick="actionDownload()"><strong>F4</strong> Edit</div>
-    <div class="fn-key" onclick="actionUpload()"><strong>F5</strong> Upload</div>
-    <div class="fn-key" onclick="actionDownload()"><strong>F6</strong> Download</div>
-    <div class="fn-key" onclick="newFolderPrompt(null)"><strong>F7</strong> New Folder</div>
-    <div class="fn-key" onclick="deletePrompt(null)"><strong>F8</strong> Delete</div>
-    <div class="fn-key" onclick="openSynchronize()"><strong>F9</strong> Synchronize</div>
-    <div class="fn-key" onclick="refreshAll()"><strong>F10</strong> Refresh</div>
+  <!-- WinSCP Commander function-key order; actions follow the focused panel. -->
+  <div class="function-keys" role="toolbar" aria-label="Commander function keys">
+    <button class="fn-key" onclick="showHelp()" title="Help"><strong>F1</strong><span>Help</span></button>
+    <button class="fn-key" onclick="renamePrompt(state.focusPane)" title="Rename selected item"><strong>F2</strong><span>Rename</span></button>
+    <button class="fn-key" onclick="viewSelected()" title="View selected file"><strong>F3</strong><span>View</span></button>
+    <button class="fn-key" onclick="editSelected()" title="Edit selected remote file"><strong>F4</strong><span>Edit</span></button>
+    <button class="fn-key" onclick="copyToOtherPane()" title="Copy to the opposite panel"><strong>F5</strong><span>Copy</span></button>
+    <button class="fn-key" onclick="moveToOtherPane()" title="Move to the opposite panel"><strong>F6</strong><span>Move</span></button>
+    <button class="fn-key" onclick="newFolderPrompt(state.focusPane)" title="Create a directory"><strong>F7</strong><span>New directory</span></button>
+    <button class="fn-key" onclick="deletePrompt(state.focusPane)" title="Delete selected item"><strong>F8</strong><span>Delete</span></button>
+    <button class="fn-key" onclick="permissionsPrompt(state.focusPane)" title="View or change permissions"><strong>F9</strong><span>Properties</span></button>
+    <button class="fn-key" onclick="disconnectActiveTab()" title="Close the active session"><strong>F10</strong><span>Close</span></button>
   </div>
 
   <div id="toast" class="toast"></div>
@@ -853,10 +446,10 @@
                   oninput="markDirty()"></textarea>
       </div>
       <div class="modal-footer">
-        <span id="editorStatus" style="flex:1; font-size:11px; color:#555;"></span>
-        <button class="btn" onclick="reloadEditorFile()">Reload</button>
-        <button class="btn" onclick="saveEditorFileAs()">Save as</button>
-        <button class="btn btn-primary" onclick="saveEditorFile()">Save (Ctrl+S)</button>
+        <span id="editorStatus" class="editor-status"></span>
+        <button class="btn" id="editorReloadBtn" onclick="reloadEditorFile()">Reload</button>
+        <button class="btn" id="editorSaveAsBtn" onclick="saveEditorFileAs()">Save as</button>
+        <button class="btn btn-primary" id="editorSaveBtn" onclick="saveEditorFile()">Save (Ctrl+S)</button>
         <button class="btn" onclick="closeEditor()">Close</button>
       </div>
     </div>
@@ -928,7 +521,7 @@
   <div class="modal-overlay" id="helpModal">
     <div class="modal-box" style="width:560px;">
       <div class="modal-header">
-        <span>LinuxSCP Commander</span>
+        <span>LinSCP Commander</span>
         <span style="cursor:pointer;" onclick="closeModal('helpModal')">✕</span>
       </div>
       <div class="modal-body" style="font-size:11px; line-height:1.6;">
@@ -939,12 +532,15 @@
         <p><b>Synchronize</b> compares the two panes and shows the plan before it
         changes anything. "Both" uses the record of the previous synchronization to
         tell a change from a conflict.</p>
-        <p><b>Edit</b> (F4) opens a remote file in the built-in editor and uploads it
-        when you save; it refuses to overwrite a file that changed on the server
-        while you were editing it.</p>
-        <p><b>Keys:</b> F4 edit, F5 upload, F6 download, F7 new folder, F8 delete,
-        F9 synchronize, F10 refresh, Ctrl+A select all, Enter open, Backspace up.</p>
-        <p>The CLI tab runs commands in the live session of the current tab.</p>
+        <p><b>View</b> (F3) opens a selected text file read-only. <b>Edit</b> (F4)
+        opens a local or remote text file in the built-in editor. Saving checks that
+        the file has not changed since it was opened; remote edits upload to the server.</p>
+        <p><b>Commander keys:</b> F1 help, F2 rename, F3 view, F4 edit, F5 copy to the
+        other panel, F6 move files to the other panel, F7 new directory, F8 delete,
+        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a
+        directory; Backspace goes up one level. Move is available for files; folders
+        can still be copied, but are not moved by the cross-panel move action.</p>
+        <p>The LinSCP command console runs commands in the live session of the current tab.</p>
         <p><b>This run's API token:</b> <code id="helpToken"></code><br>
         Every request the page makes carries it, and the backend refuses an
         <code>/api/</code> call without it, so only a page served by this run of the
@@ -983,6 +579,57 @@
 
   function $(id) { return document.getElementById(id); }
 
+  function applyTheme(theme) {
+    const next = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = next === 'dark' ? '#0e131a' : '#edf1f6';
+    const toggle = $('themeToggleMenuItem');
+    if (toggle) toggle.textContent = next === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  }
+
+  function toggleTheme() {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    try { localStorage.setItem('lscp-theme', next); }
+    catch (error) { /* keep the current theme for this run */ }
+  }
+
+  try {
+    const savedTheme = localStorage.getItem('lscp-theme');
+    applyTheme(savedTheme === 'light' ? 'light' : 'dark');
+  } catch (error) {
+    applyTheme('dark');
+  }
+
+  function closeMenus() {
+    document.querySelectorAll('.menu-group.open').forEach(group => {
+      group.classList.remove('open');
+      const trigger = group.querySelector('.menu-item');
+      if (trigger) trigger.setAttribute('aria-expanded', 'false');
+    });
+  }
+
+  function toggleMenu(id, trigger) {
+    const target = $(id);
+    const group = trigger && trigger.closest('.menu-group');
+    const wasOpen = group && group.classList.contains('open');
+    closeMenus();
+    if (group && target && !wasOpen) {
+      group.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+    }
+  }
+
+  function menuAction(action) {
+    closeMenus();
+    if (typeof action === 'function') action();
+  }
+
+  document.addEventListener('click', event => {
+    if (!event.target.closest || !event.target.closest('.menu-group')) closeMenus();
+  });
+
   async function api(url, options) {
     options = options || {};
     options.headers = Object.assign({}, options.headers);
@@ -998,7 +645,7 @@
       }
       return data;
     } catch (error) {
-      toast('Cannot reach the LinuxSCP backend: ' + error, true);
+      toast('Cannot reach the LinSCP backend: ' + error, true);
       return { success: false, error: String(error) };
     }
   }
@@ -1135,6 +782,12 @@
     await refreshStatus();
     await loadLocal(state.local.path);
     await loadRemote(state.remote.path);
+  }
+
+  async function disconnectActiveTab() {
+    const tab = activeTab();
+    if (!tab) { toast('There is no active session.'); return; }
+    await closeTab(tab.id);
   }
 
   function newTab() { openSiteManager(); }
@@ -1440,7 +1093,33 @@
       payload.names);
   }
 
-  function focusPane(side) { state.focusPane = side; }
+  function focusPane(side) {
+    state.focusPane = side;
+    $('localPane').classList.toggle('active', side === 'local');
+    $('remotePane').classList.toggle('active', side === 'remote');
+  }
+
+  function selectAllInFocusedPane() {
+    const pane = state[state.focusPane];
+    pane.selection.clear();
+    pane.entries.forEach(entry => pane.selection.add(entry.name));
+    renderPane(state.focusPane);
+  }
+
+  function clearFocusedSelection() {
+    state[state.focusPane].selection.clear();
+    renderPane(state.focusPane);
+  }
+
+  function invertFocusedSelection() {
+    const pane = state[state.focusPane];
+    const current = new Set(pane.selection);
+    pane.selection.clear();
+    pane.entries.forEach(entry => {
+      if (!current.has(entry.name)) pane.selection.add(entry.name);
+    });
+    renderPane(state.focusPane);
+  }
 
   /* ------------------------------------------------------------------ *
    * File operations                                                    *
@@ -1448,6 +1127,50 @@
 
   function actionUpload() { transfer('upload'); }
   function actionDownload() { transfer('download'); }
+
+  function copyToOtherPane() {
+    if (state.focusPane === 'local') actionUpload();
+    else actionDownload();
+  }
+
+  async function moveToOtherPane() {
+    const source = state.focusPane;
+    const names = selectedNames(source);
+    if (!names.length) {
+      toast('Select files in the ' + source + ' panel first.', true);
+      return;
+    }
+    const directories = names.filter(name => {
+      const entry = state[source].entries.find(item => item.name === name);
+      return entry && entry.is_dir;
+    });
+    if (directories.length) {
+      toast('Cross-panel move currently supports files only. Copy folders, then remove them separately.', true);
+      return;
+    }
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast('Not connected.', true); return; }
+    const direction = source === 'local' ? 'upload' : 'download';
+    const destination = source === 'local' ? state.remote.path : state.local.path;
+    if (!confirm('Move ' + names.length + ' file(s) to ' + destination + '?\n\n' +
+        'The source is removed only after its transfer completes successfully.')) return;
+    const result = await apiPost('/api/transfer/move', {
+      tab: tab.id,
+      direction: direction,
+      names: names,
+      local_dir: state.local.path,
+      remote_dir: state.remote.path,
+      resume: true,
+      preserve_time: true
+    });
+    if (result.success) {
+      toast(names.length + ' move(s) queued. Source files are removed after successful transfer.');
+      switchTab('queue');
+      refreshQueue();
+    } else {
+      toast(result.error || 'Cannot queue the move.', true);
+    }
+  }
 
   async function transfer(direction, namesOverride) {
     const source = direction === 'upload' ? 'local' : 'remote';
@@ -1501,16 +1224,18 @@
     await refreshPanes(target);
   }
 
-  async function permissionsPrompt() {
-    const names = selectedNames('remote');
-    if (!names.length) { toast('Select a remote file first.', true); return; }
+  async function permissionsPrompt(side) {
+    const target = side || state.focusPane;
+    const names = selectedNames(target);
+    if (!names.length) { toast('Select an item in the ' + target + ' panel first.', true); return; }
     const value = prompt('Permissions (octal), e.g. 644:', '644');
     if (!value) return;
+    const endpoint = target === 'remote' ? '/api/remote/chmod' : '/api/local/chmod';
     for (const name of names) {
-      const result = await apiPost('/api/remote/chmod', { tab: tabId(), name: name, permissions: value });
+      const result = await apiPost(endpoint, { tab: tabId(), name: name, permissions: value });
       if (!result.success) toast(result.error || 'Cannot change the permissions.', true);
     }
-    await refreshPanes('remote');
+    await refreshPanes(target);
   }
 
   async function deletePrompt(side) {
@@ -1760,33 +1485,63 @@
    * Remote editor                                                      *
    * ------------------------------------------------------------------ */
 
-  async function editSelected() {
-    const names = selectedNames('remote');
-    if (names.length !== 1) { toast('Select one remote file to edit.', true); return; }
-    const entry = state.remote.entries.find(item => item.name === names[0]);
-    if (entry && entry.is_dir) { toast('That is a directory.', true); return; }
-    await openEditor(joinPath(state.remote.path, names[0], true));
+  function selectedFile(side) {
+    const names = selectedNames(side);
+    if (names.length !== 1) {
+      toast('Select exactly one file in the ' + side + ' panel.', true);
+      return null;
+    }
+    const entry = state[side].entries.find(item => item.name === names[0]);
+    if (!entry || entry.is_dir) {
+      toast('Select a file, not a directory.', true);
+      return null;
+    }
+    return { side: side, name: names[0], path: joinPath(state[side].path, names[0], side === 'remote') };
   }
 
-  async function openEditor(path) {
-    const data = await apiGet('/api/remote/edit?tab=' + tabId() + '&path=' + encodeURIComponent(path));
-    if (!data.success) { toast(data.error || 'Cannot open the file.', true); return; }
+  async function viewSelected(side) {
+    const target = selectedFile(side || state.focusPane);
+    if (!target) return;
+    await openEditor(target.path, target.side, true);
+  }
+
+  async function editSelected(side) {
+    const target = side || state.focusPane;
+    const file = selectedFile(target);
+    if (!file) return;
+    await openEditor(file.path, target, false);
+  }
+
+  async function openEditor(path, side, readOnly) {
+    side = side || 'remote';
+    readOnly = !!readOnly;
+    const endpoint = side === 'local' ? '/api/local/edit' : '/api/remote/edit';
+    const data = await apiGet(endpoint + '?tab=' + tabId() + '&path=' + encodeURIComponent(path));
+    if (!data || !data.success) { toast(data && data.error || 'Cannot open the file.', true); return; }
     state.editor = {
       path: path,
+      side: side,
+      readOnly: readOnly,
       content: data.content,
       original: data.content,
       baseMtime: data.info.mtime,
+      baseMtimeNs: data.info.mtime_ns,
       dirty: false
     };
-    $('editorTitle').textContent = 'Editing ' + path;
+    $('editorTitle').textContent = (readOnly ? 'Viewing ' : 'Editing ') + path;
     $('editorText').value = data.content;
+    $('editorText').readOnly = readOnly;
+    $('editorSaveBtn').style.display = readOnly ? 'none' : '';
+    $('editorSaveAsBtn').style.display = (readOnly || side === 'local') ? 'none' : '';
     $('editorStatus').textContent = data.info.size + ' bytes, modified ' +
-      new Date(data.info.mtime * 1000).toLocaleString();
+      new Date(data.info.mtime * 1000).toLocaleString() +
+      (readOnly ? ' · read-only' : '');
     openModal('editorModal');
     setTimeout(() => $('editorText').focus(), 50);
   }
 
   function markDirty() {
+    if (state.editor.readOnly) return;
     state.editor.dirty = $('editorText').value !== state.editor.original;
     $('editorStatus').textContent = state.editor.dirty
       ? 'Modified - not saved'
@@ -1795,31 +1550,39 @@
 
   async function reloadEditorFile() {
     if (state.editor.dirty && !confirm('Discard your changes and reload?')) return;
-    await openEditor(state.editor.path);
+    await openEditor(state.editor.path, state.editor.side, state.editor.readOnly);
   }
 
   async function saveEditorFile() {
+    if (state.editor.readOnly) return;
     const content = $('editorText').value;
-    const result = await apiPost('/api/remote/save', {
+    const local = state.editor.side === 'local';
+    const payload = {
       tab: tabId(),
       path: state.editor.path,
-      content: content,
-      base_mtime: state.editor.baseMtime
-    });
+      content: content
+    };
+    if (local) payload.base_mtime_ns = state.editor.baseMtimeNs;
+    else payload.base_mtime = state.editor.baseMtime;
+    const result = await apiPost(local ? '/api/local/save' : '/api/remote/save', payload);
     if (!result.success) { toast(result.error || 'Cannot save.', true); return; }
     state.editor.content = content;
     state.editor.original = content;
     state.editor.dirty = false;
-    // Remember the new timestamp so that the next save is not refused.
-    const info = await apiGet('/api/remote/list?tab=' + tabId() + '&path=' +
-      encodeURIComponent(parentPath(state.editor.path, true)));
-    void info;
+    if (result.info) {
+      state.editor.baseMtime = result.info.mtime;
+      state.editor.baseMtimeNs = result.info.mtime_ns;
+    }
     toast('Saved ' + state.editor.path);
     $('editorStatus').textContent = 'Saved.';
-    await refreshPanes('remote');
+    await refreshPanes(local ? 'local' : 'remote');
   }
 
   async function saveEditorFileAs() {
+    if (state.editor.side !== 'remote') {
+      toast('Save as is available for remote files only.', true);
+      return;
+    }
     const name = prompt('Save as (remote path):', state.editor.path);
     if (!name) return;
     const result = await apiPost('/api/remote/save', {
@@ -1919,7 +1682,7 @@
     const tbody = $('queueList');
     tbody.innerHTML = '';
     if (!state.queue.length) {
-      tbody.innerHTML = '<tr><td colspan="5" style="padding:8px; color:#888;">No transfers in the queue.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="5" class="queue-empty">No transfers in the queue.</td></tr>';
       return;
     }
     for (const task of state.queue) {
@@ -2026,31 +1789,49 @@
   document.addEventListener('keydown', async (event) => {
     const inField = /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName);
     if (event.key === 'Escape') {
+      closeMenus();
       document.querySelectorAll('.modal-overlay.open').forEach(node => node.classList.remove('open'));
       return;
     }
-    if (event.ctrlKey && event.key === 's' && $('editorModal').classList.contains('open')) {
+    if (event.ctrlKey && event.key.toLowerCase() === 's' && $('editorModal').classList.contains('open')) {
       event.preventDefault();
       await saveEditorFile();
       return;
     }
-    if (inField) return;
-    if (event.ctrlKey && event.key === 'a') {
+    if (event.ctrlKey && event.key.toLowerCase() === 'n') {
       event.preventDefault();
-      const pane = state[state.focusPane];
-      pane.selection.clear();
-      pane.entries.forEach(entry => pane.selection.add(entry.name));
-      renderPane(state.focusPane);
+      openSiteManager();
+      return;
+    }
+    if (event.ctrlKey && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      $('localPathInput').focus();
+      $('localPathInput').select();
+      return;
+    }
+    if (event.ctrlKey && event.key.toLowerCase() === 'r') {
+      event.preventDefault();
+      $('remotePathInput').focus();
+      $('remotePathInput').select();
+      return;
+    }
+    if (inField) return;
+    if (event.ctrlKey && event.key.toLowerCase() === 'a') {
+      event.preventDefault();
+      selectAllInFocusedPane();
       return;
     }
     switch (event.key) {
+      case 'F1': event.preventDefault(); showHelp(); break;
+      case 'F2': event.preventDefault(); renamePrompt(state.focusPane); break;
+      case 'F3': event.preventDefault(); viewSelected(); break;
       case 'F4': event.preventDefault(); editSelected(); break;
-      case 'F5': event.preventDefault(); actionUpload(); break;
-      case 'F6': event.preventDefault(); actionDownload(); break;
-      case 'F7': event.preventDefault(); newFolderPrompt(null); break;
-      case 'F8': event.preventDefault(); deletePrompt(null); break;
-      case 'F9': event.preventDefault(); openSynchronize(); break;
-      case 'F10': event.preventDefault(); refreshAll(); break;
+      case 'F5': event.preventDefault(); copyToOtherPane(); break;
+      case 'F6': event.preventDefault(); moveToOtherPane(); break;
+      case 'F7': event.preventDefault(); newFolderPrompt(state.focusPane); break;
+      case 'F8': event.preventDefault(); deletePrompt(state.focusPane); break;
+      case 'F9': event.preventDefault(); permissionsPrompt(state.focusPane); break;
+      case 'F10': event.preventDefault(); disconnectActiveTab(); break;
       case 'Enter': {
         const pane = state[state.focusPane];
         const names = selectedNames(state.focusPane);

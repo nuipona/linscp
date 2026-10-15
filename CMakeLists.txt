@@ -1,4 +1,4 @@
-# Cross-platform build of LinuxSCP (Linux + Windows).
+# Cross-platform build of LinSCP (Linux + Windows).
 #
 #   Linux:   cmake -S . -B build && cmake --build build
 #            (the supported packaging build remains the plain Makefile:
@@ -16,7 +16,7 @@
 # else -- commands, scripting, local file handling -- is identical.
 
 cmake_minimum_required(VERSION 3.16)
-project(LinuxSCP VERSION 1.0 LANGUAGES C CXX)
+project(LinSCP VERSION 1.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -120,6 +120,8 @@ if(Python3_Interpreter_FOUND)
     $<TARGET_FILE:linuxscp>)
   add_test(NAME gui-search-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/RemoteSearchTest.py)
+  add_test(NAME gui-local-editor-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/LocalEditorTest.py)
   add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)
   add_test(NAME parity-inventory COMMAND ${Python3_EXECUTABLE}
@@ -170,7 +172,7 @@ if(NOT WIN32)
   target_compile_definitions(putty PUBLIC _FILE_OFFSET_BITS=64)
   set_source_files_properties(
     ${CMAKE_CURRENT_SOURCE_DIR}/source/putty/be_list.c
-    PROPERTIES COMPILE_DEFINITIONS APPNAME=LinuxSCP)
+    PROPERTIES COMPILE_DEFINITIONS APPNAME=LinSCP)
   target_include_directories(putty PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/source/putty
     ${CMAKE_CURRENT_SOURCE_DIR}/libs/putty/unix

@@ -10,8 +10,9 @@ Package: linuxscp
 Architecture: any
 Depends: ${shlibs:Depends}, python3
 Description: graphical and console file transfer client
- LinuxSCP is the native Linux port of WinSCP, providing both an interactive
- command-line interface and a dual-pane Norton Commander graphical client
+ LinSCP is a native open-source file transfer client inspired by WinSCP,
+ providing both an interactive command-line interface and a dual-pane
+ Commander graphical client
  (linuxscp-gui).
  .
  Provides native SFTP, curl-backed transfers, basic transfer resume and

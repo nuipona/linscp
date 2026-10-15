@@ -2,7 +2,7 @@
 
 TestSftpServer.py covers the SFTP protocol; Amazon S3 is a different
 transport (signed HTTP) and needs its own server. This one speaks the
-subset LinuxSCP's S3 client uses - ListBuckets, ListObjectsV2 with a
+subset LinSCP's S3 client uses - ListBuckets, ListObjectsV2 with a
 delimiter, PUT/GET/HEAD/DELETE of objects, CopyObject for rename,
 zero-byte "key/" markers for directories, byte ranges for resumed
 downloads - and it refuses anything whose signature it cannot
