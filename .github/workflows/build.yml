@@ -187,8 +187,22 @@ jobs:
         run: |
           set -o pipefail
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev
-          dpkg-buildpackage -b -us -uc 2>&1 | tee "$RUNNER_TEMP/dpkg-build.log"
+          # build-essential is what the Build-Depends line actually asks
+          # for: g++ and make, plus dpkg-dev for the tools rules calls.
+          sudo apt-get install -y dpkg-dev build-essential
+          log="$RUNNER_TEMP/dpkg-build.log"
+          # An unsatisfied build dependency aborts dpkg-buildpackage with
+          # exit code 3 and names it only in the job log, which is hosted
+          # apart from the API - so repeat the diagnostics as annotations,
+          # which the API does serve.
+          if ! dpkg-buildpackage -b -us -uc 2>&1 | tee "$log"; then
+            grep -E 'error|Error|Unmet|unsatisfied|cannot|No such|not found' \
+              "$log" | tr -d '\r' | sed 's/%/%25/g' | sort -u | head -12 |
+              while IFS= read -r line; do
+                printf '::error::%s\n' "${line//]/%5D}"
+              done
+            exit 1
+          fi
       - name: Check the package contents
         run: |
           deb=$(ls ../linuxscp_*_*.deb)
