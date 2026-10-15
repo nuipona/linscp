@@ -59,14 +59,21 @@ class InventoryTests(unittest.TestCase):
 
 
     def ledger_errors(self, entries, platforms=None, policy="cite evidence"):
-        """Run just the verification rules over a fabricated inventory."""
+        """Run just the verification rules over a fabricated inventory.
+
+        The fabricated ledger has two platforms on purpose: LinSCP ships on
+        Linux alone, but the rule under test is the general one - an entry
+        called verified has to cite every platform the ledger names - and a
+        single-platform fixture could not tell that rule apart from 'cite
+        anything'.
+        """
         if platforms is None:
             platforms = {
                 "linux": {"how": "make check", "date": "2026-10-14",
                           "suites": {"unit": "the C++ checks",
                                      "manual": "by hand, with the commands"}},
-                "windows": {"how": "ctest", "date": "2026-10-14",
-                            "suites": {"unit": "the C++ checks"}},
+                "bsd": {"how": "ctest", "date": "2026-10-14",
+                        "suites": {"unit": "the C++ checks"}},
             }
         errors = []
         check_verification({"verification": {"policy": policy,
@@ -80,19 +87,19 @@ class InventoryTests(unittest.TestCase):
                             self.ledger_errors([entry])))
         entry["verified_on"] = {"linux": ["unit"]}
         errors = self.ledger_errors([entry])
-        self.assertTrue(any("without evidence from: windows" in e for e in errors))
-        entry["verified_on"]["windows"] = ["unit"]
+        self.assertTrue(any("without evidence from: bsd" in e for e in errors))
+        entry["verified_on"]["bsd"] = ["unit"]
         self.assertEqual(self.ledger_errors([entry]), [])
 
     def test_cited_suites_have_to_exist(self):
-        """'manual' evidence exists on Linux only, so citing it for Windows is
-        a claim nobody can reproduce."""
+        """'manual' evidence exists on Linux only, so citing it for the second
+        platform of the fabricated ledger is a claim nobody can reproduce."""
         entry = {"name": "put", "status": "partial", "notes": "works",
-                 "verified_on": {"linux": ["unit"], "windows": ["manual"]}}
+                 "verified_on": {"linux": ["unit"], "bsd": ["manual"]}}
         errors = self.ledger_errors([entry])
-        self.assertTrue(any("'windows' has no suite 'manual'" in e for e in errors))
+        self.assertTrue(any("'bsd' has no suite 'manual'" in e for e in errors))
 
-        entry["verified_on"] = {"linux": ["unit"], "windows": []}
+        entry["verified_on"] = {"linux": ["unit"], "bsd": []}
         self.assertTrue(any("names no suite" in e for e in self.ledger_errors([entry])))
         entry["verified_on"] = {"linux": ["unit"], "beos": ["unit"]}
         self.assertTrue(any("unknown platform" in e for e in self.ledger_errors([entry])))
@@ -126,21 +133,29 @@ class InventoryTests(unittest.TestCase):
 
     def test_the_real_ledger_is_consistent(self):
         """The shipped inventory has to satisfy its own rules, and the evidence
-        it claims has to be evidence two platforms produce."""
+        it claims has to be evidence the platform it ships on produces."""
         inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
         entries = (list(inventory["commands"].values()) + inventory["features"] +
                    inventory.get("linuxscp_additions", []))
         errors = []
         check_verification(inventory, entries, errors)
         self.assertEqual(errors, [])
-        both = [e for e in entries if len(e.get("verified_on", {})) > 1]
-        self.assertTrue(both, "no entry has evidence from more than one platform")
+        # LinSCP is a Linux application: the ledger names exactly that
+        # platform, so no entry can cite evidence from a host this client is
+        # not built for.
+        platforms = inventory["verification"]["platforms"]
+        self.assertEqual(sorted(platforms), ["linux"])
+        cited = [e for e in entries if e.get("verified_on")]
+        self.assertTrue(cited, "no entry records any evidence at all")
+        for entry in cited:
+            self.assertEqual(sorted(entry["verified_on"]), ["linux"],
+                             str(entry.get("name")) + ": cites a platform the "
+                             "ledger does not ship on")
         # Promotion is allowed only when every aspect of the claim is
-        # accounted for: each platform the ledger ships on contributes at
+        # accounted for: the platform the ledger ships on contributes at
         # least one suite that actually ran the behaviours the notes
         # describe, the notes say which suites those are, and no aspect
         # of the entry is still listed as missing inside the claim.
-        platforms = inventory["verification"]["platforms"]
         verified = [e for e in entries if e["status"] == "verified"]
         for entry in verified:
             label = entry.get("name") or "?"
