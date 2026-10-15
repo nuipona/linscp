@@ -143,6 +143,11 @@ function value(id) {
   return node ? node.value : '<missing #' + id + '>';
 }
 
+function options(id) {
+  const node = window.document.getElementById(id);
+  return node ? Array.prototype.slice.call(node.options) : [];
+}
+
 (async () => {
   await new Promise(resolve => setTimeout(resolve, 400));
 
@@ -217,6 +222,39 @@ function value(id) {
   const run = calls.filter(call => call.path === '/api/sync/run').pop();
   check('running the plan posts the settings',
     run && JSON.parse(run.options.body).mode === 'both');
+  check('the contents are one of the comparisons offered',
+    options('syncCriteria').some(option => option.value === 'checksum') &&
+    options('syncCriteria').some(option => option.value === 'time,checksum'),
+    options('syncCriteria').map(option => option.value).join('|'));
+
+  // In the 'both' direction the record of the previous synchronization
+  // decides, so the dialog stops offering the comparisons the console would
+  // refuse there rather than letting a preview fail on one of them.
+  doc.getElementById('syncMode').value = 'both';
+  doc.getElementById('syncMode').dispatchEvent(new window.Event('change'));
+  check('the both direction refuses the comparisons it cannot make',
+    options('syncCriteria').filter(option => option.disabled)
+      .map(option => option.value).join('|') === 'checksum|time,checksum|none',
+    options('syncCriteria').filter(option => option.disabled)
+      .map(option => option.value).join('|'));
+  check('the both direction keeps a comparison it can make',
+    value('syncCriteria') === 'time', value('syncCriteria'));
+  check('the both direction says what decides instead',
+    text('syncHint').indexOf('previous synchronization') >= 0, text('syncHint'));
+  doc.getElementById('syncMode').value = 'local';
+  doc.getElementById('syncMode').dispatchEvent(new window.Event('change'));
+  check('a one-way direction offers every comparison again',
+    options('syncCriteria').every(option => !option.disabled));
+
+  // A list of comparisons reaches the console as the client got it, and the
+  // default one is left out of the command line.
+  doc.getElementById('syncCriteria').value = 'time,checksum';
+  await window.runSynchronization();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const listed = calls.filter(call => call.path === '/api/sync/run').pop();
+  check('the chosen comparison is posted with the plan',
+    listed && JSON.parse(listed.options.body).criteria === 'time,checksum',
+    listed && listed.options.body);
 
   // Search.
   window.openSearch();

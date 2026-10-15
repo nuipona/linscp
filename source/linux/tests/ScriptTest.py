@@ -266,6 +266,64 @@ class ScriptTests(unittest.TestCase):
         self.assertNotIn("Wrong arguments", result.stderr)
         self.assertIn("Not connected", result.stderr)
 
+    def test_sync_criteria_values(self):
+        """'-criteria=' takes upstream's words ('none', 'either', 'both') and
+        a comma-separated list of the three comparisons, including
+        'checksum'. Anything else is refused with the words that are known,
+        rather than being quietly dropped as upstream does."""
+        for value in ("time", "size", "either", "both", "none", "checksum",
+                      "CHECKSUM", "time,size", "time,checksum",
+                      "size,checksum", "time,size,checksum"):
+            with self.subTest(value=value):
+                result = self.run_commands(
+                    "synchronize local -criteria=%s /tmp /tmp" % value)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Not connected", result.stderr)
+        for value in ("whenever", "sha256", "check", "time,", ",size",
+                      "time,,size", "none,time", "either,size",
+                      "checksum,none", "time,none"):
+            with self.subTest(value=value):
+                result = self.run_commands(
+                    "synchronize local -criteria=%s /tmp /tmp" % value)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Wrong arguments", result.stderr)
+                self.assertNotIn("Not connected", result.stderr)
+        # The refusal names every word that is accepted.
+        result = self.run_commands("synchronize local -criteria=whenever /tmp /tmp")
+        for word in ("none", "either", "both", "time", "size", "checksum"):
+            self.assertIn(word, result.stderr)
+        # 'keepuptodate' takes the same switches and has no 'both' mode.
+        result = self.run_commands("keepuptodate -criteria=time,checksum /tmp /tmp")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Not connected", result.stderr)
+        # The help of the command documents the new value.
+        result = self.run_commands("help synchronize")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("checksum", result.stdout)
+
+    def test_sync_both_direction_refuses_criteria_it_cannot_honour(self):
+        """In the 'both' direction the record of the previous
+        synchronization decides, so a criteria value it could not apply is
+        refused instead of being ignored (upstream drops the criteria for
+        smBoth)."""
+        for value, why in (("checksum",
+                            "record of the previous synchronization"),
+                           ("none", "no way to tell which side changed")):
+            with self.subTest(value=value):
+                result = self.run_commands(
+                    "synchronize both -criteria=%s /tmp /tmp" % value)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Wrong arguments", result.stderr)
+                self.assertIn(why, result.stderr)
+                self.assertNotIn("Not connected", result.stderr)
+        # The comparisons the 'both' direction does make still parse.
+        for value in ("time", "size", "either", "both", "time,size"):
+            with self.subTest(value=value):
+                result = self.run_commands(
+                    "synchronize both -criteria=%s /tmp /tmp" % value)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Not connected", result.stderr)
+
     def test_keepuptodate_validation(self):
         # 'keepuptodate' takes no direction word (it always updates the
         # local side), so bare directories parse fine and stop at the

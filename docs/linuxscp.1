@@ -398,16 +398,42 @@ synchronization. Both directories default to the current local and remote
 directories. The following switches are supported:
 .RS
 .TP
-.BI \-criteria= time|size|either|none
+.BI \-criteria= criteria
 How to decide whether a file changed. The default is
-.BR time :
-size and time are compared with a one\-second tolerance,
-.B size
-compares sizes only,
-.B either
-synchronizes when either differs, and
+.BR time ,
+which copies a file the source has newer (in
+.B \-mirror
+mode any difference in the timestamps counts). Three words name a whole set
+of criteria on their own:
+.B time
+compares the modification times,
 .B none
-copies every file.
+copies every file, and
+.B either
+\- whose synonym is
+.B both
+\- compares the modification time and the size. The three comparisons
+.BR time ,
+.B size
+and
+.B checksum
+may also be listed, separated by commas, as in
+.IR time,checksum ;
+whatever the list names is compared and nothing else.
+.B checksum
+reads the contents of the file on both sides, so it sees a change that left
+the timestamp and the size alone; the server computes the digest when it has
+a checksum extension and a downloaded copy is hashed otherwise, which the
+client says once per synchronization. A file that cannot be hashed stops the
+synchronization with the reason instead of counting as equal to the other
+side. In the
+.B both
+direction the record of the previous synchronization decides, and it records
+timestamps and sizes, so
+.B checksum
+and
+.B none
+are refused there rather than quietly ignored.
 .TP
 .BI \-filemask= masks
 Only synchronize files matching one of the masks. Separate several masks with

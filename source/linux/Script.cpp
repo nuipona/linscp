@@ -3685,6 +3685,11 @@ bool Script::PutFiles(const std::vector<std::string> & args)
 namespace {
 
 /* The local side of a synchronization. */
+/* Upstream compares the contents of two files with SHA-256 (SHA-1 when a
+ * server cannot do SHA-256); this build asks for SHA-256 and falls back to
+ * hashing a downloaded copy when the server has no checksum extension. */
+const char * const kSyncChecksumAlgorithm = "sha-256";
+
 class LocalSyncFileSystem : public SyncFileSystem
 {
 public:
@@ -3711,13 +3716,28 @@ public:
     }
 
     virtual const char * Label() const { return "local"; }
+
+    virtual bool HashFile(const std::string & path, std::string & hash,
+        std::string & error)
+    {
+        char digest[LSCP_HASH_HEX_SIZE];
+        if (lscp_hash_file(kSyncChecksumAlgorithm, path.c_str(), digest,
+            sizeof(digest)) != 0)
+        {
+            error = lscp_hash_error();
+            return false;
+        }
+        hash = digest;
+        return true;
+    }
 };
 
 /* The remote side: whatever protocol this session speaks. */
 class RemoteSyncFileSystem : public SyncFileSystem
 {
 public:
-    explicit RemoteSyncFileSystem(Script & script) : mScript(script) {}
+    explicit RemoteSyncFileSystem(Script & script) : mScript(script),
+        mNoteShown(false) {}
 
     virtual bool ListDirectory(const std::string & path,
         std::vector<SyncEntry> & entries, std::string & error)
@@ -3727,8 +3747,31 @@ public:
 
     virtual const char * Label() const { return "remote"; }
 
+    /* The contents of a remote file, as the checksum the 'checksum' command
+     * would print: the server's own when it can, a downloaded copy
+     * otherwise. Whatever the two were, the user is told once rather than
+     * once per file. */
+    virtual bool HashFile(const std::string & path, std::string & hash,
+        std::string & error)
+    {
+        std::string note;
+        if (!mScript.RemoteChecksumFile(path, kSyncChecksumAlgorithm, hash,
+            note, error))
+        {
+            return false;
+        }
+        if (!note.empty() && !mNoteShown)
+        {
+            mNoteShown = true;
+            Console::Instance().Status(note + " Comparing the contents of a "
+                "synchronization downloads every file it reaches.");
+        }
+        return true;
+    }
+
 private:
     Script & mScript;
+    bool mNoteShown;
 };
 
 std::string DescribeTime(unsigned long value)
@@ -3852,6 +3895,7 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
     count = 0;
     continueOnError = false;
     bool modeGiven = false;
+    bool criteriaGiven = false;
     /* 'option synchdelete on' is the persistent form of '-delete'. */
     options.deleteObsolete = mSyncDeleteDefault;
     options.transferMode = mTransferMode;
@@ -3911,29 +3955,14 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
         }
         else if (StartsWith(lower, "-criteria="))
         {
-            const std::string value = lower.substr(strlen("-criteria="));
-            if (value == "time")
+            /* Upstream takes one of 'none', 'either' and 'both', or a
+             * comma-separated list of 'time', 'size' and 'checksum'. */
+            const std::string value = a.substr(strlen("-criteria="));
+            if (!ParseSyncCriteria(value, options.criteria, error))
             {
-                options.criteria = SyncCriteria::Time;
-            }
-            else if (value == "size")
-            {
-                options.criteria = SyncCriteria::Size;
-            }
-            else if (value == "either")
-            {
-                options.criteria = SyncCriteria::Either;
-            }
-            else if (value == "none")
-            {
-                options.criteria = SyncCriteria::None;
-            }
-            else
-            {
-                error = "Unsupported criteria '" + value +
-                    "' (use time, size, either or none).";
                 return false;
             }
+            criteriaGiven = true;
         }
         else if (StartsWith(lower, "-filemask="))
         {
@@ -3982,7 +4011,7 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
             (modeOptional ? std::string(" [LOCAL [REMOTE]]") :
                 std::string(" local|remote|both [LOCAL [REMOTE]]")) +
             " [-delete] [-nodelete] [-mirror] [-preview] [-nonrecursive] "
-            "[-criteria=time|size|either|none] [-filemask=MASK] "
+            "[-criteria=time|size|checksum|either|both|none] [-filemask=MASK] "
             "[-transfer=binary|ascii|automatic] [-interval=SECS] [-count=N] "
             "[-continue].";
         return false;
@@ -3991,6 +4020,30 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
     {
         error = "'-mirror' cannot be combined with the 'both' direction.";
         return false;
+    }
+    /*
+     * In the 'both' direction the record of the previous synchronization
+     * decides what changed, and it records timestamps and sizes - upstream
+     * drops the criteria for smBoth the same way. A value this branch could
+     * not honour is refused rather than quietly ignored.
+     */
+    if (criteriaGiven && options.mode == SyncMode::Both)
+    {
+        if (options.criteria.checksum)
+        {
+            error = "'-criteria=checksum' cannot be combined with the 'both' "
+                "direction, which compares the record of the previous "
+                "synchronization instead of the files; synchronize 'local' or "
+                "'remote' to compare contents.";
+            return false;
+        }
+        if (options.criteria.Empty())
+        {
+            error = "'-criteria=none' cannot be combined with the 'both' "
+                "direction: with nothing compared there is no way to tell "
+                "which side changed.";
+            return false;
+        }
     }
     return true;
 }
@@ -6003,74 +6056,101 @@ bool Script::ChecksumRemote(const std::vector<std::string> & args)
         return false;
     }
 
+    std::string hex;
+    std::string note;
+    std::string failure;
+    if (!RemoteChecksumFile(path, requested, hex, note, failure))
+    {
+        Console::Instance().Error(failure);
+        mErrors++;
+        return false;
+    }
+    if (!note.empty())
+    {
+        Console::Instance().Status(note);
+    }
+    Console::Instance().WriteLine(hex + " " + path);
+    return true;
+}
+
+/*
+ * One remote file's checksum, as lowercase hexadecimal. The server computes
+ * it when the backend can ask it to; otherwise the file is downloaded to a
+ * temporary file and hashed here, which is the same fallback the 'checksum'
+ * command has always used. 'note' receives the line a command tells the user
+ * about which of the two happened, and stays empty when the server answered.
+ *
+ * The synchronization planner calls this for '-criteria=checksum', where
+ * there is no command to print to: it collects the note itself and says it
+ * once.
+ */
+bool Script::RemoteChecksumFile(const std::string & path,
+    const std::string & algorithm, std::string & hex, std::string & note,
+    std::string & error)
+{
     /* 1. Ask the server, when the backend can. */
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        const std::string serverAlgorithm = ServerChecksumAlgorithm(requested);
+        const std::string serverAlgorithm = ServerChecksumAlgorithm(algorithm);
         if (!serverAlgorithm.empty())
         {
             char used[64];
-            char hex[LSCP_HASH_HEX_SIZE];
+            char digest[LSCP_HASH_HEX_SIZE];
             const int result = lscp_sftp_checksum(serverAlgorithm.c_str(),
-                path.c_str(), used, sizeof(used), hex, sizeof(hex));
+                path.c_str(), used, sizeof(used), digest, sizeof(digest));
             if (result == 0)
             {
-                Console::Instance().WriteLine(std::string(hex) + " " + path);
+                hex = digest;
                 return true;
             }
             if (result == -1)
             {
-                Console::Instance().Error(Texts::RemoteError(
-                    "calculate the checksum of", path, lscp_sftp_error()));
-                mErrors++;
+                error = Texts::RemoteError("calculate the checksum of", path,
+                    lscp_sftp_error());
                 return false;
             }
-            Console::Instance().Status("The server cannot calculate "
-                "checksums; '" + requested + "' is computed from the "
-                "downloaded file.");
+            note = "The server cannot calculate checksums; '" + algorithm +
+                "' is computed from the downloaded file.";
         }
         else
         {
-            Console::Instance().Status("'" + requested + "' is not a server-"
-                "side algorithm; it is computed from the downloaded file.");
+            note = "'" + algorithm + "' is not a server-side algorithm; it is "
+                "computed from the downloaded file.";
         }
     }
     else
     {
-        Console::Instance().Status("The '" + mSession.Options().protocol +
-            "' backend cannot run a server-side checksum; '" + requested +
-            "' is computed from the downloaded file.");
+        note = "The '" + mSession.Options().protocol + "' backend cannot run a "
+            "server-side checksum; '" + algorithm + "' is computed from the "
+            "downloaded file.";
     }
 
     /* 2. Fallback: hash the file as it is downloaded. */
     const std::string temp = MakeTempPath("sum");
     if (temp.empty())
     {
-        Console::Instance().Error("Cannot create a temporary file for the "
-            "checksum.");
-        mErrors++;
+        error = "Cannot create a temporary file for the checksum.";
         return false;
     }
     unsigned long long size = 0;
-    if (RemoteGet(path, temp, 0, false, &size, NULL, NULL, error) != 0)
+    std::string transferError;
+    if (RemoteGet(path, temp, 0, false, &size, NULL, NULL, transferError) != 0)
     {
         remove(temp.c_str());
-        Console::Instance().Error(Texts::TransferFailed(path, error));
-        mErrors++;
+        error = Texts::TransferFailed(path, transferError);
         return false;
     }
-    char hex[LSCP_HASH_HEX_SIZE];
-    const bool hashed = lscp_hash_file(requested.c_str(), temp.c_str(),
-        hex, sizeof(hex)) == 0;
+    char digest[LSCP_HASH_HEX_SIZE];
+    const bool hashed = lscp_hash_file(algorithm.c_str(), temp.c_str(),
+        digest, sizeof(digest)) == 0;
     remove(temp.c_str());
     if (!hashed)
     {
-        Console::Instance().Error(Texts::RemoteError("calculate the checksum of",
-            path, lscp_hash_error()));
-        mErrors++;
+        error = Texts::RemoteError("calculate the checksum of", path,
+            lscp_hash_error());
         return false;
     }
-    Console::Instance().WriteLine(std::string(hex) + " " + path);
+    hex = digest;
     return true;
 }
 
@@ -7188,8 +7268,16 @@ const struct ScriptCommandHelpEntry
             "  it. The key/value breakdown of attr stays available there." },
         { "synchronize", "synchronize local|remote|both [ <localdir> [ <remotedir> ] ]\n"
             "  [ -delete ] [-nodelete] [-mirror] [-preview]\n"
-            "  [-criteria=time|size|either|none] [-filemask=<mask>]\n"
-            "  [-transfer=binary|ascii|automatic] [-nonrecursive]" },
+            "  [-criteria=time|size|checksum|either|both|none] [-filemask=<mask>]\n"
+            "  [-transfer=binary|ascii|automatic] [-nonrecursive]\n"
+            "  The criteria say what counts as a change: 'time' (the\n"
+            "  default) copies a file the source has newer, 'size' one of\n"
+            "  a different size, 'checksum' one whose contents differ and\n"
+            "  'none' every file. 'either' and its synonym 'both' compare\n"
+            "  the time and the size, and the three comparisons may also\n"
+            "  be listed, as in -criteria=time,checksum. In the 'both'\n"
+            "  direction the record of the previous synchronization\n"
+            "  decides, so 'checksum' and 'none' are refused there." },
         { "symlink", "symlink <target> <link>\n"
             "  Same as 'ln'." },
         { "terminal", "terminal\n"

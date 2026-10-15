@@ -757,6 +757,16 @@ public:
         Add(path, false, size, mtime);
     }
 
+    /* A file with the checksum the planner sees for it. A file added
+     * without one cannot be hashed at all, which is how the refusal of a
+     * plan over a file nobody could read is tested. */
+    void AddFile(const std::string & path, unsigned long long size,
+        unsigned long mtime, const std::string & hash)
+    {
+        Add(path, false, size, mtime);
+        mHashes[Normalize(mRoot + "/" + path)] = hash;
+    }
+
     void AddDirectory(const std::string & path, unsigned long mtime)
     {
         Add(path, true, 0, mtime);
@@ -785,6 +795,21 @@ public:
     }
 
     virtual const char * Label() const { return mLabel.c_str(); }
+
+    virtual bool HashFile(const std::string & path, std::string & hash,
+        std::string & error)
+    {
+        const std::map<std::string, std::string>::const_iterator found =
+            mHashes.find(Normalize(path));
+        if (found == mHashes.end())
+        {
+            error = std::string("the ") + mLabel + " side has no checksum "
+                "for it";
+            return false;
+        }
+        hash = found->second;
+        return true;
+    }
 
 private:
     static std::string Normalize(const std::string & path)
@@ -855,9 +880,19 @@ private:
     }
 
     std::map<std::string, std::vector<SyncEntry> > mDirectories;
+    std::map<std::string, std::string> mHashes;
     std::string mLabel;
     std::string mRoot;
 };
+
+/* The criteria one '-criteria=' value describes, or a failed check. */
+SyncCriteria CriteriaOf(const char * text)
+{
+    SyncCriteria criteria;
+    std::string error;
+    CHECK_TRUE(ParseSyncCriteria(text, criteria, error));
+    return criteria;
+}
 
 const SyncItem * FindItem(const SyncPlan & plan, const std::string & path)
 {
@@ -1074,25 +1109,132 @@ void TestSyncPlannerCriteria()
     options.mode = SyncMode::Local;
     SyncPlan plan;
 
-    options.criteria = SyncCriteria::Time;
+    options.criteria = CriteriaOf("time");
     CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
         options, plan, error));
     CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::None);
 
-    options.criteria = SyncCriteria::Size;
+    options.criteria = CriteriaOf("size");
     CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
         options, plan, error));
     CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
 
-    options.criteria = SyncCriteria::Either;
+    options.criteria = CriteriaOf("either");
+    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
+        options, plan, error));
+    CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
+    /* 'both' is upstream's other word for the same pair. */
+    CHECK_TRUE(CriteriaOf("both") == CriteriaOf("either"));
+
+    options.criteria = CriteriaOf("none");
     CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
         options, plan, error));
     CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
 
-    options.criteria = SyncCriteria::None;
-    CHECK_TRUE(PlanSynchronization(local, remote, "/local", "/remote",
-        options, plan, error));
-    CHECK_TRUE(ActionOf(plan, "file.txt") == SyncAction::Download);
+    /* A list compares what it names: 'checksum' alone reaches two files
+     * the timestamps and the sizes call equal. */
+    MemoryFileSystem hashedLocal("local", "/local");
+    MemoryFileSystem hashedRemote("remote", "/remote");
+    hashedLocal.AddFile("same.txt", 10, 2000, "aa");
+    hashedRemote.AddFile("same.txt", 10, 2000, "aa");
+    hashedLocal.AddFile("edited.txt", 10, 2000, "aa");
+    hashedRemote.AddFile("edited.txt", 10, 2000, "bb");
+    SyncPlan contents;
+
+    options.criteria = CriteriaOf("checksum");
+    CHECK_TRUE(PlanSynchronization(hashedLocal, hashedRemote, "/local",
+        "/remote", options, contents, error));
+    CHECK_TRUE(ActionOf(contents, "same.txt") == SyncAction::None);
+    CHECK_TRUE(ActionOf(contents, "edited.txt") == SyncAction::Download);
+
+    /* The reason names the comparison that found the difference. */
+    const SyncItem * edited = FindItem(contents, "edited.txt");
+    CHECK_TRUE(edited != NULL);
+    CHECK_TRUE(edited->reason.find("contents differ") != std::string::npos);
+
+    /* 'time,checksum' still leaves the newer file alone in a download:
+     * the remote copy is not newer, so only the contents can differ. */
+    options.criteria = CriteriaOf("time,checksum");
+    CHECK_TRUE(PlanSynchronization(hashedLocal, hashedRemote, "/local",
+        "/remote", options, contents, error));
+    CHECK_TRUE(ActionOf(contents, "edited.txt") == SyncAction::Download);
+
+    /* A file that cannot be hashed is not an agreement: the plan is
+     * refused with the reason instead of calling the two sides equal. */
+    MemoryFileSystem opaqueLocal("local", "/local");
+    MemoryFileSystem opaqueRemote("remote", "/remote");
+    opaqueLocal.AddFile("file.txt", 10, 2000);          /* no checksum */
+    opaqueRemote.AddFile("file.txt", 10, 2000, "aa");
+    options.criteria = CriteriaOf("checksum");
+    CHECK_FALSE(PlanSynchronization(opaqueLocal, opaqueRemote, "/local",
+        "/remote", options, contents, error));
+    CHECK_TRUE(error.find("Cannot compare the checksum") != std::string::npos);
+    CHECK_TRUE(error.find("no checksum for it") != std::string::npos);
+}
+
+void TestSyncCriteriaParsing()
+{
+    /* Every word upstream accepts, and the combinations a list makes. */
+    CHECK_TRUE(CriteriaOf("none").Empty());
+    CHECK_TRUE(CriteriaOf("NONE").Empty());
+    CHECK_TRUE(CriteriaOf("time").time && !CriteriaOf("time").size &&
+        !CriteriaOf("time").checksum);
+    CHECK_TRUE(!CriteriaOf("size").time && CriteriaOf("size").size);
+    CHECK_TRUE(CriteriaOf("checksum").checksum && !CriteriaOf("checksum").time);
+    CHECK_TRUE(CriteriaOf("either").time && CriteriaOf("either").size &&
+        !CriteriaOf("either").checksum);
+    CHECK_TRUE(CriteriaOf("both") == CriteriaOf("either"));
+    CHECK_TRUE(CriteriaOf("time,size") == CriteriaOf("either"));
+    CHECK_TRUE(CriteriaOf("time,checksum").time &&
+        CriteriaOf("time,checksum").checksum &&
+        !CriteriaOf("time,checksum").size);
+    CHECK_TRUE(CriteriaOf("size,checksum").size &&
+        CriteriaOf("size,checksum").checksum);
+    CHECK_TRUE(CriteriaOf("time,size,checksum").time &&
+        CriteriaOf("time,size,checksum").size &&
+        CriteriaOf("time,size,checksum").checksum);
+    /* Spaces around an item are tolerated, and an item may repeat. */
+    CHECK_TRUE(CriteriaOf("time , checksum") == CriteriaOf("time,checksum"));
+    CHECK_TRUE(CriteriaOf("size,size") == CriteriaOf("size"));
+
+    /* The names a plan prints: the words, and the list for the rest. */
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("none")), std::string("none"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("time")), std::string("time"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("size")), std::string("size"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("checksum")), std::string("checksum"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("either")), std::string("either"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("time,checksum")),
+        std::string("time,checksum"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("size,checksum")),
+        std::string("size,checksum"));
+    CHECK_EQ(SyncCriteriaName(CriteriaOf("time,size,checksum")),
+        std::string("time,size,checksum"));
+    /* The default is the one '-criteria=time' describes. */
+    CHECK_TRUE(SyncOptions().criteria == CriteriaOf("time"));
+
+    /* Anything else is refused, and the refusal names the words that
+     * are known. */
+    const char * const rejected[] = { "", "whenever", "timestamp", "time,",
+        ",size", "time,,size", "none,time", "time,none", "either,size",
+        "sha256", "check", "times" };
+    for (size_t i = 0; i < sizeof(rejected) / sizeof(rejected[0]); i++)
+    {
+        SyncCriteria criteria;
+        std::string error;
+        CHECK_FALSE(ParseSyncCriteria(rejected[i], criteria, error));
+        CHECK_TRUE(!error.empty());
+    }
+    SyncCriteria criteria;
+    std::string error;
+    CHECK_FALSE(ParseSyncCriteria("", criteria, error));
+    CHECK_TRUE(error.find("needs a value") != std::string::npos);
+    CHECK_FALSE(ParseSyncCriteria("whenever", criteria, error));
+    CHECK_TRUE(error.find("Unsupported criteria 'whenever'") != std::string::npos);
+    CHECK_TRUE(error.find("checksum") != std::string::npos);
+    CHECK_FALSE(ParseSyncCriteria("time,", criteria, error));
+    CHECK_TRUE(error.find("empty item") != std::string::npos);
+    CHECK_FALSE(ParseSyncCriteria("none,time", criteria, error));
+    CHECK_TRUE(error.find("whole set of criteria") != std::string::npos);
 }
 
 void TestSyncPlannerMaskAndRecursion()
@@ -2439,6 +2581,7 @@ int main()
     TestFileMaskParsing();
     TestSyncPlannerModes();
     TestSyncPlannerCriteria();
+    TestSyncCriteriaParsing();
     TestSyncPlannerMaskAndRecursion();
     TestSyncPlannerConflictsAndState();
     TestSyncPlanOrder();

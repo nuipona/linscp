@@ -161,6 +161,14 @@ public:
     /* The remote file listing as the synchronization planner needs it. */
     bool ListRemoteEntries(const std::string & path, std::vector<SyncEntry> & entries,
         std::string & error);
+    /* One remote file's checksum as lowercase hexadecimal, computed by the
+     * server when it can and from a downloaded copy otherwise. 'note'
+     * receives what the caller may tell the user about which of the two it
+     * was. The 'checksum' command and the synchronization planner's
+     * '-criteria=checksum' both go through it. */
+    bool RemoteChecksumFile(const std::string & path,
+        const std::string & algorithm, std::string & hex, std::string & note,
+        std::string & error);
     /* The three remote operations the editor needs, so that Editor.cpp
      * does not have to know anything about the session. */
     int StatForEdit(const std::string & path, LscpAttrs & attrs, std::string & error);

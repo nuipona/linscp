@@ -802,7 +802,7 @@
       </div>
       <div class="modal-body">
         <div class="form-row"><label>Direction:</label>
-          <select id="syncMode" class="select-field">
+          <select id="syncMode" class="select-field" onchange="syncModeChanged()">
             <option value="local">Remote &rarr; Local (update the local directory)</option>
             <option value="remote">Local &rarr; Remote (update the remote directory)</option>
             <option value="both">Both (the side that changed wins)</option>
@@ -814,7 +814,9 @@
           <select id="syncCriteria" class="select-field">
             <option value="time">Modification time</option>
             <option value="size">File size</option>
+            <option value="checksum">Contents (checksum)</option>
             <option value="either">Time or size</option>
+            <option value="time,checksum">Time and contents</option>
             <option value="none">Always copy</option>
           </select>
         </div>
@@ -1658,8 +1660,30 @@
     $('syncLocal').value = state.local.path;
     $('syncRemote').value = state.remote.path;
     $('syncPreviewBox').style.display = 'none';
-    $('syncHint').textContent = 'A preview does not change anything; it only compares the two trees.';
+    syncModeChanged();
     openModal('syncModal');
+  }
+
+  /* The 'both' direction decides from the record of the previous
+   * synchronization rather than from the files, so the console refuses a
+   * comparison it could not honour there. Offering only the ones it can is
+   * better than letting a preview fail on a setting the dialog suggested. */
+  function syncModeChanged() {
+    const both = $('syncMode').value === 'both';
+    const criteria = $('syncCriteria');
+    for (let i = 0; i < criteria.options.length; i++) {
+      const value = criteria.options[i].value;
+      criteria.options[i].disabled = both &&
+        (value === 'none' || value.indexOf('checksum') >= 0);
+    }
+    if (criteria.selectedOptions.length === 0 || criteria.options[
+        criteria.selectedIndex].disabled) {
+      criteria.value = 'either';
+    }
+    $('syncHint').textContent = both ?
+      'Both directions compare the record of the previous synchronization, ' +
+      'so the contents of the files are not read.' :
+      'A preview does not change anything; it only compares the two trees.';
   }
 
   function syncSettings() {
