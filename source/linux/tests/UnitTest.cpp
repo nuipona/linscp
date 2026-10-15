@@ -2249,7 +2249,7 @@ void TestNewScriptCommands()
     /* 'edit' and 'keepuptodate' need a connection and say so. */
     CHECK_TRUE(script.ExecuteLine("edit /tmp/file.txt"));
     CHECK_TRUE(script.ErrorCount() == 5);
-    CHECK_TRUE(script.ExecuteLine("keepuptodate local /tmp /tmp"));
+    CHECK_TRUE(script.ExecuteLine("keepuptodate /tmp /tmp"));
     CHECK_TRUE(script.ErrorCount() == 6);
 
     /* The editor is configurable and reported back. */

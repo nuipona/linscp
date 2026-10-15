@@ -57,12 +57,19 @@ feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
 LinuxSCP implements a subset of WinSCP workflows, **not full upstream feature
 parity**. It has a command-line interpreter, native SFTP on POSIX, curl-backed
 transfer paths, basic recursive transfers/resume/synchronization, and a
-browser-based dual-pane Commander interface (`linuxscp-gui`).
+browser-based dual-pane Commander interface (`linuxscp-gui`) with bounded
+UTF-8 full-text search of remote files. The `keepuptodate` command reflects
+local changes onto the remote side; Linux watches recursively with inotify
+and Windows uses `ReadDirectoryChangesW`, with interval polling as a fallback.
 
-Protocol URL acceptance is not proof of complete support: WebDAV lists, stats
-and moves through PROPFIND/MKCOL/MOVE/DELETE but has no locking, dead
-properties or COPY, and Amazon S3 signs with Signature Version 4 and lists,
-stats and transfers objects without ACLs, versioning or multipart uploads.
+Protocol URL acceptance is not proof of complete support: WebDAV lists and
+stats through PROPFIND, moves with MOVE, and file copies with COPY (falling
+back to a streamed copy when the server refuses COPY); locking, dead properties
+and conditional requests remain gaps. Amazon S3 signs with Signature Version 4,
+lists and stats objects, uses CopyObject for remote copies, and switches uploads
+larger than 16 MiB to multipart requests. Interrupted multipart uploads restart
+from the first part; ACLs, versioning, storage classes and server-side encryption
+options remain unsupported.
 Windows SSH protocols depend on the installed curl build. Scripting covers the
 WinSCP transfer switches (file masks, `-transfer=`, `-resume`, `-append`,
 `-speed=`, `-resumesupport=`, `-preservetime`) with upstream's `.filepart`

@@ -10,8 +10,8 @@ client needs:
   PROPFIND Depth 0/1 with a 207 multi-status (resourcetype,
   getcontentlength, getlastmodified - the properties LinuxSCP's parser
   reads), MKCOL, GET/HEAD with ranges, PUT, DELETE (409 on a
-  non-empty collection, the conflict rmdir depends on), and MOVE with
-  an absolute-URI Destination and Overwrite semantics.
+  non-empty collection, the conflict rmdir depends on), MOVE, and COPY
+  with absolute-URI Destination and Overwrite semantics.
 
 Storage is in memory, one fresh process per test. The XML is written
 by this file and parsed independently by the client; neither shares
@@ -23,6 +23,7 @@ prints "READY <port>" once listening.
 
 import calendar
 import datetime
+import json
 import re
 import sys
 import urllib.parse
@@ -59,6 +60,8 @@ class Store:
 
     def __init__(self):
         self.items = {"/": {"kind": "dir", "mtime": _now()}}
+        self.copy_count = 0
+        self.reject_next_copy = False
 
     @staticmethod
     def normalize(path):
@@ -128,6 +131,33 @@ class Store:
             elif p.startswith(path + "/") and "/" not in p[len(path) + 1:]:
                 out.append(p)
         return out
+
+    def copy(self, src, dest, overwrite):
+        src = self.normalize(src)
+        dest = self.normalize(dest)
+        if src not in self.items:
+            return "missing-source"
+        if dest == "/" or dest == src or dest.startswith(src + "/") or \
+                src.startswith(dest + "/"):
+            return "forbidden"
+        parent = self.parent_of(dest)
+        if parent not in self.items or self.items[parent]["kind"] != "dir":
+            return "no-parent"
+        replaced = dest in self.items
+        if replaced and not overwrite:
+            return "precondition"
+        source = self.items[src]
+        subtree = {p: value for p, value in self.items.items()
+                   if p == src or p.startswith(src + "/")}
+        if replaced:
+            for path in list(self.items):
+                if path == dest or path.startswith(dest + "/"):
+                    del self.items[path]
+        for path, value in subtree.items():
+            target = dest + path[len(src):]
+            self.items[target] = dict(value)
+        self.copy_count += 1
+        return "replaced" if replaced else "created"
 
     def move(self, src, dest, overwrite):
         src = self.normalize(src)
@@ -206,7 +236,7 @@ class DavHandler(BaseHTTPRequestHandler):
         self.send_header("DAV", "1")
         self.send_header("Allow",
                          "OPTIONS, GET, HEAD, PUT, DELETE, MKCOL, "
-                         "PROPFIND, MOVE")
+                         "PROPFIND, MOVE, COPY")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -266,6 +296,16 @@ class DavHandler(BaseHTTPRequestHandler):
         return Store.normalize(path)
 
     def do_GET(self):
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/__test__/reject-next-copy":
+            SERVER_STORE.reject_next_copy = True
+            self.send_body(204, b"")
+            return
+        if parsed.path == "/__test__/state":
+            body = json.dumps({"copy_count": SERVER_STORE.copy_count}).encode(
+                "utf-8")
+            self.send_body(200, body, "application/json")
+            return
         if not self.authorized():
             return
         path = self.local_path()
@@ -359,6 +399,38 @@ class DavHandler(BaseHTTPRequestHandler):
         dest = parsed.path or destination
         overwrite = self.headers.get("Overwrite", "T").upper() != "F"
         result = SERVER_STORE.move(self.local_path(), dest, overwrite)
+        if result in ("created", "replaced"):
+            self.send_response(201 if result == "created" else 204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif result == "missing-source":
+            self.send_error_text(404, "Not Found.")
+        elif result == "precondition":
+            self.send_error_text(412, "The destination exists.")
+        elif result == "no-parent":
+            self.send_error_text(409, "The destination's parent is missing.")
+        else:
+            self.send_error_text(403, "Forbidden.")
+
+    def do_COPY(self):
+        if not self.authorized():
+            return
+        if SERVER_STORE.reject_next_copy:
+            SERVER_STORE.reject_next_copy = False
+            self.send_error_text(405, "COPY is disabled for this request.")
+            return
+        destination = self.headers.get("Destination", "")
+        if not destination:
+            self.send_error_text(400, "Destination required.")
+            return
+        parsed = urllib.parse.urlsplit(destination)
+        if parsed.netloc and parsed.netloc.lower() != self.headers.get(
+                "Host", "").lower():
+            self.send_error_text(502, "Destination must be on this server.")
+            return
+        dest = parsed.path or destination
+        overwrite = self.headers.get("Overwrite", "T").upper() != "F"
+        result = SERVER_STORE.copy(self.local_path(), dest, overwrite)
         if result in ("created", "replaced"):
             self.send_response(201 if result == "created" else 204)
             self.send_header("Content-Length", "0")

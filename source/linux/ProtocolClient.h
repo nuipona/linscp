@@ -60,6 +60,12 @@ public:
     static int MakeDir(const SessionOptions & options, const std::string & remotePath,
         std::string & error);
 
+    /* Server-side file copy where the protocol provides it. Returns 1 when
+     * no copy operation is available so the caller can stream through the
+     * client, 0 on success, and -1 on a real server/transport failure. */
+    static int Copy(const SessionOptions & options, const std::string & fromPath,
+        const std::string & toPath, std::string & error);
+
     static int Move(const SessionOptions & options, const std::string & fromPath,
         const std::string & toPath, std::string & error);
 

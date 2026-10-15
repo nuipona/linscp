@@ -1678,6 +1678,63 @@ int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & 
     return 0;
 }
 
+int ProtocolClient::Copy(const SessionOptions & options,
+    const std::string & fromPath, const std::string & toPath,
+    std::string & error)
+{
+    error.clear();
+    const std::string proto = ToLower(options.protocol);
+    if (proto == "s3")
+    {
+        return S3Client::Copy(options, fromPath, toPath, error);
+    }
+    if (IsDavProtocol(proto))
+    {
+        std::vector<std::pair<std::string, std::string> > headers;
+        headers.push_back(std::make_pair(std::string("Destination"),
+            BuildUrl(options, toPath)));
+        /* cp overwrites when confirmation was accepted (or disabled), just
+         * like the stream-copy fallback's PUT to the destination. */
+        headers.push_back(std::make_pair(std::string("Overwrite"),
+            std::string("T")));
+        DavResult copied;
+        std::string copyError;
+        if (!DavInvoke(options, "COPY", fromPath, headers, std::string(),
+                copied, copyError))
+        {
+            error = copyError;
+            return -1;
+        }
+        if (copied.httpCode == 200 || copied.httpCode == 201 ||
+            copied.httpCode == 204)
+        {
+            return 0;
+        }
+        /* COPY is optional in deployed DAV servers. Keep the portable
+         * download/upload fallback for servers which explicitly do not
+         * implement or permit this method. */
+        if (copied.httpCode == 405 || copied.httpCode == 501)
+        {
+            return 1;
+        }
+        if (copied.httpCode == 404)
+        {
+            error = "No such file or directory.";
+            return -1;
+        }
+        if (copied.httpCode == 412)
+        {
+            error = "The server refused to overwrite the destination '" +
+                toPath + "'.";
+            return -1;
+        }
+        error = "Cannot copy '" + fromPath + "': " +
+            DavHttpFailure(copied, "Copy");
+        return -1;
+    }
+    return 1;
+}
+
 int ProtocolClient::Move(const SessionOptions & options, const std::string & fromPath,
     const std::string & toPath, std::string & error)
 {

@@ -14,7 +14,12 @@ what a DAV filesystem has to answer:
   - mkdir refusing an existing name, rmdir refusing a non-empty
     directory, remove of a missing file failing;
   - rename through MOVE leaving exactly the destination behind;
-  - an upload/download roundtrip with a checksum.
+  - `cp` through server-side COPY, with the source retained and the copied
+    bytes checked independently (the mock records which HTTP method ran);
+  - `cp` falling back to a streamed download/upload when the mock refuses
+    COPY with 405, again checked byte-for-byte;
+  - an upload/download roundtrip with a checksum;
+  - keepuptodate uploading local changes and waking on a nested file event.
 
 Unlike the SFTP and S3 suites this one needs no POSIX-only pieces: the
 client uses curl over plain HTTP and the server is the standard
@@ -26,6 +31,7 @@ Evidence convention (same as every other suite):
 """
 
 import hashlib
+import json
 import os
 import pathlib
 import signal
@@ -34,6 +40,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.request
 
 BINARY = str(pathlib.Path(sys.argv.pop(1)).resolve())
 SUITE_NAME = "live-dav"
@@ -174,6 +181,26 @@ class LiveDavTests(unittest.TestCase):
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env)
 
+    def start_script(self, commands, creds=None, open_args=()):
+        user, secret = creds if creds else (USER, PASSWORD)
+        argv = [BINARY, "-batch", "-hostkey=*",
+                "-log=" + str(self.config / "session.log"),
+                "-command=open dav://%s:%s@127.0.0.1:%d/ %s ; %s" %
+                (user, secret, self.port, " ".join(open_args), commands)]
+        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        return subprocess.Popen(argv, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE, text=True, env=env)
+
+    def server_state(self):
+        url = "http://127.0.0.1:%d/__test__/state" % self.port
+        with urllib.request.urlopen(url, timeout=10) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def reject_next_server_copy(self):
+        url = "http://127.0.0.1:%d/__test__/reject-next-copy" % self.port
+        with urllib.request.urlopen(url, timeout=10) as response:
+            self.assertEqual(response.status, 204)
+
     # -- tests --------------------------------------------------------------
     def test_wrong_password_is_refused_by_the_challenge(self):
         """--anyauth lets the server challenge, and the second attempt
@@ -249,6 +276,90 @@ class LiveDavTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("ROUNDTRIP_OK", result.stdout)
         self.assertEqual(sha256_of(source), sha256_of(downloaded))
+
+    def test_keepuptodate_reflects_local_files_on_the_remote_side(self):
+        """WinSCP's command watches the local side and reflects its files
+        onto the remote directory; one bounded pass must therefore upload."""
+        local_dir = self.root / "keepuptodate-once"
+        local_dir.mkdir()
+        payload = b"local changes go to the remote side\n"
+        source = local_dir / "payload.txt"
+        source.write_bytes(payload)
+        downloaded = self.root / "keepuptodate-once-downloaded.txt"
+        result = self.run_script(
+            "mkdir /keepuptodate-once ; "
+            "keepuptodate -count=1 %s /keepuptodate-once ; "
+            "get /keepuptodate-once/payload.txt %s" %
+            (local_dir, downloaded))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(downloaded.read_bytes(), payload)
+
+    @unittest.skipUnless(sys.platform.startswith("linux") or os.name == "nt",
+                         "native directory notifications are unavailable")
+    def test_keepuptodate_wakes_on_a_local_change(self):
+        """A completed file arrival wakes the native watcher immediately
+        instead of waiting for its 30-second safety-rescan interval."""
+        local_dir = self.root / "keepuptodate-watch"
+        local_dir.mkdir()
+        nested = local_dir / "nested"
+        nested.mkdir()
+        pending_file = self.root / "keepuptodate-pending.bin"
+        pending_file.write_bytes(b"the native directory event woke the next pass\n")
+        self.assertEqual(self.run_script(
+            "mkdir /keepuptodate-watch ; mkdir /keepuptodate-watch/nested"
+        ).returncode, 0)
+
+        process = self.start_script(
+            "keepuptodate -interval=30 -count=2 %s /keepuptodate-watch" %
+            local_dir)
+        stdout_lines = []
+        stderr_lines = []
+        first_pass = threading.Event()
+
+        def read_output(stream, lines, watch_first_pass=False):
+            for line in stream:
+                lines.append(line)
+                if watch_first_pass and "Pass 1:" in line:
+                    first_pass.set()
+
+        readers = [
+            threading.Thread(target=read_output,
+                             args=(process.stdout, stdout_lines, True),
+                             daemon=True),
+            threading.Thread(target=read_output,
+                             args=(process.stderr, stderr_lines),
+                             daemon=True),
+        ]
+        for reader in readers:
+            reader.start()
+        try:
+            self.assertTrue(first_pass.wait(timeout=15),
+                            "initial pass did not finish; stdout=%r stderr=%r" %
+                            (stdout_lines, stderr_lines))
+            os.replace(pending_file, nested / "arrived-after-start.txt")
+            returncode = process.wait(timeout=12)
+        except Exception:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=3)
+            raise
+        finally:
+            for reader in readers:
+                reader.join(timeout=3)
+
+        self.assertEqual(returncode, 0,
+                         "stdout=%r stderr=%r" % (stdout_lines, stderr_lines))
+        downloaded = self.root / "keepuptodate-watch-downloaded.txt"
+        result = self.run_script(
+            "get /keepuptodate-watch/nested/arrived-after-start.txt %s" %
+            downloaded)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(downloaded.read_bytes(),
+                         b"the native directory event woke the next pass\n")
 
     def test_transfer_preset_drives_ascii_and_loads_with_the_site(self):
         """Transfer presets against a real server: the active preset
@@ -359,6 +470,46 @@ class LiveDavTests(unittest.TestCase):
         self.assertIn("RMDIR_OK", result.stdout)
         listing = result.stdout.split("Reading directory /docs...")[1]
         self.assertNotIn("full", listing)
+
+    def test_cp_uses_webdav_copy_and_preserves_the_source(self):
+        """COPY is a server-side operation: the destination has to match
+        byte-for-byte, the original remains, and the mock's COPY counter
+        proves no GET/PUT stream-copy fallback was used."""
+        source = self.root / "dav-copy-source.bin"
+        payload = bytes(range(256)) * 128
+        source.write_bytes(payload)
+        downloaded = self.root / "dav-copy-destination.bin"
+        result = self.run_script(
+            "option confirm off ; mkdir /docs ; "
+            "put %s /docs/source.bin ; "
+            "cp /docs/source.bin /docs/copied.bin ; "
+            "get /docs/copied.bin %s ; ls -l /docs ; echo COPY_OK" %
+            (source, downloaded))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("COPY_OK", result.stdout)
+        self.assertIn("source.bin", result.stdout)
+        self.assertIn("copied.bin", result.stdout)
+        self.assertEqual(downloaded.read_bytes(), payload)
+        self.assertEqual(self.server_state()["copy_count"], 1)
+
+    def test_cp_falls_back_to_streaming_when_webdav_copy_is_refused(self):
+        source = self.root / "dav-fallback-source.bin"
+        payload = bytes(range(251)) * 257
+        source.write_bytes(payload)
+        downloaded = self.root / "dav-fallback-destination.bin"
+        result = self.run_script(
+            "option confirm off ; mkdir /docs ; put %s /docs/source.bin" %
+            source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.reject_next_server_copy()
+
+        result = self.run_script(
+            "cp /docs/source.bin /docs/copied.bin ; "
+            "get /docs/copied.bin %s ; echo COPY_FALLBACK_OK" % downloaded)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("COPY_FALLBACK_OK", result.stdout)
+        self.assertEqual(downloaded.read_bytes(), payload)
+        self.assertEqual(self.server_state()["copy_count"], 0)
 
     def test_rename_moves_and_remove_reports_a_missing_file(self):
         first = self.root / "a.txt"

@@ -1551,14 +1551,36 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 return
             pattern = body.get("pattern") or "*"
             start = body.get("path") or tab.remote_dir
-            limit = int(body.get("limit") or 500)
-            case_sensitive = bool(body.get("case_sensitive"))
             try:
-                matches = remote_search(tab, start, pattern, limit, case_sensitive)
+                limit = max(1, min(1000, int(body.get("limit") or 500)))
+            except (TypeError, ValueError):
+                self.send_json({"success": False, "error": "The result limit must be a number."}, status=400)
+                return
+            case_sensitive = body.get("case_sensitive") is True
+            search_contents = body.get("search_contents") is True
+            content_query = body.get("content_query") or ""
+            if search_contents and not isinstance(content_query, str):
+                self.send_json({"success": False, "error": "The text query must be a string."}, status=400)
+                return
+            if search_contents and not content_query:
+                self.send_json({"success": False, "error": "Enter text to search for."}, status=400)
+                return
+            if search_contents and len(content_query) > 1024:
+                self.send_json({"success": False, "error": "The text query is too long (maximum 1024 characters)."}, status=400)
+                return
+            stats = {"scanned": 0, "skipped": 0, "bytes_scanned": 0,
+                     "truncated": False}
+            try:
+                matches = remote_search(tab, start, pattern, limit,
+                    case_sensitive, content_query=content_query if search_contents else None,
+                    stats=stats)
             except Exception as exc:
                 self.send_json({"success": False, "error": str(exc)}, status=400)
                 return
-            self.send_json({"success": True, "matches": matches, "truncated": len(matches) >= limit})
+            self.send_json({"success": True, "matches": matches,
+                "truncated": stats["truncated"], "scanned": stats["scanned"],
+                "skipped": stats["skipped"],
+                "bytes_scanned": stats["bytes_scanned"]})
             return
 
         if path == "/api/remote/save":
@@ -1775,35 +1797,159 @@ def remote_size(tab, remote_path):
     return info["size"] if info else 0
 
 
-def remote_search(tab, start, pattern, limit=500, case_sensitive=False, depth=0, matches=None):
-    """Recursive search over the remote tree, breadth first."""
+MAX_CONTENT_SEARCH_FILE_BYTES = 8 * 1024 * 1024
+MAX_CONTENT_SEARCH_TOTAL_BYTES = 64 * 1024 * 1024
+MAX_CONTENT_SEARCH_FILES = 200
+MAX_CONTENT_SEARCH_CANDIDATES = 1000
+MAX_REMOTE_SEARCH_DEPTH = 12
+
+
+def _content_match_in_remote_file(tab, remote_path, query, case_sensitive):
+    """Download and scan one bounded UTF-8 text file, returning its first hit."""
+    directory = tempfile.mkdtemp(prefix="linuxscp-search-")
+    local_path = os.path.join(directory, "content")
+    try:
+        command = "get -transfer=binary %s %s" % (
+            quote_remote(remote_path), quote_remote(local_path))
+        code, lines, errors = tab.run_capture(command, timeout=180)
+        if code != 0:
+            return None, 0, "download"
+        actual_size = os.path.getsize(local_path)
+        if actual_size > MAX_CONTENT_SEARCH_FILE_BYTES:
+            return None, actual_size, "too-large"
+        with open(local_path, "rb") as handle:
+            data = handle.read(MAX_CONTENT_SEARCH_FILE_BYTES + 1)
+        if len(data) > MAX_CONTENT_SEARCH_FILE_BYTES:
+            return None, len(data), "too-large"
+        if b"\0" in data:
+            return None, len(data), "binary"
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None, len(data), "encoding"
+        wanted = query if case_sensitive else query.casefold()
+        for line_number, line in enumerate(text.splitlines(), 1):
+            candidate = line if case_sensitive else line.casefold()
+            position = candidate.find(wanted)
+            if position < 0:
+                continue
+            snippet = " ".join(line.split())
+            if len(snippet) > 240:
+                folded = snippet if case_sensitive else snippet.casefold()
+                position = max(0, folded.find(wanted))
+                left = max(0, min(position - 80, len(snippet) - 234))
+                right = left + 234
+                snippet = ("..." if left else "") + snippet[left:right] + \
+                    ("..." if right < len(snippet) else "")
+            snippet = "".join(ch if ch >= " " or ch == "\t" else " "
+                               for ch in snippet)
+            return {"line": line_number, "snippet": snippet}, len(data), ""
+        return None, len(data), ""
+    except (OSError, IOError, subprocess.SubprocessError):
+        return None, 0, "download"
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def remote_search(tab, start, pattern, limit=500, case_sensitive=False,
+                  depth=0, matches=None, content_query=None, stats=None,
+                  _budget=None):
+    """Search names or bounded UTF-8 file contents throughout a remote tree.
+
+    Content mode treats ``pattern`` as a filename mask, scans at most 200
+    files/64 MiB (8 MiB per file), and reports files it could not inspect.
+    """
     if matches is None:
         matches = []
-    if depth > 12 or len(matches) >= limit:
+    if stats is None:
+        stats = {"scanned": 0, "skipped": 0, "bytes_scanned": 0,
+                 "truncated": False}
+    if _budget is None:
+        _budget = {"candidates": 0}
+    if depth > MAX_REMOTE_SEARCH_DEPTH:
+        stats["truncated"] = True
+        return matches
+    if len(matches) >= limit:
+        stats["truncated"] = True
         return matches
     code, lines = tab.run_many(["cd " + quote_remote(start), "ls -la"], timeout=30)
     if code != 0:
         return matches
     entries = parse_ls_output(lines)
-    needle = pattern if case_sensitive else pattern.lower()
+    needle = pattern if case_sensitive else pattern.casefold()
     for entry in entries:
-        name = entry["name"] if case_sensitive else entry["name"].lower()
-        if fnmatch(name, needle):
+        name = entry["name"] if case_sensitive else entry["name"].casefold()
+        if content_query is None:
+            if fnmatch(name, needle):
+                matches.append({
+                    "path": posixpath.join(start, entry["name"]),
+                    "name": entry["name"],
+                    "is_dir": entry["is_dir"],
+                    "size": entry.get("size", 0),
+                    "date": entry.get("date", ""),
+                    "permissions": entry.get("permissions", ""),
+                })
+                if len(matches) >= limit:
+                    stats["truncated"] = True
+                    return matches
+            continue
+
+        # In content mode the mask filters candidate file names; directories
+        # are traversed below, but are not themselves content results.
+        if entry["is_dir"] or not fnmatch(name, needle):
+            continue
+        if _budget["candidates"] >= MAX_CONTENT_SEARCH_CANDIDATES:
+            stats["truncated"] = True
+            return matches
+        _budget["candidates"] += 1
+        remote_path = posixpath.join(start, entry["name"])
+        info = remote_stat(tab, remote_path, timeout=30)
+        if info is None or info.get("is_dir"):
+            stats["skipped"] += 1
+            continue
+        size = int(info.get("size") or 0)
+        if size <= 0:
+            continue
+        if size > MAX_CONTENT_SEARCH_FILE_BYTES:
+            stats["skipped"] += 1
+            continue
+        if stats["scanned"] >= MAX_CONTENT_SEARCH_FILES or \
+                stats["bytes_scanned"] + size > MAX_CONTENT_SEARCH_TOTAL_BYTES:
+            stats["truncated"] = True
+            return matches
+        stats["scanned"] += 1
+        hit, actual_size, reason = _content_match_in_remote_file(
+            tab, remote_path, content_query, case_sensitive)
+        if reason:
+            stats["skipped"] += 1
+            if reason != "download":
+                # The actual transfer size may differ from the stat result;
+                # account it so a lying listing cannot bypass the budget.
+                if actual_size <= MAX_CONTENT_SEARCH_TOTAL_BYTES:
+                    stats["bytes_scanned"] += actual_size
+            continue
+        stats["bytes_scanned"] += actual_size
+        if hit is not None:
             matches.append({
-                "path": posixpath.join(start, entry["name"]),
+                "path": remote_path,
                 "name": entry["name"],
-                "is_dir": entry["is_dir"],
-                "size": entry.get("size", 0),
+                "is_dir": False,
+                "size": actual_size,
                 "date": entry.get("date", ""),
                 "permissions": entry.get("permissions", ""),
+                "line": hit["line"],
+                "snippet": hit["snippet"],
             })
             if len(matches) >= limit:
+                stats["truncated"] = True
                 return matches
+
     for entry in entries:
         if entry["is_dir"]:
             remote_search(tab, posixpath.join(start, entry["name"]), pattern,
-                          limit, case_sensitive, depth + 1, matches)
-            if len(matches) >= limit:
+                          limit, case_sensitive, depth + 1, matches,
+                          content_query, stats, _budget)
+            if len(matches) >= limit or stats["truncated"]:
                 break
     return matches
 
