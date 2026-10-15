@@ -329,7 +329,7 @@
   },
   "open": {
    "status": "partial",
-   "notes": "URL sessions and stored-session names; an unknown host key is refused and reported on a HOSTKEY line so it can be pinned. No raw settings, SSH tunnels, session folders or session selection UI in the console client. A stored password that cannot be decrypted is reported and the\nopen continues without it.",
+   "notes": "URL sessions and stored-session names; an unknown host key is refused and reported on a HOSTKEY line so it can be pinned. '-rawsettings[=N] NAME=VALUE...' applies upstream's proxy session settings (ProxyMethod, ProxyHost, ProxyPort, ProxyUsername, ProxyPassword, ProxyTelnetCommand, ProxyLocalCommand, ProxyDNS, ProxyLocalhost, ProxyExcludeList) and refuses by name any setting this build does not apply, an incomplete proxy, and a proxy the curl transports cannot run; the switches of 'open' also apply to a stored site, as they do upstream. Missing: SSH tunnels, session folders, session selection UI, and the raw settings beyond the proxy ones. A stored password that cannot be decrypted is reported and the\nopen continues without it.",
    "verified_on": {
     "linux": [
      "script",
@@ -563,9 +563,14 @@
   {
    "name": "Sessions/configuration",
    "status": "partial",
-   "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import, last-used tracking, and the transfer preset a site stores with '-preset=' and loads when it opens. Stored passwords are encrypted under a sibling 'sessions.key' (created\non first use, user-only access) in a format the graphical client reads and\nwrites too. Missing: folder tree, raw settings and the full upstream\nconfiguration model.",
+   "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import, last-used tracking, and the transfer preset a site stores with '-preset=' and loads when it opens. Stored passwords are encrypted under a sibling 'sessions.key' (created\non first use, user-only access) in a format the graphical client reads and\nwrites too. A proxy travels with a site: 'open -rawsettings' applies upstream's proxy settings, 'savesession -rawsettings' stores them with the proxy password encrypted like a session password, and a site whose stored proxy cannot be decrypted is refused rather than opened without it. Missing: folder tree, the raw settings beyond the proxy ones, and the full upstream\nconfiguration model.",
    "verified_on": {
     "linux": [
+     "script",
+     "unit",
+     "live-sftp"
+    ],
+    "windows": [
      "script"
     ]
    }
@@ -573,11 +578,16 @@
   {
    "name": "Security/authentication",
    "status": "partial",
-   "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
+   "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration is in place under upstream's setting names - SOCKS 4 and 5, HTTP CONNECT, a telnet command or a local command through the PuTTY core, with its DNS, localhost and exclude-list policy - and the curl protocols translate the same settings to --proxy/--proxy-user/--noproxy, refusing a telnet or local-command proxy they cannot run; a proxy password is masked in the echo and in the action log. What the curl path cannot express is ProxyLocalhost=0: curl proxies every host, localhost included. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
    "verified_on": {
     "linux": [
      "live-sftp",
+     "live-dav",
+     "script",
      "unit"
+    ],
+    "windows": [
+     "script"
     ]
    }
   },
@@ -634,7 +644,7 @@
   {
    "name": "savesession / rmsession",
    "status": "verified",
-   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key on save, and a stored value that cannot be decrypted is preserved across an unrelated re-save. Covered by the script suite on both platforms.",
+   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key on save, '-rawsettings' stores the proxy settings with the site the same way - its password encrypted under the same key file, kept byte for byte across a re-save this machine cannot decrypt, dropped with the credential when ProxyMethod=None clears the proxy, and refused at open when the key file is gone rather than connected around - and a stored value that cannot be decrypted is preserved across an unrelated re-save. Covered by the script suite on both platforms.",
    "verified_on": {
     "linux": [
      "script"

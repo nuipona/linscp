@@ -59,16 +59,23 @@ parity**. It has a command-line interpreter, native SFTP on POSIX, curl-backed
 transfer paths, basic recursive transfers/resume/synchronization, and a
 browser-based dual-pane Commander interface (`linuxscp-gui`).
 
-Protocol URL acceptance is not proof of complete support: WebDAV directory
-listing is incomplete, and authenticated Amazon S3 (signing and bucket/object
-listing) is not implemented. Windows SSH protocols depend on the installed
-curl build. Scripting covers the WinSCP transfer switches (file masks,
-`-transfer=`, `-resume`, `-append`, `-speed=`, `-resumesupport=`,
-`-preservetime`) with upstream's `.filepart` staging for resume-capable
-transfers, unambiguous command and option abbreviations, script
-parameters with `%TIMESTAMP%` and environment expansion, and an XML action
-log; the .NET assembly and PowerShell automation APIs, transfer presets,
-session folder trees remain open gaps.
+Protocol URL acceptance is not proof of complete support: WebDAV lists, stats
+and moves through PROPFIND/MKCOL/MOVE/DELETE but has no locking, dead
+properties or COPY, and Amazon S3 signs with Signature Version 4 and lists,
+stats and transfers objects without ACLs, versioning or multipart uploads.
+Windows SSH protocols depend on the installed curl build. Scripting covers the
+WinSCP transfer switches (file masks, `-transfer=`, `-resume`, `-append`,
+`-speed=`, `-resumesupport=`, `-preservetime`) with upstream's `.filepart`
+staging for resume-capable transfers, named and rule-based transfer presets,
+unambiguous command and option abbreviations, script parameters with
+`%TIMESTAMP%` and environment expansion, and an XML action log. A session can
+be reached through a proxy: `open -rawsettings ProxyMethod=SOCKS5
+ProxyHost=... ProxyPort=...` applies upstream's proxy settings (SOCKS 4 and 5,
+HTTP CONNECT, a telnet or local command, with their DNS, localhost and
+exclude-list policy), `savesession -rawsettings` stores them with the site and
+encrypts the proxy password, and a setting or proxy this build cannot use is
+refused by name instead of being dropped. The .NET assembly and PowerShell
+automation APIs, SSH tunnels and session folder trees remain open gaps.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 for the pinned upstream baseline, command inventory, limitations and tests.
