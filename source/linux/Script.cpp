@@ -10,6 +10,24 @@
 
 #include <algorithm>
 #include <chrono>
+#include <map>
+#include <set>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__linux__)
+#include <dirent.h>
+#include <fcntl.h>
+#include <poll.h>
+#include <sys/inotify.h>
+#include <sys/stat.h>
+#endif
 
 #if !defined(_WIN32)
 /* The public half of a key file, which only the bundled PuTTY core can
@@ -43,6 +61,408 @@ const char * const kPartialExt = ".filepart";
  * 'option resume' at its default 'automatic', a binary file of at least
  * this size is transferred through '.filepart' and can be continued. */
 const unsigned long long kDefaultResumeThreshold = 100ull * 1024;
+
+/* Native local-directory watchers wake keepuptodate on file changes; the
+ * configured interval remains a full-rescan safety net. Linux uses inotify,
+ * Windows uses ReadDirectoryChangesW, and other platforms poll on a timer. */
+class LocalChangeWatcher
+{
+public:
+    LocalChangeWatcher()
+#if defined(__linux__)
+        : mFd(-1), mAvailable(false)
+#elif defined(_WIN32)
+        : mDirectory(INVALID_HANDLE_VALUE), mEvent(NULL),
+          mRequestPending(false), mAvailable(false)
+#else
+        : mAvailable(false)
+#endif
+    {}
+
+    ~LocalChangeWatcher()
+    {
+#if defined(__linux__)
+        if (mFd >= 0)
+        {
+            close(mFd);
+        }
+#elif defined(_WIN32)
+        if (mRequestPending && mDirectory != INVALID_HANDLE_VALUE)
+        {
+            /* The overlapped structure and buffer are members of this
+             * object; wait for cancellation to complete before destroying
+             * them. The watch is always issued and cancelled on this thread. */
+            CancelIo(mDirectory);
+            DWORD ignoredBytes = 0;
+            GetOverlappedResult(mDirectory, &mOverlapped, &ignoredBytes, TRUE);
+        }
+        if (mDirectory != INVALID_HANDLE_VALUE)
+        {
+            CloseHandle(mDirectory);
+        }
+        if (mEvent != NULL)
+        {
+            CloseHandle(mEvent);
+        }
+#endif
+    }
+
+    bool Start(const std::string & root)
+    {
+#if defined(__linux__)
+        mRoot = root;
+        mFd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+        if (mFd < 0)
+        {
+            return false;
+        }
+        mAvailable = AddDirectoryTree(root, true);
+        if (!mAvailable)
+        {
+            close(mFd);
+            mFd = -1;
+        }
+        return mAvailable;
+#elif defined(_WIN32)
+        const std::wstring wideRoot = Utf8PathToWide(root);
+        if (wideRoot.empty())
+        {
+            return false;
+        }
+        mDirectory = CreateFileW(wideRoot.c_str(), FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            NULL);
+        if (mDirectory == INVALID_HANDLE_VALUE)
+        {
+            return false;
+        }
+        mEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+        if (mEvent == NULL)
+        {
+            return false;
+        }
+        mAvailable = IssueRead();
+        return mAvailable;
+#else
+        (void)root;
+        return false;
+#endif
+    }
+
+    bool Available() const { return mAvailable; }
+
+    void WaitForChange(unsigned timeoutMilliseconds)
+    {
+#if defined(__linux__)
+        if (!mAvailable || mFd < 0)
+        {
+            return;
+        }
+        /* The watched root can be removed and recreated while the command is
+         * waiting. Re-arm it before the next interval after such a change. */
+        if (mWatchedPaths.count(mRoot) == 0)
+        {
+            AddDirectoryTree(mRoot, true);
+        }
+        unsigned remaining = timeoutMilliseconds;
+        while (remaining > 0 && !Interrupted())
+        {
+            const unsigned slice = remaining < 250u ? remaining : 250u;
+            struct pollfd fd;
+            fd.fd = mFd;
+            fd.events = POLLIN;
+            fd.revents = 0;
+            const int ready = poll(&fd, 1, static_cast<int>(slice));
+            if (ready == 0)
+            {
+                remaining -= slice;
+                continue;
+            }
+            if (ready < 0)
+            {
+                if (errno == EINTR)
+                {
+                    continue;
+                }
+                remaining -= slice;
+                continue;
+            }
+            if ((fd.revents & POLLIN) == 0)
+            {
+                remaining -= slice;
+                continue;
+            }
+            if (DrainEvents())
+            {
+                return;
+            }
+            remaining -= slice;
+        }
+#elif defined(_WIN32)
+        unsigned remaining = timeoutMilliseconds;
+        if (!mAvailable || mDirectory == INVALID_HANDLE_VALUE || mEvent == NULL)
+        {
+            WaitUsingTimer(remaining);
+            return;
+        }
+        while (remaining > 0 && !Interrupted())
+        {
+            const unsigned slice = remaining < 250u ? remaining : 250u;
+            const DWORD ready = WaitForSingleObject(mEvent,
+                static_cast<DWORD>(slice));
+            if (ready == WAIT_TIMEOUT)
+            {
+                remaining -= slice;
+                continue;
+            }
+            if (ready != WAIT_OBJECT_0)
+            {
+                mAvailable = false;
+                WaitUsingTimer(remaining);
+                return;
+            }
+
+            DWORD bytesRead = 0;
+            const BOOL completed = GetOverlappedResult(mDirectory,
+                &mOverlapped, &bytesRead, FALSE);
+            mRequestPending = false;
+            if (!completed && GetLastError() != ERROR_NOTIFY_ENUM_DIR)
+            {
+                /* A failed watch still gets its full comparison pass now;
+                 * the next wait falls back to the configured timer. */
+                mAvailable = false;
+                return;
+            }
+            /* A zero-byte completion means the notification buffer overflowed;
+             * the full comparison below repairs the missed event. Re-arm first
+             * so changes during that comparison are queued for the next pass. */
+            if (!IssueRead())
+            {
+                mAvailable = false;
+            }
+            return;
+        }
+#else
+        (void)timeoutMilliseconds;
+#endif
+    }
+
+private:
+#if defined(__linux__)
+    bool AddDirectoryTree(const std::string & root, bool isRoot = false)
+    {
+        struct stat rootInfo;
+        const int rootStat = isRoot ? stat(root.c_str(), &rootInfo) :
+            lstat(root.c_str(), &rootInfo);
+        if (rootStat != 0 || !S_ISDIR(rootInfo.st_mode))
+        {
+            return false;
+        }
+
+        std::vector<std::string> pending(1, root);
+        bool rootAdded = false;
+        for (size_t next = 0; next < pending.size(); next++)
+        {
+            const std::string directory = pending[next];
+            if (mWatchedPaths.count(directory) != 0)
+            {
+                rootAdded = rootAdded || directory == root;
+                continue;
+            }
+            const int wd = inotify_add_watch(mFd, directory.c_str(),
+                IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_MOVED_FROM |
+                IN_MOVED_TO | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF);
+            if (wd < 0)
+            {
+                continue;
+            }
+            std::map<int, std::string>::iterator watched = mWatches.find(wd);
+            if (watched != mWatches.end() && watched->second != directory)
+            {
+                mWatchedPaths.erase(watched->second);
+                watched->second = directory;
+            }
+            else
+            {
+                mWatches[wd] = directory;
+            }
+            mWatchedPaths.insert(directory);
+            rootAdded = rootAdded || directory == root;
+
+            DIR * stream = opendir(directory.c_str());
+            if (stream == NULL)
+            {
+                continue;
+            }
+            struct dirent * item = NULL;
+            while ((item = readdir(stream)) != NULL)
+            {
+                if (strcmp(item->d_name, ".") == 0 ||
+                    strcmp(item->d_name, "..") == 0)
+                {
+                    continue;
+                }
+                const std::string child = JoinLocalPath(directory, item->d_name);
+                struct stat childInfo;
+                if (lstat(child.c_str(), &childInfo) == 0 &&
+                    S_ISDIR(childInfo.st_mode))
+                {
+                    pending.push_back(child);
+                }
+            }
+            closedir(stream);
+        }
+        return rootAdded;
+    }
+
+    void ForgetWatch(int wd)
+    {
+        std::map<int, std::string>::iterator found = mWatches.find(wd);
+        if (found != mWatches.end())
+        {
+            mWatchedPaths.erase(found->second);
+            mWatches.erase(found);
+        }
+    }
+
+    bool DrainEvents()
+    {
+        bool changed = false;
+        alignas(struct inotify_event) char buffer[64 * 1024];
+        for (;;)
+        {
+            const ssize_t length = read(mFd, buffer, sizeof(buffer));
+            if (length < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            {
+                break;
+            }
+            if (length <= 0)
+            {
+                break;
+            }
+            char * cursor = buffer;
+            char * end = buffer + length;
+            while (cursor + sizeof(struct inotify_event) <= end)
+            {
+                const struct inotify_event * event =
+                    reinterpret_cast<const struct inotify_event *>(cursor);
+                const bool isDirectory = (event->mask & IN_ISDIR) != 0;
+                const bool addedDirectory = isDirectory &&
+                    (event->mask & (IN_CREATE | IN_MOVED_TO)) != 0;
+                if (addedDirectory && event->len != 0)
+                {
+                    std::map<int, std::string>::const_iterator parent =
+                        mWatches.find(event->wd);
+                    if (parent != mWatches.end())
+                    {
+                        AddDirectoryTree(JoinLocalPath(parent->second,
+                            event->name));
+                    }
+                }
+                if ((event->mask & (IN_CLOSE_WRITE | IN_DELETE | IN_MOVED_FROM |
+                        IN_MOVED_TO | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF |
+                        IN_Q_OVERFLOW)) != 0 || addedDirectory)
+                {
+                    changed = true;
+                }
+                if ((event->mask & (IN_DELETE_SELF | IN_IGNORED)) != 0)
+                {
+                    ForgetWatch(event->wd);
+                }
+                else if ((event->mask & IN_MOVE_SELF) != 0)
+                {
+                    std::map<int, std::string>::const_iterator watched =
+                        mWatches.find(event->wd);
+                    struct stat info;
+                    if (watched == mWatches.end() ||
+                        lstat(watched->second.c_str(), &info) != 0 ||
+                        !S_ISDIR(info.st_mode))
+                    {
+                        ForgetWatch(event->wd);
+                    }
+                }
+                cursor += sizeof(struct inotify_event) + event->len;
+            }
+        }
+        return changed;
+    }
+
+    int mFd;
+    std::string mRoot;
+    std::map<int, std::string> mWatches;
+    std::set<std::string> mWatchedPaths;
+#elif defined(_WIN32)
+    static std::wstring Utf8PathToWide(const std::string & path)
+    {
+        if (path.empty() || path.size() > 0x7fffffffu)
+        {
+            return std::wstring();
+        }
+        const int length = static_cast<int>(path.size());
+        int count = MultiByteToWideChar(CP_UTF8, 0, path.data(), length,
+            NULL, 0);
+        UINT codePage = CP_UTF8;
+        if (count <= 0)
+        {
+            /* Match the Windows local-path layer: tolerate a path typed in
+             * the legacy console code page when it is not valid UTF-8. */
+            codePage = CP_ACP;
+            count = MultiByteToWideChar(codePage, 0, path.data(), length,
+                NULL, 0);
+        }
+        if (count <= 0)
+        {
+            return std::wstring();
+        }
+        std::wstring result(static_cast<size_t>(count), L'\0');
+        if (MultiByteToWideChar(codePage, 0, path.data(), length,
+                &result[0], count) <= 0)
+        {
+            return std::wstring();
+        }
+        return result;
+    }
+
+    bool IssueRead()
+    {
+        ResetEvent(mEvent);
+        memset(&mOverlapped, 0, sizeof(mOverlapped));
+        mOverlapped.hEvent = mEvent;
+        const DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME |
+            FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_SIZE |
+            FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_ATTRIBUTES |
+            FILE_NOTIFY_CHANGE_CREATION;
+        const BOOL started = ReadDirectoryChangesW(mDirectory, mBuffer,
+            static_cast<DWORD>(sizeof(mBuffer)), TRUE, filter, NULL,
+            &mOverlapped, NULL);
+        if (!started && GetLastError() != ERROR_IO_PENDING)
+        {
+            mRequestPending = false;
+            return false;
+        }
+        mRequestPending = true;
+        return true;
+    }
+
+    void WaitUsingTimer(unsigned milliseconds)
+    {
+        while (milliseconds > 0 && !Interrupted())
+        {
+            const unsigned slice = milliseconds < 250u ? milliseconds : 250u;
+            SleepMilliseconds(slice);
+            milliseconds -= slice;
+        }
+    }
+
+    HANDLE mDirectory;
+    HANDLE mEvent;
+    OVERLAPPED mOverlapped;
+    alignas(DWORD) char mBuffer[64 * 1024];
+    bool mRequestPending;
+#endif
+    bool mAvailable;
+};
 
 std::string ToLower(const std::string & text)
 {
@@ -3899,11 +4319,11 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
     /* 'option synchdelete on' is the persistent form of '-delete'. */
     options.deleteObsolete = mSyncDeleteDefault;
     options.transferMode = mTransferMode;
-    /* 'keepuptodate' has no direction word: it always watches the
-     * remote side and updates the local one. */
+    /* Upstream's 'keepuptodate' watches the local directory and reflects
+     * its changes onto the remote directory. */
     if (modeOptional)
     {
-        options.mode = SyncMode::Local;
+        options.mode = SyncMode::Remote;
         modeGiven = true;
     }
 
@@ -4477,9 +4897,21 @@ bool Script::KeepUpToDate(const std::vector<std::string> & args)
         return false;
     }
 
+    LocalChangeWatcher watcher;
+    bool eventDriven = watcher.Start(localDir);
     InstallInterruptHandler();
-    console.Status("Watching '" + localDir + "' and '" + remoteDir + "' every " +
-        std::to_string(interval) + " seconds. Press Ctrl-C to stop.");
+    if (eventDriven)
+    {
+        console.Status("Watching local changes in '" + localDir + "' and " +
+            "keeping remote '" + remoteDir + "' up to date (full check every " +
+            std::to_string(interval) + " seconds). Press Ctrl-C to stop.");
+    }
+    else
+    {
+        console.Status("Watching '" + localDir + "' and '" + remoteDir +
+            "' every " + std::to_string(interval) +
+            " seconds. Press Ctrl-C to stop.");
+    }
 
     bool ok = true;
     for (int pass = 1; count == 0 || pass <= count; pass++)
@@ -4497,12 +4929,14 @@ bool Script::KeepUpToDate(const std::vector<std::string> & args)
             break;
         }
 
+        bool passOk = true;
         SyncPlan plan;
         if (!BuildSynchronizationPlan(options, localDir, remoteDir, plan, &state, error))
         {
             console.Error(error);
             mErrors++;
             ok = false;
+            passOk = false;
         }
         else if (preview)
         {
@@ -4523,10 +4957,7 @@ bool Script::KeepUpToDate(const std::vector<std::string> & args)
             if (!ExecuteSynchronizationPlan(plan, options, true, bytes))
             {
                 ok = false;
-                if (!continueOnError)
-                {
-                    break;
-                }
+                passOk = false;
             }
             if (!statePath.empty())
             {
@@ -4536,8 +4967,13 @@ bool Script::KeepUpToDate(const std::vector<std::string> & args)
                     console.Error(saveError);
                     mErrors++;
                     ok = false;
+                    passOk = false;
                 }
             }
+        }
+        if (!passOk && !continueOnError)
+        {
+            break;
         }
 
         if (count != 0 && pass == count)
@@ -4549,14 +4985,29 @@ bool Script::KeepUpToDate(const std::vector<std::string> & args)
             console.Status("Stopped watching.");
             break;
         }
-        /* Sleep in small steps so that Ctrl-C ends the wait. */
-        for (int waited = 0; waited < interval * 4; waited++)
+        if (eventDriven)
         {
-            if (Interrupted())
+            /* Local changes trigger an immediate comparison; the timeout is
+             * still a safety rescan if a filesystem event was lost. */
+            watcher.WaitForChange(static_cast<unsigned>(interval * 1000));
+            if (!watcher.Available())
             {
-                break;
+                eventDriven = false;
+                console.Status("Native local change notifications stopped; "
+                    "continuing with timer polling.");
             }
-            SleepMilliseconds(250);
+        }
+        else
+        {
+            /* Sleep in small steps so that Ctrl-C ends the fallback wait. */
+            for (int waited = 0; waited < interval * 4; waited++)
+            {
+                if (Interrupted())
+                {
+                    break;
+                }
+                SleepMilliseconds(250);
+            }
         }
     }
     return ok;
@@ -5981,6 +6432,23 @@ bool Script::CopyRemoteOneFile(const std::string & from,
         Console::Instance().Status("The server cannot copy files by itself; " +
             std::string("copying through this client."));
     }
+    else
+    {
+        const int result = ProtocolClient::Copy(mSession.Options(), from, to,
+            error);
+        if (result == 0)
+        {
+            Console::Instance().Status("Copied '" + from + "' to '" + to +
+                "' on the server.");
+            return true;
+        }
+        if (result < 0)
+        {
+            Console::Instance().Error(Texts::RemoteError("copy", from, error));
+            mErrors++;
+            return false;
+        }
+    }
 
     if (RemoteStreamCopy(from, to, error) != 0)
     {
@@ -7180,7 +7648,8 @@ const struct ScriptCommandHelpEntry
         { "help", "help [ <command> ]\n"
             "  Prints the list of commands, or the help of one command." },
         { "keepuptodate", "keepuptodate [ <localdir> [ <remotedir> ] ]\n"
-            "  Repeats a synchronization on a timer; -interval=<seconds>,\n"
+            "  Reflects local changes on the remote side. Linux and Windows\n"
+            "  watch the local tree; other platforms poll. -interval=<seconds>,\n"
             "  -count=<passes>, -delete, -continue, -filemask=, -transfer=." },
         { "lcd", "lcd <directory>\n"
             "  Changes the local working directory." },

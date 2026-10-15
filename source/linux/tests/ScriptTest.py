@@ -325,14 +325,18 @@ class ScriptTests(unittest.TestCase):
                 self.assertIn("Not connected", result.stderr)
 
     def test_keepuptodate_validation(self):
-        # 'keepuptodate' takes no direction word (it always updates the
-        # local side), so bare directories parse fine and stop at the
-        # connection check.
+        # 'keepuptodate' takes no direction word; its local directory is
+        # the source and the remote directory is the target, as upstream
+        # documents. Bare directories parse fine and stop at connection check.
         for args in ("", "sideways"):
             with self.subTest(args=args):
                 result = self.run_commands("keepuptodate " + args)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("Not connected", result.stderr)
+        result = self.run_commands("keepuptodate local /tmp /tmp")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Wrong arguments", result.stderr)
+        self.assertNotIn("Not connected", result.stderr)
         for args in ("local -bogus", "a b c"):
             with self.subTest(args=args):
                 result = self.run_commands("keepuptodate " + args)

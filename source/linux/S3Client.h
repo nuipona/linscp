@@ -20,9 +20,11 @@ namespace linuxscp {
  * AWS_DEFAULT_REGION, else from an s3.<region>.amazonaws.com host,
  * else us-east-1. Every request carries x-amz-content-sha256 (the hash
  * of an empty body, or UNSIGNED-PAYLOAD for uploads) because S3
- * requires that header to be signed; uploads therefore restart rather
- * than resume byte-wise - S3 has no partial PUT outside multipart,
- * which this client does not implement yet.
+ * requires that header to be signed. Small objects use PutObject; files
+ * larger than 16 MiB use the S3 multipart API with an 8 MiB minimum part
+ * size (scaled as needed to stay under 10,000 parts). On a handled
+ * failure the client attempts to abort the multipart upload; there is no
+ * persisted upload-ID/part state, so a retry restarts from the first part.
  *
  * The signing itself lives in S3SigV4.cpp (pure strings, unit-tested
  * against AWS's published examples); this file is the HTTP side: one
@@ -66,6 +68,11 @@ public:
 
     static int MakeDir(const SessionOptions & options,
         const std::string & remotePath, std::string & error);
+
+    /* Returns 0 when a server-side CopyObject succeeds. */
+    static int Copy(const SessionOptions & options,
+        const std::string & fromPath, const std::string & toPath,
+        std::string & error);
 
     static int Move(const SessionOptions & options,
         const std::string & fromPath, const std::string & toPath,

@@ -27,6 +27,8 @@ import base64
 import datetime
 import hashlib
 import hmac
+import json
+import xml.etree.ElementTree as ET
 import os
 import pathlib
 import re
@@ -196,6 +198,11 @@ class Store:
     def __init__(self):
         self.buckets = {}  # name -> creation epoch
         self.objects = {}  # (bucket, key) -> (bytes, mtime)
+        self.uploads = {}  # UploadId -> {bucket, key, parts}
+        self.next_upload_id = 1
+        self.multipart_history = []
+        self.copy_count = 0
+        self.embedded_errors = set()
 
     def ensure_bucket(self, bucket, epoch):
         if bucket not in self.buckets:
@@ -296,6 +303,7 @@ class S3Handler(BaseHTTPRequestHandler):
             return
 
         bucket, key, query = self.split_path()
+        params = urllib.parse.parse_qs(query, keep_blank_values=True)
         try:
             if method == "GET" and bucket == "" and key == "":
                 self.list_buckets()
@@ -309,8 +317,16 @@ class S3Handler(BaseHTTPRequestHandler):
                 self.get_object(bucket, key)
             elif method == "HEAD":
                 self.head_object(bucket, key)
+            elif method == "PUT" and "uploadId" in params:
+                self.put_multipart_part(params, body)
             elif method == "PUT":
                 self.put_object(bucket, key, headers, body)
+            elif method == "POST" and "uploads" in params:
+                self.initiate_multipart(bucket, key)
+            elif method == "POST" and "uploadId" in params:
+                self.complete_multipart(params, body)
+            elif method == "DELETE" and "uploadId" in params:
+                self.abort_multipart(params)
             elif method == "DELETE":
                 self.delete_object(bucket, key)
             else:
@@ -320,6 +336,27 @@ class S3Handler(BaseHTTPRequestHandler):
             pass
 
     def do_GET(self):
+        # Diagnostic endpoints consumed only by the live regression suite.
+        parsed = urllib.parse.urlsplit(self.path)
+        if parsed.path == "/__test__/inject-error":
+            operation = urllib.parse.parse_qs(parsed.query).get(
+                "operation", [""])[0]
+            if operation not in ("copy", "complete"):
+                self.send_bytes(400, b"Unknown test error operation.")
+                return
+            STORE.embedded_errors.add(operation)
+            self.send_bytes(204, b"")
+            return
+        if parsed.path == "/__test__/state":
+            # This makes the multipart tests prove which API operations ran.
+            body = json.dumps({
+                "active_uploads": len(STORE.uploads),
+                "multipart_history": STORE.multipart_history,
+                "copy_count": STORE.copy_count,
+            }).encode("utf-8")
+            self.send_bytes(200, body, extra=(("Content-Type",
+                "application/json"),))
+            return
         self.handle_any("GET", b"")
 
     def do_HEAD(self):
@@ -330,6 +367,9 @@ class S3Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         self.handle_any("DELETE", self.read_body())
+
+    def do_POST(self):
+        self.handle_any("POST", self.read_body())
 
     # -- operations -------------------------------------------------------
     def list_buckets(self):
@@ -487,7 +527,14 @@ class S3Handler(BaseHTTPRequestHandler):
                 self.send_error_xml(404, "NoSuchKey",
                                     "The specified key does not exist.")
                 return
+            if "copy" in STORE.embedded_errors:
+                STORE.embedded_errors.remove("copy")
+                self.send_xml(200,
+                    "<Error><Code>InjectedCopyError</Code>"
+                    "<Message>Embedded copy failure.</Message></Error>")
+                return
             STORE.put(bucket, key, record[0], now)
+            STORE.copy_count += 1
             self.send_xml(200,
                           "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
                           "<CopyObjectResult><ETag>%s</ETag>"
@@ -501,6 +548,118 @@ class S3Handler(BaseHTTPRequestHandler):
         STORE.put(bucket, key, body, now)
         self.send_bytes(200, b"", extra=(
             ("ETag", '"%s"' % hashlib.sha256(body).hexdigest()[:32]),))
+
+    def initiate_multipart(self, bucket, key):
+        if bucket not in STORE.buckets or not key:
+            self.send_error_xml(404, "NoSuchBucket",
+                                "The multipart target bucket does not exist.")
+            return
+        upload_id = "test-upload-%d" % STORE.next_upload_id
+        STORE.next_upload_id += 1
+        STORE.uploads[upload_id] = {
+            "bucket": bucket, "key": key, "parts": {},
+        }
+        STORE.multipart_history.append({
+            "action": "initiate", "bucket": bucket, "key": key,
+            "upload_id": upload_id,
+        })
+        self.send_xml(200,
+                      '<?xml version="1.0" encoding="UTF-8"?>'
+                      "<InitiateMultipartUploadResult>"
+                      "<Bucket>%s</Bucket><Key>%s</Key><UploadId>%s</UploadId>"
+                      "</InitiateMultipartUploadResult>" %
+                      (xml_escape(bucket), xml_escape(key), xml_escape(upload_id)))
+
+    def put_multipart_part(self, params, body):
+        upload_id = params.get("uploadId", [""])[0]
+        try:
+            number = int(params.get("partNumber", ["0"])[0])
+        except ValueError:
+            number = 0
+        upload = STORE.uploads.get(upload_id)
+        if upload is None or number < 1 or number > 10000:
+            self.send_error_xml(404, "NoSuchUpload",
+                                "The multipart upload or part number is invalid.")
+            return
+        etag = '"%s"' % hashlib.sha256(body).hexdigest()[:32]
+        upload["parts"][number] = (body, etag)
+        STORE.multipart_history.append({
+            "action": "part", "part": number, "size": len(body),
+            "upload_id": upload_id,
+        })
+        self.send_bytes(200, b"", extra=(("ETag", etag),))
+
+    def complete_multipart(self, params, body):
+        upload_id = params.get("uploadId", [""])[0]
+        upload = STORE.uploads.get(upload_id)
+        if upload is None:
+            self.send_error_xml(404, "NoSuchUpload",
+                                "The multipart upload does not exist.")
+            return
+        try:
+            document = ET.fromstring(body)
+            requested = []
+            for part in document.findall("Part"):
+                requested.append((int(part.findtext("PartNumber")),
+                                  part.findtext("ETag")))
+        except (ET.ParseError, TypeError, ValueError):
+            self.send_error_xml(400, "MalformedXML",
+                                "The completion document is malformed.")
+            return
+        if not requested or requested != sorted(requested):
+            self.send_error_xml(400, "InvalidPartOrder",
+                                "Parts must be listed in ascending order.")
+            return
+        assembled = []
+        for index, (number, etag) in enumerate(requested):
+            stored = upload["parts"].get(number)
+            if stored is None or stored[1] != etag:
+                self.send_error_xml(400, "InvalidPart",
+                                    "A completion part is missing or has a wrong ETag.")
+                return
+            if index + 1 < len(requested) and len(stored[0]) < 5 * 1024 * 1024:
+                self.send_error_xml(400, "EntityTooSmall",
+                                    "A non-final multipart part is too small.")
+                return
+            assembled.append(stored[0])
+
+        data = b"".join(assembled)
+        if "complete" in STORE.embedded_errors:
+            STORE.embedded_errors.remove("complete")
+            self.send_xml(200,
+                "<Error><Code>InjectedCompleteError</Code>"
+                "<Message>Embedded completion failure.</Message></Error>")
+            return
+        now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        STORE.put(upload["bucket"], upload["key"], data, now)
+        del STORE.uploads[upload_id]
+        STORE.multipart_history.append({
+            "action": "complete", "key": upload["key"],
+            "size": len(data), "parts": len(requested),
+            "upload_id": upload_id,
+        })
+        etag = '"%s-%d"' % (hashlib.sha256(data).hexdigest()[:32],
+                             len(requested))
+        self.send_xml(200,
+                      '<?xml version="1.0" encoding="UTF-8"?>'
+                      "<CompleteMultipartUploadResult>"
+                      "<Bucket>%s</Bucket><Key>%s</Key><ETag>%s</ETag>"
+                      "</CompleteMultipartUploadResult>" %
+                      (xml_escape(upload["bucket"]),
+                       xml_escape(upload["key"]), xml_escape(etag)))
+
+    def abort_multipart(self, params):
+        upload_id = params.get("uploadId", [""])[0]
+        upload = STORE.uploads.pop(upload_id, None)
+        if upload is None:
+            self.send_error_xml(404, "NoSuchUpload",
+                                "The multipart upload does not exist.")
+            return
+        STORE.multipart_history.append({
+            "action": "abort", "key": upload["key"],
+            "upload_id": upload_id,
+        })
+        self.send_bytes(204, b"")
 
     def delete_object(self, bucket, key):
         if bucket not in STORE.buckets:

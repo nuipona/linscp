@@ -5,8 +5,10 @@ protocol and needs its own server, so this file exists: it starts
 TestS3Server.py (TLS on a port the kernel picks, credentials fixed to
 AKIDTEST/testsecret42) and drives the console client against it -
 bucket and object listings, mkdir/rmdir markers, upload, download,
-rename (copy-plus-delete), remove, a resumed download that must go
-through an HTTP byte range, and the two refusal paths: a wrong secret
+server-side CopyObject for `cp` and rename, multipart upload of a large
+object (with per-part ETags and completion), embedded HTTP-200 errors from
+CopyObject and multipart completion (with abort cleanup), remove, a resumed download
+that must go through an HTTP byte range, and the two refusal paths: a wrong secret
 rejected by signature verification and missing credentials refused
 before any request. One test additionally signs a request with
 botocore, Amazon's own reference implementation, so that the server's
@@ -27,6 +29,7 @@ Evidence convention (same as every other suite):
 import base64
 import hashlib
 import importlib.util
+import json
 import os
 import pathlib
 import ssl
@@ -141,6 +144,19 @@ class LiveS3Tests(unittest.TestCase):
         return self.run_script("echo OPENED", creds=creds,
                                extra_args=extra_args)
 
+    def server_state(self):
+        context = ssl._create_unverified_context()
+        url = "https://127.0.0.1:%d/__test__/state" % self.port
+        with urllib.request.urlopen(url, context=context, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def inject_embedded_error(self, operation):
+        context = ssl._create_unverified_context()
+        url = "https://127.0.0.1:%d/__test__/inject-error?operation=%s" % (
+            self.port, operation)
+        with urllib.request.urlopen(url, context=context, timeout=15) as response:
+            self.assertEqual(response.status, 204)
+
     # -- tests --------------------------------------------------------------
     @posix_only("the client shells out to curl against 127.0.0.1")
     def test_missing_secret_is_refused_before_any_request(self):
@@ -254,6 +270,104 @@ class LiveS3Tests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertNotIn("SizeBytes:", result.stdout)
         self.assertRegex(result.stdout, r"(?m)^\S.* roundtrip\.bin$")
+
+    @posix_only("the client shells out to curl against 127.0.0.1")
+    def test_cp_uses_s3_copy_object_and_keeps_the_source(self):
+        source = self.root / "copy-source.txt"
+        payload = b"server-side copy on S3\n" * 100
+        source.write_bytes(payload)
+        downloaded = self.root / "copy-destination.txt"
+        result = self.run_script(
+            "option confirm off ; mkdir /photos ; "
+            "put %s /photos/source.txt ; "
+            "cp /photos/source.txt /photos/copied.txt ; "
+            "get /photos/copied.txt %s ; ls -l /photos ; echo COPY_OK" %
+            (source, downloaded))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("COPY_OK", result.stdout)
+        self.assertIn("source.txt", result.stdout)
+        self.assertIn("copied.txt", result.stdout)
+        self.assertEqual(downloaded.read_bytes(), payload)
+        self.assertEqual(self.server_state()["copy_count"], 1)
+
+    @posix_only("the client shells out to curl against 127.0.0.1")
+    def test_copy_object_embedded_http_200_error_is_reported(self):
+        source = self.root / "copy-error-source.txt"
+        source.write_text("copy source\n", encoding="utf-8")
+        result = self.run_script(
+            "mkdir /photos ; put %s /photos/source.txt" % source)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        self.inject_embedded_error("copy")
+        result = self.run_script(
+            "cp /photos/source.txt /photos/failed-copy.txt")
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("InjectedCopyError", result.stderr)
+        self.assertIn("Embedded copy failure", result.stderr)
+        self.assertEqual(self.server_state()["copy_count"], 0)
+
+    @posix_only("the client shells out to curl against 127.0.0.1")
+    def test_large_upload_uses_multipart_and_roundtrips(self):
+        """Large S3 objects must go through initiate/parts/complete rather
+        than one unbounded PUT; every returned part ETag is used to commit
+        the object, and the object that becomes visible is byte-exact."""
+        source = self.root / "multipart.bin"
+        expected_size = 20 * 1024 * 1024 + 123
+        block = bytes(range(256)) * 4096  # one MiB, deterministic bytes
+        with source.open("wb") as handle:
+            remaining = expected_size
+            while remaining:
+                chunk = block[:min(len(block), remaining)]
+                handle.write(chunk)
+                remaining -= len(chunk)
+
+        downloaded = self.root / "multipart-downloaded.bin"
+        result = self.run_script(
+            "mkdir /photos ; put %s /photos/multipart.bin ; "
+            "get /photos/multipart.bin %s ; echo MULTIPART_OK" %
+            (source, downloaded), timeout=180)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("MULTIPART_OK", result.stdout)
+        self.assertEqual(source.stat().st_size, expected_size)
+        self.assertEqual(sha256_of(source), sha256_of(downloaded))
+
+        state = self.server_state()
+        history = state["multipart_history"]
+        actions = [event["action"] for event in history]
+        self.assertEqual(actions, ["initiate", "part", "part", "part", "complete"])
+        part_events = [event for event in history if event["action"] == "part"]
+        self.assertEqual([event["part"] for event in part_events], [1, 2, 3])
+        self.assertEqual(sum(event["size"] for event in part_events), expected_size)
+        self.assertEqual(state["active_uploads"], 0)
+        complete = history[-1]
+        self.assertEqual(complete["size"], expected_size)
+        self.assertEqual(complete["parts"], 3)
+
+    @posix_only("the client shells out to curl against 127.0.0.1")
+    def test_multipart_completion_embedded_http_200_error_is_reported_and_aborted(self):
+        source = self.root / "multipart-error.bin"
+        expected_size = 20 * 1024 * 1024 + 17
+        block = bytes(range(256)) * 4096
+        with source.open("wb") as handle:
+            remaining = expected_size
+            while remaining:
+                chunk = block[:min(len(block), remaining)]
+                handle.write(chunk)
+                remaining -= len(chunk)
+
+        self.inject_embedded_error("complete")
+        result = self.run_script(
+            "mkdir /photos ; put %s /photos/multipart-error.bin" % source,
+            timeout=180)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("InjectedCompleteError", result.stdout + result.stderr)
+        self.assertIn("Embedded completion failure", result.stdout + result.stderr)
+
+        state = self.server_state()
+        actions = [event["action"] for event in state["multipart_history"]]
+        self.assertEqual(actions,
+            ["initiate", "part", "part", "part", "abort"])
+        self.assertEqual(state["active_uploads"], 0)
 
     @posix_only("the client shells out to curl against 127.0.0.1")
     def test_resumed_download_continues_through_a_byte_range(self):

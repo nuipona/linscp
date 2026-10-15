@@ -464,18 +464,21 @@ line with the number of uploads, downloads, deletions, conflicts and bytes.
 .RE
 .TP
 .BI keepuptodate " [" options "] [" localdir " [" remotedir ]]"
-Synchronize repeatedly, using the same arguments as
-.BR synchronize .
-The first pass runs immediately and later passes are spaced out by
+Reflect changes in the local directory on the remote directory, as upstream
+WinSCP does. The first synchronization pass runs immediately. On Linux, a
+recursive inotify watcher starts another pass when a local change is reported;
+Windows uses
+.B ReadDirectoryChangesW
+for the same purpose. The
 .BI \-interval= seconds
-(60 seconds by default, and
-.B 0
-runs one pass only). There is no file\-system watcher, so a pass is a full
-comparison of both directories; give
-.BI \-times= n
+(10 by default, from 1 to 86400) also triggers a full comparison as a safety
+rescan; timer polling is used when native watch setup is unavailable. Give
+.BI \-count= n
 to stop after
 .I n
-passes.
+passes. An interactive run continues until Ctrl-C; a non-interactive run must
+give
+.BR \-count= .
 .TP
 .BI edit " [file]"
 Download
@@ -795,15 +798,26 @@ remote editor and a browser-based graphical interface exist. Other protocols
 use curl and depend on its build capabilities: the curl.exe built into Windows
 has no SFTP or SCP support, and an BopenP of such an endpoint then fails
 with that statement rather than reporting a session that cannot transfer
-anything. WebDAV listing is incomplete;
-authenticated S3 signing/listing is absent. File masks, ASCII conversion,
-retries/reconnect and the .NET API are not implemented.
+anything. WebDAV provides PROPFIND listings, MOVE and single-file COPY, but
+not locking, dead properties or conditional requests. S3 uses Signature
+Version 4, supports object listing/stat/transfer and CopyObject, and uses
+multipart uploads for files larger than 16 MiB; an interrupted multipart
+upload restarts from the first part. ACLs, versioning, storage classes and
+server-side encryption options are absent. SCP remains curl-dependent rather
+than WinSCP's remote-shell implementation, and FTP uses a generic listing
+parser. File masks, ASCII/automatic conversion, reconnect and transfer presets
+are implemented; the .NET/PowerShell automation API and broad GUI parity are
+not.
 .PP
 .B keepuptodate
-repeats a full comparison on a timer: there is no file-system watcher, so a
-short interval on a large tree is expensive and changes can still be missed
-between passes. It also has no background mode: a script that runs it blocks
-until the last pass finishes.
+reflects local changes on the remote side and runs in the foreground. Linux
+uses a recursive inotify watcher and Windows uses
+.B ReadDirectoryChangesW
+plus a full comparison at each
+.BI \-interval=
+(10 seconds by default) as a safety rescan; a timer fallback is used when
+native watch setup fails. A non-interactive run must use
+.BR \-count= .
 .PP
 The graphical interface is a local web application, not a remote one: it is
 reachable from the machine that runs it (or through a proxy you point at it

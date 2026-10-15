@@ -223,8 +223,10 @@ open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
 In addition to `sftp://`, `ssh://` and `scp://`, LinuxSCP supports standard
 URL schemes `ftp://`, `ftps://`, `dav://` / `webdav://`, and `s3://`,
 as well as bare `host[:port]`. These curl-backed paths do not establish full
-protocol support: WebDAV listing is incomplete and authenticated S3 is not
-implemented. See [the parity audit](upstream-parity.md). The password is
+protocol support: WebDAV has PROPFIND listings and basic COPY/MOVE operations;
+S3 has SigV4, object CRUD, server-side copy, and multipart uploads for large
+files. Both remain partial implementations. See [the parity audit](upstream-parity.md).
+The password is
 optional here; prefer `-password=` or `LINUXSCP_PASSWORD` so that it does not
 end up in the script file.
 
@@ -234,6 +236,7 @@ LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
 * Launch with `linuxscp-gui` or `linuxscp -gui`.
 * Dual-pane explorer with local filesystem on the left and remote server on the right.
 * Background transfer queue with live progress metrics and transfer speeds.
+* Remote search by filename mask or literal UTF-8 file content (bounded per file and per search).
 * Real-time console log and embedded interactive command-line terminal.
 * Full integration with desktop environments via `/usr/share/applications/linuxscp.desktop`.
 
@@ -243,21 +246,27 @@ LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
 `bye`, `quit` and `end` alias the commands upstream maps them to. `lls` lists
 local directory entries or a simple wildcard mask, in names-only format.
 
-What a transport cannot do is refused instead of approximated: `-append` and
-`-resume` need the native SFTP engine (the curl-backed paths say so),
-`-resume` with ASCII conversion is rejected, `-rawtransfersettings=` and
-transfer presets are not accepted at all, `synchronize both -delete` is
-rejected, `-mirror` is rejected with `both`, and an unknown switch or an
-option value outside its vocabulary is reported before any file is read. A
-non-octal `-permissions=`, a malformed `-filemask` and a `%TIMESTAMP%`
-placeholder with an offset but no format are errors for the same reason.
-This is deliberate: an ignored filter or setting would silently change what a
-script transfers or deletes.
+What a transport cannot do is refused instead of approximated: `-append`
+requires native SFTP, and `-resume` with ASCII conversion is rejected. Resume
+uses each backend's range/continuation support; S3 multipart uploads restart
+from part one rather than resuming a saved upload ID. Transfer presets are
+supported; `-rawtransfersettings=` accepts settings implemented by this build
+and refuses unsupported names. `synchronize both -delete` is rejected,
+`-mirror` is rejected with `both`, and an unknown switch or an option value
+outside its vocabulary is reported before any file is read. A non-octal
+`-permissions=`, a malformed `-filemask` and a `%TIMESTAMP%` placeholder with
+an offset but no format are errors for the same reason. This is deliberate:
+an ignored filter or setting would silently change what a script transfers or
+deletes.
 
-`keepuptodate` polls on a timer rather than watching the filesystem, so it is
-not the upstream background watcher, and there is no `stop` command. Queue
-priorities, S3 signing, DAV `PROPFIND` listing and WinSCP's `.NET` assembly
-are not implemented; see the pinned audit for the full list.
+`keepuptodate` follows upstream's direction: it reflects changes from the
+local directory onto the remote one. Linux uses recursive inotify and Windows
+uses `ReadDirectoryChangesW` to wake on local changes; the configured interval
+triggers a full safety rescan, and timer polling is used if native watch setup
+fails. The command runs in the foreground until Ctrl-C (or `-count=` passes
+complete), and a non-interactive script must give `-count=`. Queue priorities and WinSCP's `.NET` assembly are not implemented.
+S3 signing and DAV `PROPFIND` are present but incomplete; see the pinned audit
+for the full list.
 
 ### Authentication
 

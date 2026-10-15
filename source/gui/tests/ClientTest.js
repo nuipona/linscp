@@ -110,7 +110,18 @@ const dom = new JSDOM(html, {
     window.fetch = (url, options) => {
       const path = String(url).replace('http://localhost:8080', '').split('?')[0];
       calls.push({ path: path, options: options });
-      const body = responses[path];
+      let body = responses[path];
+      if (path === '/api/remote/search') {
+        let request = {};
+        try { request = JSON.parse(options.body || '{}'); } catch (error) {}
+        if (request.search_contents) {
+          body = { success: true, matches: [
+            { path: '/tmp/slowremote/keep.txt', name: 'keep.txt', is_dir: false,
+              size: 22, permissions: '-rw-r--r--', line: 3,
+              snippet: 'Needle <example>' }
+          ], truncated: false, scanned: 4, skipped: 1, bytes_scanned: 64 };
+        }
+      }
       if (body === undefined) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({ success: true }) });
       }
@@ -256,12 +267,37 @@ function options(id) {
     listed && JSON.parse(listed.options.body).criteria === 'time,checksum',
     listed && listed.options.body);
 
-  // Search.
+  // Filename search remains the default. Content search is opt-in, carries
+  // its literal query to the backend, reports its scan budget and escapes
+  // matched text before rendering a snippet.
   window.openSearch();
   doc.getElementById('searchPattern').value = '*.txt';
   await window.runSearch();
   await new Promise(resolve => setTimeout(resolve, 100));
-  check('search lists one match', text('searchSummary').indexOf('1 match') >= 0, text('searchSummary'));
+  check('filename search lists one match',
+    text('searchSummary').indexOf('1 match') >= 0, text('searchSummary'));
+  let searchCall = calls.filter(call => call.path === '/api/remote/search').pop();
+  check('filename search stays in name-only mode',
+    searchCall && JSON.parse(searchCall.options.body).search_contents === false);
+
+  const searchContents = doc.getElementById('searchContents');
+  searchContents.checked = true;
+  searchContents.dispatchEvent(new window.Event('change'));
+  check('content query is revealed when enabled',
+    doc.getElementById('searchTextRow').style.display === 'flex');
+  doc.getElementById('searchText').value = 'needle';
+  await window.runSearch();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  searchCall = calls.filter(call => call.path === '/api/remote/search').pop();
+  check('content search posts its literal query',
+    searchCall && JSON.parse(searchCall.options.body).content_query === 'needle' &&
+      JSON.parse(searchCall.options.body).search_contents === true);
+  check('content search reports scanned and skipped files',
+    text('searchSummary').indexOf('4 file(s) scanned, 1 skipped') >= 0,
+    text('searchSummary'));
+  check('content match snippet is safely escaped',
+    doc.getElementById('searchResults').innerHTML.indexOf('Needle &lt;example&gt;') >= 0,
+    doc.getElementById('searchResults').innerHTML);
 
   // Site manager.
   window.openSiteManager();

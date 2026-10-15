@@ -871,9 +871,18 @@
       </div>
       <div class="modal-body">
         <div class="form-row"><label>Start in:</label><input type="text" id="searchPath" class="input-field"></div>
-        <div class="form-row"><label>Mask:</label><input type="text" id="searchPattern" class="input-field" value="*"></div>
+        <div class="form-row"><label>Filename mask:</label><input type="text" id="searchPattern" class="input-field" value="*"></div>
         <div class="form-row"><label></label>
           <label style="flex:1; font-weight:normal; width:auto;"><input type="checkbox" id="searchCase"> Case sensitive</label>
+        </div>
+        <div class="form-row"><label></label>
+          <label style="flex:1; font-weight:normal; width:auto;"><input type="checkbox" id="searchContents" onchange="toggleSearchContents()"> Search inside files</label>
+        </div>
+        <div class="form-row" id="searchTextRow" style="display:none;">
+          <label>Contains text:</label><input type="text" id="searchText" class="input-field" maxlength="1024" placeholder="Literal UTF-8 text">
+        </div>
+        <div class="hint" id="searchContentsHint" style="display:none;">
+          Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.
         </div>
         <div class="preview-box">
           <div class="preview-header" id="searchSummary">No search yet.</div>
@@ -1838,27 +1847,53 @@
     $('searchPath').value = state.remote.path;
     $('searchResults').innerHTML = '';
     $('searchSummary').textContent = 'No search yet.';
+    $('searchContents').checked = false;
+    $('searchText').value = '';
+    toggleSearchContents();
     openModal('searchModal');
   }
 
+  function toggleSearchContents() {
+    const enabled = $('searchContents').checked;
+    $('searchTextRow').style.display = enabled ? 'flex' : 'none';
+    $('searchContentsHint').style.display = enabled ? 'block' : 'none';
+  }
+
   async function runSearch() {
+    const searchContents = $('searchContents').checked;
+    const contentQuery = $('searchText').value;
+    if (searchContents && !contentQuery) {
+      toast('Enter text to search for.', true);
+      $('searchText').focus();
+      return;
+    }
     const result = await apiPost('/api/remote/search', {
       tab: tabId(),
       path: $('searchPath').value || state.remote.path,
       pattern: $('searchPattern').value || '*',
-      case_sensitive: $('searchCase').checked
+      case_sensitive: $('searchCase').checked,
+      search_contents: searchContents,
+      content_query: contentQuery
     });
     if (!result.success) { toast(result.error || 'Cannot search.', true); return; }
-    $('searchSummary').textContent = result.matches.length + ' match(es)' +
-      (result.truncated ? ' (limited, refine the mask)' : '');
+    let summary = result.matches.length + ' match(es)';
+    if (searchContents) {
+      summary += ', ' + (result.scanned || 0) + ' file(s) scanned, ' +
+        (result.skipped || 0) + ' skipped (' +
+        formatBytes(result.bytes_scanned || 0) + ')';
+    }
+    if (result.truncated) summary += ' (search limit reached; refine the mask)';
+    $('searchSummary').textContent = summary;
     const list = $('searchResults');
     list.innerHTML = '';
     for (const match of result.matches) {
       const div = document.createElement('div');
       div.className = 'plan-item download';
+      const detail = match.snippet ?
+        'Line ' + match.line + ': ' + match.snippet : (match.permissions || '');
       div.innerHTML = '<span class="plan-action">' + (match.is_dir ? 'dir' : formatBytes(match.size)) +
         '</span><span class="plan-path">' + escapeHtml(match.path) + '</span>' +
-        '<span class="plan-reason">' + escapeHtml(match.permissions || '') + '</span>';
+        '<span class="plan-reason">' + escapeHtml(detail) + '</span>';
       div.ondblclick = async () => {
         closeModal('searchModal');
         await loadRemote(parentPath(match.path, true));

@@ -217,12 +217,13 @@ check: $(BINDIR)/unittest
 # Transfers against the servers in tests/, which take seconds rather than
 # milliseconds: ScriptTest is server-free, LiveSftpTest skips itself without
 # paramiko, LiveS3Test is standard-library-only (botocore is an optional
-# extra one test skips without).
+# extra one test skips without), and the GUI search test uses a fake session.
 check-live: $(BINDIR)/linuxscp
 	python3 tests/ScriptTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveSftpTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveS3Test.py $(BINDIR)/linuxscp
 	python3 tests/LiveDavTest.py $(BINDIR)/linuxscp
+	python3 ../../source/gui/tests/RemoteSearchTest.py
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
