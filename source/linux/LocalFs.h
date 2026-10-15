@@ -43,8 +43,7 @@ bool CreateLocalDirectory(const std::string & path, std::string & error);
 bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error);
 /*
  * Sets the permission bits of a local file, as a download's
- * '-permissions' switch asks. On Windows only the read-only bit of the
- * mode is representable; the call still reports failure honestly.
+ * '-permissions' switch asks.
  */
 bool SetLocalFileMode(const std::string & path, int mode, std::string & error);
 

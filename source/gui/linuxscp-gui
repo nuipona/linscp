@@ -1,1 +1,28 @@
-linuxscp_gui.py
+#!/bin/sh
+# LinSCP graphical Commander interface launcher.
+#
+# Runs the Python server that serves the browser client. It works both
+# from a source tree, where linuxscp_gui.py sits next to this script, and
+# from the installed package, where the Python modules live in
+# /usr/share/linuxscp/gui.
+set -e
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+# Keep the installed directory clean: a __pycache__ written below
+# /usr/share would survive the package and make its removal complain.
+PYTHONDONTWRITEBYTECODE=1
+export PYTHONDONTWRITEBYTECODE
+
+for candidate in "$here/linuxscp_gui.py" \
+                 "$here/../share/linuxscp/gui/linuxscp_gui.py" \
+                 /usr/share/linuxscp/gui/linuxscp_gui.py; do
+    if [ -f "$candidate" ]; then
+        exec python3 "$candidate" "$@"
+    fi
+done
+
+echo "linuxscp-gui: cannot find linuxscp_gui.py (looked next to $0 and in" \
+     "/usr/share/linuxscp/gui). Install the linuxscp package, or run" \
+     "python3 source/gui/linuxscp_gui.py from a source tree." >&2
+exit 1

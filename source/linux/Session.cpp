@@ -12,21 +12,14 @@
 #include <cstdlib>
 #include <cstring>
 
-#if !defined(_WIN32)
-#define LINUXSCP_SESSION_NATIVE 1
 #include "PuttyCompat.h"
-#else
-#define LINUXSCP_SESSION_NATIVE 0
-#endif
 
 namespace linuxscp {
 
 namespace {
 
-#if LINUXSCP_SESSION_NATIVE
 /* Deriving from the core's trait structs keeps static_cast working in both
- * directions, the way the Windows front end does it with __fastcall
- * classes. */
+ * directions. */
 struct ScpSeat : public Seat
 {
     Session * session;
@@ -396,7 +389,6 @@ LogPolicyVtable MakeLogPolicyVtable()
 
 const SeatVtable seat_vtable = MakeSeatVtable();
 const LogPolicyVtable log_policy_vtable = MakeLogPolicyVtable();
-#endif /* LINUXSCP_SESSION_NATIVE */
 
 Session * g_currentSession = NULL;
 
@@ -1171,11 +1163,6 @@ bool Session::TakeReceivedData(char * buffer, size_t len)
 
 bool Session::SendData(const char * data, size_t len)
 {
-#if !LINUXSCP_SESSION_NATIVE
-    (void)data;
-    (void)len;
-    return false;
-#else
     if (mBackend == NULL)
     {
         return false;
@@ -1183,34 +1170,25 @@ bool Session::SendData(const char * data, size_t len)
     Console::Instance().LogTraffic(data, len, false);
     backend_send(static_cast<Backend *>(mBackend), data, len);
     return true;
-#endif
 }
 
 size_t Session::SendBufferSize()
 {
-#if !LINUXSCP_SESSION_NATIVE
-    return 0;
-#else
     if (mBackend == NULL)
     {
         return 0;
     }
     return backend_sendbuffer(static_cast<Backend *>(mBackend));
-#endif
 }
 
 bool Session::Pump()
 {
-#if !LINUXSCP_SESSION_NATIVE
-    return false;
-#else
     if (mBackend == NULL)
     {
         return false;
     }
     cli_main_loop(cliloop_no_pw_setup, cliloop_no_pw_check, pump_once, this);
     return mAlive;
-#endif
 }
 
 bool Session::ReceiveData(char * buffer, size_t len)
@@ -1243,10 +1221,6 @@ void Session::SetConnectionError(const std::string & error)
 
 bool Session::HostKeyMatches(const char * const * fingerprints) const
 {
-#if !LINUXSCP_SESSION_NATIVE
-    (void)fingerprints;
-    return false;
-#else
     const std::string expected = mOptions.hostKey;
     if (expected.empty())
     {
@@ -1289,7 +1263,6 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
         }
     }
     return false;
-#endif
 }
 
 bool Session::Open(const SessionOptions & options, std::string & error)
@@ -1375,7 +1348,6 @@ bool Session::Connect(const SessionOptions & options, const char * program,
     mAlive = true;
     mConnectionError.clear();
 
-#if LINUXSCP_SESSION_NATIVE
 
     ScpSeat * seat = new ScpSeat();
     seat->session = this;
@@ -1500,11 +1472,6 @@ bool Session::Connect(const SessionOptions & options, const char * program,
 
     mOpen = true;
     return true;
-#else
-    error = "The native SFTP transport is not available in this build.";
-    Close();
-    return false;
-#endif
 }
 
 void Session::Close()
@@ -1512,14 +1479,11 @@ void Session::Close()
     /* A failed transfer can leave request IDs queued in the SFTP core. The
      * connection is being discarded, so release that state before another
      * session can start reusing it. */
-#if LINUXSCP_SESSION_NATIVE
     lscp_sftp_cleanup();
-#endif
     if (g_currentSession == this)
     {
         SetCurrentSession(NULL);
     }
-#if LINUXSCP_SESSION_NATIVE
     if (mBackend != NULL)
     {
         backend_free(static_cast<Backend *>(mBackend));
@@ -1543,7 +1507,6 @@ void Session::Close()
     /* A key file imported from the OpenSSH format is only needed while
      * the session is open. */
     DiscardImportedPrivateKeyFile();
-#endif
     mReceived.clear();
     mReceivedStart = 0;
     mReceivedEnd = 0;
@@ -1564,12 +1527,6 @@ void ExecOutputSink(void * ctx, const char * data, size_t len)
 bool Session::ExecRemote(const SessionOptions & options,
     const std::string & command, std::string & error)
 {
-#if !LINUXSCP_SESSION_NATIVE
-    (void)options;
-    (void)command;
-    error = "The native SSH transport is not available in this build.";
-    return false;
-#else
     if (!UseNativeSftp(options.protocol))
     {
         error = "Remote command execution needs an SSH (sftp://) session.";
@@ -1598,7 +1555,6 @@ bool Session::ExecRemote(const SessionOptions & options,
         return false;
     }
     return true;
-#endif
 }
 
 Session * CurrentSession()

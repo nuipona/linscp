@@ -121,6 +121,43 @@ jobs:
                       -H "X-LSCP-Token: $token" http://localhost:18080/api/status)
           [ "$code" = "403" ] || { echo "a foreign host was accepted ($code)"; kill "$gui"; exit 1; }
           kill "$gui"
+      - name: Smoke test the GUI launcher
+        run: |
+          # The launcher is what a desktop entry, the console client's -gui
+          # and a PATH install all end up running, so it gets its own check
+          # from a directory that is not the source tree: it has to find the
+          # Python module and the web client relative to itself.
+          gui_log="$RUNNER_TEMP/gui-launcher.log"
+          rm -f "$gui_log"
+          cd "$RUNNER_TEMP"
+          LINUXSCP_CONFIG_DIR="$RUNNER_TEMP/linuxscp-launcher-config" \
+            "$GITHUB_WORKSPACE/source/gui/linuxscp-gui" \
+            --port=18085 --print-token > "$gui_log" &
+          gui=$!
+          token=""
+          for attempt in $(seq 1 15); do
+            sleep 1
+            token=$(sed -n 's/^Token: //p' "$gui_log" | head -1)
+            if [ -n "$token" ]; then break; fi
+          done
+          if [ -z "$token" ]; then
+            cat "$gui_log"
+            kill "$gui"
+            echo "::error::the source-tree GUI launcher did not print a token"
+            exit 1
+          fi
+          grep -q "Serving web client from: $GITHUB_WORKSPACE/source/gui/web" \
+            "$gui_log" ||
+            { cat "$gui_log"; kill "$gui"
+              echo "::error::the launcher is not serving the source web client"
+              exit 1; }
+          curl -fsS -H "X-LSCP-Token: $token" \
+            http://localhost:18085/api/status | grep -q '"binary"'
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18085/api/status)
+          [ "$code" = "401" ] ||
+            { echo "::error::the launcher's API answered a call without a token ($code)"
+              kill "$gui"; exit 1; }
+          kill "$gui"
       - name: Graphical client regression test
         run: |
           mkdir -p "$RUNNER_TEMP/gui-client-test"
@@ -141,147 +178,93 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
-  windows-msvc:
-    name: Windows (MSVC)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Configure and build
-        shell: pwsh
-        run: |
-          $log = Join-Path $env:RUNNER_TEMP "msvc-build.log"
-          # Pin the interpreter CMake hands to CTest. Without this,
-          # find_package(Python3) picks another installation than the
-          # 'python' on PATH, the test dependencies land in the wrong
-          # site-packages, and the suites that need them skip themselves.
-          $python = (Get-Command python).Source
-          Write-Host "Tests will run under $python"
-          cmake -S . -B build-windows -A x64 "-DPython3_EXECUTABLE=$python" 2>&1 |
-            Tee-Object -FilePath $log
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          cmake --build build-windows --config Release 2>&1 |
-            Tee-Object -FilePath $log -Append
-          if ($LASTEXITCODE -ne 0) {
-            # The job log itself lives on a separate host that not every
-            # environment can read, so repeat the compiler diagnostics as
-            # check-run annotations, which the API does serve.
-            $lines = Get-Content $log |
-              Select-String -Pattern 'error', 'fatal', 'LNK[0-9]', 'C[0-9]{4}' |
-              ForEach-Object { $_.Line.Trim() } | Select-Object -Unique -First 12
-            if (-not $lines) { $lines = Get-Content $log | Select-Object -Last 10 }
-            foreach ($line in $lines) {
-              # % and ] carry meaning inside a workflow command, so a
-              # compiler message containing one would truncate the
-              # annotation; escape both.
-              $escaped = $line.Replace('%', '%25').Replace(']', '%5D')
-              Write-Host "::error::$escaped"
-            }
-            exit 1
-          }
-      - name: Unit tests
-        shell: pwsh
-        run: |
-          # -V rather than --output-on-failure: the evidence lines a suite
-          # prints when it passes are the point of this step, and ctest
-          # swallows the output of tests that do not fail.
-          $output = & ctest --test-dir build-windows -C Release -V 2>&1 | Out-String
-          Write-Host $output
-          # What this platform actually proved, as an annotation the API
-          # serves: the skip count included, because the live suite skips the
-          # cases a POSIX host needs and a reader has to be able to tell that
-          # apart from a suite that ran everything.
-          # ctest prefixes every line it echoes with the test number, so the
-          # pattern is unanchored and the prefix is dropped again.
-          $evidence = $output -split "`r?`n" |
-            Where-Object { $_ -match 'evidence: |checks passed' } |
-            ForEach-Object { ($_ -replace '^\s*\d+: ', '').Trim() }
-          if (-not $evidence) {
-            # A run that cannot say what it executed has not established
-            # anything, so it does not get to be green.
-            Write-Host "::error::no suite reported its evidence line: the " +
-              "tests did not run, or their output is not reaching this step"
-            exit 1
-          }
-          foreach ($line in $evidence) {
-            $escaped = $line.Trim().Replace('%', '%25').Replace(']', '%5D')
-            Write-Host "::notice::$escaped"
-          }
-          if ($LASTEXITCODE -ne 0) {
-            # Repeat the failing checks as annotations: they stay readable in
-            # the API (check-run annotations) even when the full job log is
-            # out of reach.
-            $lines = $output -split "`r?`n" | Where-Object { $_ -match "expected|checks failed|no such|cannot|error" }
-            if (-not $lines) { $lines = $output -split "`r?`n" | Select-Object -Last 12 }
-            foreach ($line in ($lines | Select-Object -First 10)) {
-              Write-Host "::error::$line"
-            }
-            exit 1
-          }
-      - name: Smoke test console client
-        shell: cmd
-        run: |
-          build-windows\Release\linuxscp.exe -version
-          build-windows\Release\linuxscp.exe -batch -command="echo ok; exit"
-      - name: Smoke test GUI server
-        shell: pwsh
-        run: |
-          python -m py_compile source/gui/linuxscp_gui.py
-          $log = Join-Path $env:RUNNER_TEMP "gui-backend.log"
-          Remove-Item $log -ErrorAction SilentlyContinue
-          $p = Start-Process python -ArgumentList "source/gui/linuxscp_gui.py","--port=18081","--print-token" `
-            -PassThru -NoNewWindow -RedirectStandardOutput $log
-          try {
-            $token = $null
-            foreach ($i in 1..20) {
-              Start-Sleep -Seconds 1
-              if (Test-Path $log) {
-                $line = Select-String -Path $log -Pattern '^Token: ' | Select-Object -First 1
-                if ($line) { $token = $line.Line.Substring(7).Trim(); break }
-              }
-            }
-            if (-not $token) { throw "The GUI did not print an API token" }
-            $headers = @{ 'X-LSCP-Token' = $token }
-            $status = Invoke-RestMethod -Uri "http://localhost:18081/api/status" -Headers $headers
-            if (-not $status.binary) { throw "GUI did not report a core binary" }
-            $list = Invoke-RestMethod -Uri "http://localhost:18081/api/local/list?path=C:\" -Headers $headers
-            if (-not $list.success) { throw "GUI local listing failed" }
-            $code = 200
-            try { Invoke-WebRequest -Uri "http://localhost:18081/api/status" | Out-Null }
-            catch { $code = [int]$_.Exception.Response.StatusCode }
-            if ($code -ne 401) { throw "The API answered a call without a token ($code)" }
-          } finally {
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-          }
-
-  windows-mingw-cross:
-    name: Windows (MinGW cross-compile)
+  debian-package:
+    name: Debian package (.deb)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install MinGW-w64
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64
-      - name: Configure and build
+      - name: Build the binary package
         run: |
           set -o pipefail
-          log="$RUNNER_TEMP/mingw-build.log"
-          {
-            cmake -S . -B build-win -DCMAKE_TOOLCHAIN_FILE=windows/toolchain-mingw64.cmake
-            cmake --build build-win -j
-          } 2>&1 | tee "$log"
-          status=${PIPESTATUS[0]}
-          if [ "$status" -ne 0 ]; then
-            # Repeat the diagnostics as check-run annotations: the plain job
-            # log is hosted separately and is not readable from everywhere.
-            grep -E 'error:|error C[0-9]+|CMake Error|Error [0-9]+|undefined reference|FAILED:|fatal' "$log" |
-              tr -d '\r' | sed 's/%/%25/g' | sort -u | head -12 |
+          sudo apt-get update
+          # build-essential is what the Build-Depends line actually asks
+          # for: g++ and make, plus dpkg-dev for the tools rules calls.
+          sudo apt-get install -y dpkg-dev build-essential
+          log="$RUNNER_TEMP/dpkg-build.log"
+          # An unsatisfied build dependency aborts dpkg-buildpackage with
+          # exit code 3 and names it only in the job log, which is hosted
+          # apart from the API - so repeat the diagnostics as annotations,
+          # which the API does serve.
+          if ! dpkg-buildpackage -b -us -uc 2>&1 | tee "$log"; then
+            grep -E 'error|Error|Unmet|unsatisfied|cannot|No such|not found' \
+              "$log" | tr -d '\r' | sed 's/%/%25/g' | sort -u | head -12 |
               while IFS= read -r line; do
                 printf '::error::%s\n' "${line//]/%5D}"
               done
-            exit "$status"
+            exit 1
           fi
-      - name: Check artifacts
+      - name: Check the package contents
         run: |
-          test -f build-win/linuxscp.exe
-          test -f build-win/linuxscp-unittest.exe
+          set -o pipefail
+          deb=$(ls ../linuxscp_*_*.deb)
+          echo "Built $deb"
+          dpkg-deb --contents "$deb" | tee "$RUNNER_TEMP/contents-raw.txt" |
+            awk '{print $NF}' | sed 's|^\./||' | sort > "$RUNNER_TEMP/contents.txt"
+          echo "Paths in the package:"
+          cat "$RUNNER_TEMP/contents.txt"
+          # The package is the product. The GUI's module and crypto helper
+          # are listed by name because a package that ships only one of them
+          # installs a launcher that cannot start, which is what the previous
+          # packaging did.
+          for path in usr/bin/linuxscp usr/bin/linuxscp-gui \
+                      usr/share/linuxscp/gui/linuxscp_gui.py \
+                      usr/share/linuxscp/gui/linscp_crypto.py \
+                      usr/share/linuxscp/gui/web/index.html \
+                      usr/share/applications/linuxscp.desktop \
+                      usr/share/pixmaps/linuxscp.png \
+                      usr/share/icons/hicolor/scalable/apps/linuxscp.svg \
+                      usr/share/man/man1/linuxscp.1.gz; do
+            grep -qx "$path" "$RUNNER_TEMP/contents.txt" ||
+              { echo "::error::$path is missing from the package"; exit 1; }
+          done
+      - name: Install and smoke test it
+        run: |
+          sudo dpkg -i ../linuxscp_*_*.deb
+          linuxscp -version
+          linuxscp -batch -command="echo ok; exit"
+          test -x /usr/bin/linuxscp-gui
+      - name: Start the installed graphical client
+        run: |
+          # The launcher is the part a broken install hides: it has to find
+          # its Python modules and its web client under /usr/share, and the
+          # API it opens has to keep its token and Host checks.
+          gui_log="$RUNNER_TEMP/installed-gui.log"
+          rm -f "$gui_log"
+          LINUXSCP_CONFIG_DIR="$RUNNER_TEMP/installed-gui-config" \
+            linuxscp-gui --port=18082 --print-token > "$gui_log" &
+          gui=$!
+          token=""
+          for attempt in $(seq 1 15); do
+            sleep 1
+            token=$(sed -n 's/^Token: //p' "$gui_log" | head -1)
+            if [ -n "$token" ]; then break; fi
+          done
+          if [ -z "$token" ]; then
+            cat "$gui_log"
+            kill "$gui"
+            echo "::error::the installed GUI did not print an API token"
+            exit 1
+          fi
+          grep -q 'Serving web client from: /usr/share/linuxscp/gui' "$gui_log" ||
+            { cat "$gui_log"; kill "$gui"
+              echo "::error::the installed GUI is not serving the packaged web client"
+              exit 1; }
+          curl -fsS -H "X-LSCP-Token: $token" \
+            http://localhost:18082/api/status | grep -q '"binary"'
+          curl -fsS -H "X-LSCP-Token: $token" http://localhost:18082/ |
+            grep -q '<html'
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:18082/api/status)
+          [ "$code" = "401" ] ||
+            { echo "::error::the installed GUI answered a call without a token ($code)"
+              kill "$gui"; exit 1; }
+          kill "$gui"

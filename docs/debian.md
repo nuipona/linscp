@@ -5,10 +5,9 @@ client, `linuxscp`, from the platform-neutral PuTTY core (`source/putty`), a
 POSIX platform layer vendored from upstream PuTTY 0.85 (`libs/putty/unix`,
 `libs/putty/charset`) and the LinSCP front end in `source/linux`.
 
-The whole repository is the Debian application; see the top-level
-[readme.md](../readme.md) for an overview. For the Windows build of the
-same front end, see [windows.md](windows.md) instead; everything below
-is specific to Debian/Linux.
+The whole repository is the Debian application, and Linux is the only
+platform it builds, ships and tests on; see the top-level
+[readme.md](../readme.md) for an overview.
 
 ## Requirements
 
@@ -18,11 +17,13 @@ is specific to Debian/Linux.
 | a C and C++17 compiler (`gcc`/`g++` or `clang`) | the core is C, the front end is C++ |
 | POSIX threads | the core's critical sections (`-pthread`) |
 | `dpkg-dev` | only to build the `.deb` package |
+| `curl` (run time) | every protocol except SFTP: `scp://`, `ftp://`, `ftps://`, `dav://`, `s3://` |
+| `python3` (run time) | the graphical client, `linuxscp-gui` |
 
 On Debian:
 
 ```sh
-sudo apt install build-essential dpkg-dev
+sudo apt install build-essential dpkg-dev curl python3
 ```
 
 ## Building
@@ -30,11 +31,20 @@ sudo apt install build-essential dpkg-dev
 ```sh
 make -C source/linux            # -> source/linux/build/linuxscp
 make -C source/linux check      # builds and runs the unit tests
+make -C source/linux check-live # the script and live-server suites
 make -C source/linux clean
 ```
 
 The build is a single `make`; there is no `configure` step. Object files and
 the resulting binary go to `source/linux/build/`, which is git-ignored.
+
+CMake builds the same client from the same sources and registers every test
+suite with CTest, which is what CI runs second:
+
+```sh
+cmake -S . -B build && cmake --build build -j
+ctest --test-dir build --output-on-failure
+```
 
 Useful overrides:
 
@@ -49,15 +59,31 @@ make -C source/linux BUILD=build-asan OPT=-O0 \
 
 ```sh
 dpkg-buildpackage -b -us -uc
-# -> ../linuxscp_1.0-1_amd64.deb
-sudo dpkg -i ../linuxscp_1.0-1_amd64.deb
+# -> ../linuxscp_1.0-2_amd64.deb
+sudo dpkg -i ../linuxscp_1.0-2_amd64.deb
 ```
 
 `debian/rules` deliberately does not use debhelper: the whole build is one
 plain Makefile, so the few targets are written out and the build dependency
 list stays at `dpkg-dev`. It builds the client, runs the unit tests as part of
-the package build, and installs `linuxscp` into `/usr/bin` with its manual
-page in `/usr/share/man/man1` and this document as `README.Debian`.
+the package build, and installs
+
+| Path | What |
+| --- | --- |
+| `/usr/bin/linuxscp` | the console client |
+| `/usr/bin/linuxscp-gui` | the launcher of the graphical client |
+| `/usr/share/linuxscp/gui/` | the GUI's Python modules and its web client |
+| `/usr/share/man/man1/linuxscp.1.gz` | the manual page |
+| `/usr/share/applications/linuxscp.desktop` | the desktop entry, with the `sftp://`, `ftp://` and `ftps://` scheme handlers |
+| `/usr/share/pixmaps/linuxscp.png`, `/usr/share/icons/hicolor/scalable/apps/linuxscp.svg` | the icons |
+| `/usr/share/doc/linuxscp/` | the copyright, the licence and this document as `README.Debian` |
+
+`linuxscp -gui` and the desktop entry both start `/usr/bin/linuxscp-gui`,
+which runs `/usr/share/linuxscp/gui/linuxscp_gui.py` with `python3`; the same
+launcher also works from a source tree, where the Python file sits next to
+it. CI installs the built package and starts the GUI from the installed paths,
+so a launcher that cannot find its modules is a build failure rather than a
+surprise on the desktop.
 
 The package installs:
 
@@ -159,8 +185,8 @@ leaves symbolic links alone, so it cannot follow one out of the directory.
 `copyid [<keyfile>]` appends the public half of the session's private key, or of
 `<keyfile>`, to `~/.ssh/authorized_keys` on the server, creating `~/.ssh` as
 `0700` and the file as `0600`, and saying so when the key is already installed.
-It needs an `sftp://` or `scp://` session, and the Windows build reports that it
-cannot read a key file rather than doing nothing.
+It needs an `sftp://` or `scp://` session; the key file is read through the
+bundled PuTTY core.
 
 `synchronize local|remote|both [localdir [remotedir]]` compares directory
 trees and synchronizes newer and missing files in the specified direction.
@@ -203,8 +229,7 @@ taken from `LINUXSCP_TERMINAL` (`<program> [args]`, for example `xterm -e` or
 `alacritty`, `kitty`, `foot`, `wezterm`, `urxvt` and `xterm` that is
 installed. It is available for SSH (`sftp://`) sessions only. The same
 feature is on the "Terminal" button of the graphical client, which asks the
-backend to run this command. On Windows the client opens PuTTY, Windows
-Terminal or `ssh.exe` instead.
+backend to run this command.
 
 `call` (and `!`) run a command through a one-shot SSH `exec` channel, in a
 second connection, so the SFTP session stays open; `show` is rejected on
@@ -260,10 +285,9 @@ an ignored filter or setting would silently change what a script transfers or
 deletes.
 
 `keepuptodate` follows upstream's direction: it reflects changes from the
-local directory onto the remote one. Linux uses recursive inotify and Windows
-uses `ReadDirectoryChangesW` to wake on local changes; the configured interval
-triggers a full safety rescan, and timer polling is used if native watch setup
-fails. The command runs in the foreground until Ctrl-C (or `-count=` passes
+local directory onto the remote one. A recursive inotify watch wakes it on
+local changes; the configured interval triggers a full safety rescan, and
+timer polling is used if the watch cannot be set up. The command runs in the foreground until Ctrl-C (or `-count=` passes
 complete), and a non-interactive script must give `-count=`. Queue priorities and WinSCP's `.NET` assembly are not implemented.
 S3 signing and DAV `PROPFIND` are present but incomplete; see the pinned audit
 for the full list.

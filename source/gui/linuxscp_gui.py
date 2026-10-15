@@ -60,19 +60,13 @@ REQUIRE_TOKEN = True
 # allowed; --allow-host adds more (a reverse proxy, for example).
 ALLOWED_HOSTS = set(["localhost", "127.0.0.1", "::1"])
 ALLOW_ANY_HOST = False
-IS_WINDOWS = os.name == "nt"
-EXE_SUFFIX = ".exe" if IS_WINDOWS else ""
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
 if not os.path.isdir(WEB_DIR):
-    fallbacks = ["/usr/share/linuxscp/gui"]
-    if IS_WINDOWS:
-        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
-            if root:
-                fallbacks.append(os.path.join(root, "LinuxSCP", "web"))
-                fallbacks.append(os.path.join(root, "LinuxSCP", "bin", "web"))
-    for candidate in fallbacks:
+    # The installed locations: the package puts this module and the web
+    # client under /usr/share/linuxscp/gui.
+    for candidate in ["/usr/share/linuxscp/gui/web", "/usr/share/linuxscp/gui"]:
         if os.path.isdir(candidate):
             WEB_DIR = candidate
             break
@@ -86,32 +80,24 @@ def _default_user():
 
 
 def find_linuxscp_binary():
-    names = ["linuxscp" + EXE_SUFFIX, "linuxscp"]
-    candidates = []
-    # Next to the GUI script / installed next to linuxscp.exe.
-    for name in names:
-        candidates.append(os.path.join(BASE_DIR, name))
-        candidates.append(os.path.join(BASE_DIR, "..", "linux", "build", name))
-        candidates.append(os.path.join(BASE_DIR, "..", "..", "source", "linux", "build", name))
-        candidates.append(os.path.join(BASE_DIR, "..", "..", "build-windows", name))
-        candidates.append(os.path.join(BASE_DIR, "..", "..", "build", name))
-    if IS_WINDOWS:
-        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"),
-                     os.environ.get("LOCALAPPDATA")):
-            if root:
-                candidates.append(os.path.join(root, "LinuxSCP", "linuxscp.exe"))
-                candidates.append(os.path.join(root, "LinuxSCP", "bin", "linuxscp.exe"))
-    else:
-        candidates.append("/usr/bin/linuxscp")
-        candidates.append("/usr/local/bin/linuxscp")
-    for name in names:
-        found = shutil.which(name)
-        if found:
-            candidates.append(found)
+    name = "linuxscp"
+    candidates = [
+        # Next to the GUI script, then the usual build trees, then the
+        # installed locations.
+        os.path.join(BASE_DIR, name),
+        os.path.join(BASE_DIR, "..", "linux", "build", name),
+        os.path.join(BASE_DIR, "..", "..", "source", "linux", "build", name),
+        os.path.join(BASE_DIR, "..", "..", "build", name),
+        "/usr/bin/linuxscp",
+        "/usr/local/bin/linuxscp",
+    ]
+    found = shutil.which(name)
+    if found:
+        candidates.append(found)
     for c in candidates:
-        if c and os.path.isfile(c) and (IS_WINDOWS or os.access(c, os.X_OK)):
+        if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return os.path.abspath(c)
-    return "linuxscp" + EXE_SUFFIX
+    return name
 
 
 LINUXSCP_BIN = find_linuxscp_binary()
@@ -147,9 +133,6 @@ def session_store_path():
     override = os.environ.get("LINUXSCP_CONFIG_DIR")
     if override:
         return os.path.join(override, "sessions.ini")
-    if IS_WINDOWS:
-        root = os.environ.get("APPDATA") or os.path.expanduser("~")
-        return os.path.join(root, "LinuxSCP", "sessions.ini")
     root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
     return os.path.join(root, "LinuxSCP", "sessions.ini")
 
@@ -335,9 +318,6 @@ def popen_kwargs():
         "encoding": "utf-8",
         "errors": "replace",
     }
-    if IS_WINDOWS:
-        # No console window flashing up for every operation.
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     return kwargs
 
 
@@ -352,8 +332,8 @@ def run_linuxscp(command_script, session=None, timeout=300):
         proc = subprocess.Popen(cmd, **popen_kwargs())
     except OSError as exc:
         message = ("Cannot start the LinSCP core binary '%s': %s. "
-                   "Build it first (windows\\build.cmd or make -C source/linux) "
-                   "or put linuxscp%s on PATH." % (bin_path, exc, EXE_SUFFIX))
+                   "Build it first (make -C source/linux) or put linuxscp "
+                   "on PATH." % (bin_path, exc))
         add_log(message, "error")
         return 1, "", message
     try:
@@ -935,22 +915,7 @@ def parse_ls_output(stdout):
     return entries
 
 
-def list_windows_drives():
-    import string
-    entries = []
-    for letter in string.ascii_uppercase:
-        root = "%s:\\" % letter
-        if os.path.exists(root):
-            entries.append({
-                "name": root, "is_dir": True, "size": 0,
-                "permissions": "drwxr-xr-x", "date": "", "mtime": 0, "owner": ""
-            })
-    return entries
-
-
 def list_local_directory(path):
-    if IS_WINDOWS and path in ("/", "\\", ""):
-        return list_windows_drives(), None
     if not os.path.isabs(path):
         path = os.path.abspath(os.path.join(os.path.expanduser("~"), path))
     if not os.path.exists(path):
@@ -1778,7 +1743,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             records = []
             for name in names:
                 if not isinstance(name, str) or not name or name in (".", "..") or \
-                        "/" in name or (IS_WINDOWS and "\\" in name):
+                        "/" in name:
                     self.send_json({"success": False,
                                     "error": "A move can only select file names from the current panel."},
                                    status=400)

@@ -1,5 +1,5 @@
 /*
- * main: command line entry point of the front end (POSIX and Windows).
+ * main: command line entry point of the front end.
  */
 
 #include <cstdio>
@@ -17,9 +17,7 @@
 #include "Session.h"
 #include "Texts.h"
 
-#if !defined(_WIN32)
 #include "PuttyCompat.h"
-#endif
 
 namespace {
 
@@ -90,35 +88,9 @@ int main(int argc, char ** argv)
     bool commandSpecified = false;
     const char * value = NULL;
 
-    std::string normalizedArg;
     for (int i = 1; i < argc; i++)
     {
         const char * arg = argv[i];
-#if defined(_WIN32)
-        if (arg[0] == '/' && arg[1] != '\0')
-        {
-            static const char * known[] = {
-                "script=", "command=", "hostkey=", "password=", "privatekey=",
-                "username=", "port=", "timeout=", "log=", "xmllog=",
-                "parameter", "parameters",
-                "batch", "batch=on", "batch=off", "gui", "server", "verbose",
-                "version", "help", "h"
-            };
-            const char * rest = arg + 1;
-            for (size_t k = 0; k < sizeof(known) / sizeof(known[0]); k++)
-            {
-                size_t len = strlen(known[k]);
-                bool valueForm = len > 0 && known[k][len - 1] == '=';
-                if (strncmp(rest, known[k], len) == 0 &&
-                    (valueForm || rest[len] == '\0'))
-                {
-                    normalizedArg = std::string("-") + rest;
-                    arg = normalizedArg.c_str();
-                    break;
-                }
-            }
-        }
-#endif
         if (collectingParameters)
         {
             /* WinSCP takes the script parameters after a bare '/parameter';
@@ -314,14 +286,12 @@ int main(int argc, char ** argv)
     console.SetBatchMode(batch);
     console.SetVerbose(options.verbose);
 
-#if !defined(_WIN32)
     /* The platform layer of the PuTTY core needs these before any socket
      * or file descriptor is registered, and before any critical section
      * can be taken. */
     linuxscp_platform_init();
     sk_init();
     uxsel_init();
-#endif
 
     linuxscp::Script script;
     script.SetDefaults(options);
@@ -352,8 +322,6 @@ int main(int argc, char ** argv)
         result = script.RunInteractive(url);
     }
 
-#if !defined(_WIN32)
     sk_cleanup();
-#endif
     return result;
 }

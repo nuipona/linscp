@@ -10,13 +10,9 @@ so a run cannot collide with a server somebody else is using. paramiko is the
 only external requirement and it is optional: without it the whole module
 skips, loudly, rather than pretending to pass.
 
-What cannot be done from another platform says so per test instead of taking
-the whole suite with it, because a run that silently does less is worth more
-than one that does nothing. The suite as a whole is POSIX, for a reason worth
-knowing: on Windows the client speaks SFTP through curl, and the curl.exe
-built into Windows has no SFTP or SCP support, so there is no session for
-these tests to open - not a slow test, an impossible one. A Windows install
-that puts a curl built with libssh2 on PATH gets these tests back.
+A test that cannot run says so per test instead of taking the whole suite
+with it, because a run that silently does less is worth more than one that
+does nothing.
 """
 import base64
 import hashlib
@@ -53,28 +49,11 @@ def sha256_of(path):
     return digest.hexdigest()
 
 
-def posix_only(reason):
-    """Marks a test that only this platform can run, with the reason someone
-    reading the skip list of the other one needs."""
-    return unittest.skipIf(os.name != "posix", "POSIX only: " + reason)
-
-
 class LiveSftpTests(unittest.TestCase):
-    """Requires paramiko; individual tests additionally require a POSIX
-    host, and say which of the two is missing when they skip."""
+    """Requires paramiko, and says so when it is missing."""
 
     @classmethod
     def setUpClass(cls):
-        if os.name != "posix":
-            # First, because it is the binding reason: paramiko on a Windows
-            # box would buy nothing while curl cannot speak the protocol, and
-            # a recorded reason that names the wrong blocker is worse than no
-            # recorded reason at all.
-            raise unittest.SkipTest(
-                "SFTP on Windows goes through curl, and the curl.exe built "
-                "into Windows has no SFTP support: there is no session for "
-                "these tests to open. Put a curl built with libssh2 on PATH "
-                "and this restriction goes away.")
         if server_module is None:
             raise unittest.SkipTest(
                 "paramiko is not installed; the live SFTP tests are skipped. "
@@ -100,12 +79,11 @@ class LiveSftpTests(unittest.TestCase):
     # -- the server ---------------------------------------------------------
     def start_server(self):
         env = dict(os.environ, LSCP_TEST_ROOT=str(self.root), LSCP_TEST_PORT="0")
+        # Its own process group, so that tearDown can stop the server and
+        # anything it left behind without touching the test runner.
         popen_args = dict(env=env, stdout=subprocess.PIPE,
-                         stderr=subprocess.STDOUT, text=True)
-        if os.name == "posix":
-            # Its own process group, so that tearDown can stop the server and
-            # anything it left behind without touching the test runner.
-            popen_args["start_new_session"] = True
+                          stderr=subprocess.STDOUT, text=True,
+                          start_new_session=True)
         self.server = subprocess.Popen(
             [sys.executable, str(HERE / "TestSftpServer.py")], **popen_args)
         self.port = None
@@ -126,10 +104,11 @@ class LiveSftpTests(unittest.TestCase):
         server = getattr(self, "server", None)
         if server is not None:
             if server.poll() is None:
-                if os.name == "posix" and not force:
-                    os.killpg(os.getpgid(server.pid), signal.SIGTERM)
+                if force:
+                    server.kill()
                 else:
-                    (server.kill if force else server.terminate)()
+                    # The whole process group: the server may have children.
+                    os.killpg(os.getpgid(server.pid), signal.SIGTERM)
                 try:
                     server.wait(timeout=10)
                 except subprocess.TimeoutExpired:
@@ -151,9 +130,8 @@ class LiveSftpTests(unittest.TestCase):
         env = dict(os.environ, LSCP_TEST_PORT="0", LSCP_TEST_PROXY_KIND=kind,
                    LSCP_TEST_PROXY_AUTH=credentials)
         popen_args = dict(env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True)
-        if os.name == "posix":
-            popen_args["start_new_session"] = True
+                          stderr=subprocess.STDOUT, text=True,
+                          start_new_session=True)
         proxy = subprocess.Popen(
             [sys.executable, str(HERE / "TestProxyServer.py")], **popen_args)
         lines = []
@@ -180,12 +158,9 @@ class LiveSftpTests(unittest.TestCase):
 
     def stop_proxy(self, proxy, reader):
         if proxy.poll() is None:
-            if os.name == "posix":
-                try:
-                    os.killpg(os.getpgid(proxy.pid), signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    proxy.terminate()
-            else:
+            try:
+                os.killpg(os.getpgid(proxy.pid), signal.SIGTERM)
+            except (OSError, ProcessLookupError):
                 proxy.terminate()
             try:
                 proxy.wait(timeout=10)
@@ -244,9 +219,6 @@ class LiveSftpTests(unittest.TestCase):
         self.assertIn("Cannot open session", result.stderr)
         self.assertNotIn("Connected", result.stdout)
 
-    @posix_only("curl can only pin an MD5 fingerprint; a SHA256 pin falls "
-                "back to known_hosts on that path, so there is nothing to "
-                "refuse here")
     def test_open_with_an_unexpected_host_key_is_refused(self):
         """A pinned key that does not match has to stop the connection, and
         say that it was the key rather than the network."""
@@ -257,7 +229,6 @@ class LiveSftpTests(unittest.TestCase):
         combined = (result.stdout + result.stderr).lower()
         self.assertIn("host key", combined)
 
-    @posix_only("write protection of a directory is not a mode bit elsewhere")
     def test_operations_the_server_refuses_are_reported(self):
         """A denied transfer or removal has to fail the command, not quietly
         produce nothing."""
@@ -284,7 +255,6 @@ class LiveSftpTests(unittest.TestCase):
         finally:
             os.chmod(locked, 0o700)
 
-    @posix_only("Ctrl-C is delivered as a signal")
     def test_interrupted_get_stages_in_filepart_and_resumes(self):
         """Ctrl-C in the middle of a download must leave the partial bytes
         in '<name>.filepart' - the final name is written only when the file
@@ -325,7 +295,6 @@ class LiveSftpTests(unittest.TestCase):
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 
-    @posix_only("Ctrl-C is delivered as a signal")
     def test_option_resume_off_transfers_without_a_staging_file(self):
         """'option resume off' is upstream's rsOff: the file is written
         under its final name directly, staging file or not."""
@@ -381,7 +350,6 @@ class LiveSftpTests(unittest.TestCase):
         self.assertFalse(part.exists())
         self.assertEqual(sha256_of(target), digest)
 
-    @posix_only("Ctrl-C is delivered as a signal")
     def test_interrupted_put_stages_in_filepart_and_resumes(self):
         """The upload direction stages too: an interrupted 'put' leaves
         the remote final name alone and the retry continues the remote
@@ -456,7 +424,6 @@ class LiveSftpTests(unittest.TestCase):
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 
-    @posix_only("curl cannot set the modification time of an upload")
     # -- stored passwords, shared with the GUI ------------------------------
     def clean_sessions(self):
         """This config directory is shared by the class; a session file
@@ -484,7 +451,6 @@ class LiveSftpTests(unittest.TestCase):
         import linscp_crypto
         return linscp_crypto
 
-    @posix_only("the test writes the key file with POSIX permissions")
     def test_password_encrypted_by_python_opens_the_core(self):
         """The whole point of the shared format: a password encrypted by
         the GUI's module must authenticate the console client."""
@@ -516,7 +482,6 @@ class LiveSftpTests(unittest.TestCase):
         finally:
             self.clean_sessions()
 
-    @posix_only("the test writes the key file with POSIX permissions")
     def test_missing_key_file_is_reported_and_the_password_preserved(self):
         """An undecryptable password stops nobody who has a key, says so
         loudly, and survives a re-save that cannot read it."""
@@ -570,7 +535,6 @@ class LiveSftpTests(unittest.TestCase):
         finally:
             self.clean_sessions()
 
-    @posix_only("the test writes the key file with POSIX permissions")
     def test_password_stored_by_the_core_decrypts_in_python(self):
         """And the other direction: what the console client encrypts has
         to come back out through the GUI's reader, password and all."""
@@ -781,8 +745,8 @@ def run_and_report():
     """
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
-    line = ("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
-            (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
+    line = ("evidence: suite=%s platform=linux ran=%d skipped=%d failed=%d" %
+            (SUITE_NAME, result.testsRun, len(result.skipped),
              len(result.failures) + len(result.errors)))
     if not result.testsRun and result.skipped:
         # A suite that ran nothing is not a pass, and 'skipped' alone does not

@@ -62,10 +62,6 @@ def sha256_of(path):
     return digest.hexdigest()
 
 
-def posix_only(reason):
-    return unittest.skipIf(os.name != "posix", "POSIX only: " + reason)
-
-
 class LiveS3Tests(unittest.TestCase):
     """A fresh server (and therefore a fresh in-memory store) per test,
     started over TLS on a kernel-picked port."""
@@ -92,10 +88,11 @@ class LiveS3Tests(unittest.TestCase):
     # -- the server ---------------------------------------------------------
     def start_server(self):
         env = dict(os.environ, LSCP_TEST_PORT="0")
+        # Its own process group, so that teardown can stop the server and
+        # anything it left behind without touching the test runner.
         popen_args = dict(env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True)
-        if os.name == "posix":
-            popen_args["start_new_session"] = True
+                          stderr=subprocess.PIPE, text=True,
+                          start_new_session=True)
         self.server = subprocess.Popen(
             [sys.executable, str(HERE / "TestS3Server.py")], **popen_args)
         self.port = None
@@ -158,7 +155,6 @@ class LiveS3Tests(unittest.TestCase):
             self.assertEqual(response.status, 204)
 
     # -- tests --------------------------------------------------------------
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_missing_secret_is_refused_before_any_request(self):
         """A site without a secret key cannot be signed at all, and says
         so instead of trying anonymously."""
@@ -173,7 +169,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertIn("secret access key", result.stderr)
         self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_wrong_secret_is_rejected_by_signature_verification(self):
         """The server re-derives every signature; a wrong secret has to
         come back as a named S3 error, not a silent open."""
@@ -183,7 +178,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertIn("SignatureDoesNotMatch", result.stderr)
         self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_listing_shows_buckets_directories_and_objects(self):
         """mkdir creates buckets and markers, put creates objects, and
         both levels of listing report them with sizes."""
@@ -211,7 +205,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("hello.txt", result.stdout)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_rmdir_refuses_nonempty_and_accepts_virtual_directories(self):
         """rmdir on S3 has to behave like everywhere else: a directory
         with contents fails, a marker-less 'virtual' prefix with none
@@ -247,7 +240,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("bucket itself", result.stderr)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_upload_and_download_roundtrip(self):
         source = self.root / "roundtrip.bin"
         source.write_bytes(bytes(range(256)) * 64)
@@ -271,7 +263,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertNotIn("SizeBytes:", result.stdout)
         self.assertRegex(result.stdout, r"(?m)^\S.* roundtrip\.bin$")
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_cp_uses_s3_copy_object_and_keeps_the_source(self):
         source = self.root / "copy-source.txt"
         payload = b"server-side copy on S3\n" * 100
@@ -290,7 +281,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertEqual(downloaded.read_bytes(), payload)
         self.assertEqual(self.server_state()["copy_count"], 1)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_copy_object_embedded_http_200_error_is_reported(self):
         source = self.root / "copy-error-source.txt"
         source.write_text("copy source\n", encoding="utf-8")
@@ -306,7 +296,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertIn("Embedded copy failure", result.stderr)
         self.assertEqual(self.server_state()["copy_count"], 0)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_large_upload_uses_multipart_and_roundtrips(self):
         """Large S3 objects must go through initiate/parts/complete rather
         than one unbounded PUT; every returned part ETag is used to commit
@@ -343,7 +332,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertEqual(complete["size"], expected_size)
         self.assertEqual(complete["parts"], 3)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_multipart_completion_embedded_http_200_error_is_reported_and_aborted(self):
         source = self.root / "multipart-error.bin"
         expected_size = 20 * 1024 * 1024 + 17
@@ -369,7 +357,6 @@ class LiveS3Tests(unittest.TestCase):
             ["initiate", "part", "part", "part", "abort"])
         self.assertEqual(state["active_uploads"], 0)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_resumed_download_continues_through_a_byte_range(self):
         """A pre-existing staging file makes the download resume with
         curl -C; the server answers only with a range, so a client that
@@ -392,7 +379,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertFalse(staging.exists())
         self.assertEqual(sha256_of(source), sha256_of(destination))
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_rename_and_remove(self):
         """Rename is CopyObject plus a delete of the source; remove is a
         DELETE that has to fail on a missing key afterwards."""
@@ -424,7 +410,6 @@ class LiveS3Tests(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertNotIn("SHOULD_NOT_SEE", result.stdout)
 
-    @posix_only("the client shells out to curl against 127.0.0.1")
     def test_unsigned_and_botocore_signed_requests(self):
         """Two directions of agreement: a request with no signature at
         all is refused, and a request signed by botocore - the AWS
@@ -475,8 +460,8 @@ def run_and_report():
     suite = unittest.defaultTestLoader.loadTestsFromModule(
         sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
-    line = ("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
-            (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
+    line = ("evidence: suite=%s platform=linux ran=%d skipped=%d failed=%d" %
+            (SUITE_NAME, result.testsRun, len(result.skipped),
              len(result.failures) + len(result.errors)))
     if not result.testsRun and result.skipped:
         reasons = "; ".join(sorted(set(str(reason)[:160]

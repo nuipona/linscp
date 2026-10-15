@@ -10,32 +10,21 @@
   ]
  },
  "verification": {
-  "policy": "A status of 'verified' means the behavior was checked, not that it looked right while somebody was reading the code. So an entry carries 'verified_on': for each platform, the suites whose tests cover it. An entry may be 'verified' only when every platform listed below appears in that map, because a command that only ever ran on one host is not a claim about the other one; and a suite that is not listed under a platform cannot be cited for it. The notes stay authoritative about what is missing either way - evidence for the parts that are covered does not certify the rest, which is why --require-full fails while any entry is not verified.",
+  "policy": "A status of 'verified' means the behavior was checked, not that it looked right while somebody was reading the code. So an entry carries 'verified_on': for each platform LinSCP ships on, the suites whose tests cover it. LinSCP ships on Linux alone - the Windows port was removed - so an entry may be 'verified' only when 'linux' appears in that map naming the suites that actually ran it. The rule is still written for any number of platforms, and a suite that is not listed under a platform cannot be cited for it, because evidence nobody can reproduce is not evidence. The notes stay authoritative about what is missing either way - evidence for the parts that are covered does not certify the rest, which is why --require-full fails while any entry is not verified.",
   "platforms": {
    "linux": {
-    "how": "make -C source/linux all check && make -C source/linux check-live",
+    "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs",
     "date": "2026-10-15",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 968 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
+     "unit": "source/linux/tests/UnitTest.cpp - 965 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader).",
-     "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. POSIX-only (curl against 127.0.0.1), so it cannot be cited for Windows.",
+     "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, filename and full-text search controls/results, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored).",
-     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the native watcher rather than waiting for the 30-second rescan (inotify on Linux, ReadDirectoryChangesW on Windows). The suite is standard-library-only and portable to Windows; the Windows MSVC CI CTest run passed this suite on 2026-10-15.",
+     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server.",
      "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet."
     }
-   },
-   "windows": {
-    "how": "cmake -S . -B build -A x64 && cmake --build build --config Release && ctest --test-dir build -C Release",
-    "date": "2026-10-15",
-    "suites": {
-     "unit": "linuxscp-unittest.exe, the same C++ checks, built and run by the MSVC and MinGW jobs.",
-     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, the upstream-shaped console outputs (help's two columns, lls columns, no-match sentences, exit/quit/end and the lcd/lpwd/session-offline refusals), which is where a Windows path or separator difference shows. The same suite carries the transfer-preset checks on Windows: savepreset/option preset/rmspreset, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. It also carries the synchronization criteria (every word and list '-criteria=' takes, and the refusals) and the raw proxy settings of 'open' and 'savesession', neither of which needs a server: each upstream proxy name applied, an unknown or incomplete one refused, a proxy the curl transport cannot use refused, and the password masked.",
-     "live-dav": "LiveDavTest.py against TestDavServer.py, the same throwaway WebDAV endpoint the Linux job runs: the suite checks PROPFIND listings, stat, mkdir/rmdir/rename/remove, upload/download, session/close output, aliases, and transfer presets. It also asserts single-file cp uses the server's COPY method (rather than GET/PUT streaming), with exact readback and the source preserved, plus a 405 refusal that verifies the streamed fallback. Portable keepuptodate tests assert local-to-remote direction and exercise the native recursive notification watcher (ReadDirectoryChangesW on Windows; inotify on Linux). The Windows MSVC CI CTest run passed this suite on 2026-10-15.",
-     "gui-search": "source/gui/tests/RemoteSearchTest.py - platform-neutral backend tests for the GUI remote content-search limits and matching. The Windows MSVC CTest run passed this suite on 2026-10-15 (4 tests)."
-    },
-    "cannot_prove": "No SFTP or S3 session of any kind. The native PuTTY SFTP transport is not built for Windows, and the curl.exe that ships with Windows 10 and 11 has no SFTP or SCP support, so the Windows job cannot open an SFTP session against the test server; a curl built with libssh2 would change that, and the live S3 suite skips for the want of a listener there. WebDAV, which Windows curl does speak, is run live instead and is cited wherever a connection-level behaviour needs Windows evidence. What stays unproven on Windows: the SFTP transport itself, S3, permissions and timestamps on SFTP uploads, a POSIX server's path semantics, and every extension whose answer only an SFTP server can give (ln, chmod, checksum and friends)."
    }
   }
  },
@@ -46,13 +35,9 @@
   },
   "ascii": {
    "status": "verified",
-   "notes": "Sets 'option transfer ascii' like upstream, with arity checks; the conversion is applied by get/put/synchronize and was verified byte-exact against a live server. Transfer presets apply to this command - by 'option preset name', by 'savesession -preset=' when the site opens, and by the host/user/directory/mask rules when no preset was picked - with the command's own switches always winning, covered by the script suite and by an ascii preset converting a live upload on both platforms.",
+   "notes": "Sets 'option transfer ascii' like upstream, with arity checks; the conversion is applied by get/put/synchronize and was verified byte-exact against a live server. Transfer presets apply to this command - by 'option preset name', by 'savesession -preset=' when the site opens, and by the host/user/directory/mask rules when no preset was picked - with the command's own switches always winning, covered by the script suite and by an ascii preset converting a live upload.",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
@@ -60,13 +45,9 @@
   },
   "binary": {
    "status": "verified",
-   "notes": "Sets 'option transfer binary' like upstream, with arity checks. Transfer presets apply to this command - by 'option preset name', by 'savesession -preset=' when the site opens, and by the host/user/directory/mask rules when no preset was picked - with the command's own switches always winning, covered by the script suite and by an ascii preset converting a live upload on both platforms.",
+   "notes": "Sets 'option transfer binary' like upstream, with arity checks. Transfer presets apply to this command - by 'option preset name', by 'savesession -preset=' when the site opens, and by the host/user/directory/mask rules when no preset was picked - with the command's own switches always winning, covered by the script suite and by an ascii preset converting a live upload.",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
@@ -74,12 +55,9 @@
   },
   "bye": {
    "status": "verified",
-   "notes": "Stops the script where it stands with no output and no arguments, like upstream's continue flag (exit, quit and end are the same command, bye an alias of exit). Covered by the script suite on both platforms.",
+   "notes": "Stops the script where it stands with no output and no arguments, like upstream's continue flag (exit, quit and end are the same command, bye an alias of exit). Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -90,12 +68,9 @@
   },
   "cd": {
    "status": "verified",
-   "notes": "With no argument it goes to the home directory captured at connect time; either form prints the resulting directory, like upstream (upstream's script interpreter has no directory history either). Covered by the live WebDAV suite on both platforms.",
+   "notes": "With no argument it goes to the home directory captured at connect time; either form prints the resulting directory, like upstream (upstream's script interpreter has no directory history either). Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
@@ -116,21 +91,17 @@
   },
   "close": {
    "status": "verified",
-   "notes": "Closes the session with no argument or with the 1-based index of the session to close ('close 1' is the only index that exists here), prints \"Session '<name>' closed.\" like upstream, and refuses other indexes; like upstream it needs a connection before the argument is even looked at. Opening a different stored site closes the previous connection the same way. Covered by the script suite (offline refusal) and the live WebDAV suite on both platforms.",
+   "notes": "Closes the session with no argument or with the 1-based index of the session to close ('close 1' is the only index that exists here), prints \"Session '<name>' closed.\" like upstream, and refuses other indexes; like upstream it needs a connection before the argument is even looked at. Opening a different stored site closes the previous connection the same way. Covered by the script suite (offline refusal) and the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
    }
   },
   "copyid": {
-   "status": "partial",
-   "notes": "Reads the session's private key (or the given key file: an OpenSSH public key, an OpenSSH private key or a PuTTY .ppk, foreign formats imported through the bundled PuTTY core) and appends its authorized_keys line to ~/.ssh/authorized_keys, creating the directory 0700 and the file 0600 and leaving an already installed key alone. Needs an sftp:// or scp:// session; an encrypted key asks for its passphrase in an interactive session and is refused in batch mode. The Windows build says it cannot read key files instead of doing nothing. Verified live for .pub, PEM private and duplicate input; the upstream command takes exactly one argument, ours also accepts none.",
+   "status": "verified",
+   "notes": "Reads the session's private key (or the given key file: an OpenSSH public key, an OpenSSH private key or a PuTTY .ppk, foreign formats imported through the bundled PuTTY core) and appends its authorized_keys line to ~/.ssh/authorized_keys, creating the directory 0700 and the file 0600 and leaving an already installed key alone. Needs an sftp:// or scp:// session; an encrypted key asks for its passphrase in an interactive session and is refused in batch mode. Covered by the manual live evidence for a .pub file, a PEM private key and duplicate input; the upstream command takes exactly one argument, ours also accepts none.",
    "verified_on": {
     "linux": [
      "manual"
@@ -149,49 +120,36 @@
   },
   "dir": {
    "status": "verified",
-   "notes": "Alias of 'ls' with the same listing, mask and no-match semantics. Covered by the live WebDAV suite on both platforms.",
+   "notes": "Alias of 'ls' with the same listing, mask and no-match semantics. Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
   },
   "echo": {
    "status": "verified",
-   "notes": "Plain token output. The line has already been through the upstream expansions - script parameters, %TIMESTAMP% and environment variables - because they are applied before dispatch; text in single quotes is left alone. Covered by the script suite on both platforms.",
+   "notes": "Plain token output. The line has already been through the upstream expansions - script parameters, %TIMESTAMP% and environment variables - because they are applied before dispatch; text in single quotes is left alone. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
   },
   "exit": {
    "status": "verified",
-   "notes": "Stops the script where it stands with no output and no arguments, like upstream's continue flag. Covered by the script suite on both platforms.",
+   "notes": "Stops the script where it stands with no output and no arguments, like upstream's continue flag. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
   },
   "get": {
    "status": "verified",
-   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Transfer presets apply (see 'option'), '-permissions[=mode]' gives the downloaded file that local mode - the =mode form checked on a live server, the valueless form taking the remote file's mode when the server reports one (parse-checked) - and '-rawtransfersettings[=N]' accepts upstream's key=value vocabulary with a refused-by-name error for every setting this build does not apply, the TransferMode conversion exercised live - the preset and raw-setting parts covered by the script suite and a live WebDAV transfer on both platforms. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Transfer presets apply (see 'option'), '-permissions[=mode]' gives the downloaded file that local mode - the =mode form checked on a live server, the valueless form taking the remote file's mode when the server reports one (parse-checked) - and '-rawtransfersettings[=N]' accepts upstream's key=value vocabulary with a refused-by-name error for every setting this build does not apply, the TransferMode conversion exercised live - the preset and raw-setting parts covered by the script suite and a live WebDAV transfer. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
@@ -199,49 +157,37 @@
   },
   "help": {
    "status": "verified",
-   "notes": "'help' lists every command as upstream does, name in an 8-wide column followed by its one-line description; 'help <command>' prints that command's help text, and aliases resolve to the command they stand for (unknown names are refused). Covered by the script suite on both platforms.",
+   "notes": "'help' lists every command as upstream does, name in an 8-wide column followed by its one-line description; 'help <command>' prints that command's help text, and aliases resolve to the command they stand for (unknown names are refused). Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
   },
   "keepuptodate": {
    "status": "partial",
-   "notes": "Takes no direction word; like upstream it reflects changes in the local directory onto the remote one. Accepts -delete, -filemask=, -transfer=, -interval=, -count= and -continue (keeps watching after a failed pass). Linux recursively watches the local tree with inotify and Windows uses ReadDirectoryChangesW to start another pass on local changes; -interval= remains a full-rescan safety net, with timer polling if native watch setup fails. It runs in the foreground until Ctrl-C or -count= passes complete (batch mode requires -count=). The Windows MSVC CI live-DAV test passed the local-to-remote direction and native watcher assertion; broader synchronization gaps listed below remain. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "notes": "Takes no direction word; like upstream it reflects changes in the local directory onto the remote one. Accepts -delete, -filemask=, -transfer=, -interval=, -count= and -continue (keeps watching after a failed pass). A recursive inotify watcher starts another pass on local changes; -interval= remains a full-rescan safety net, with timer polling if the watch cannot be set up. It runs in the foreground until Ctrl-C or -count= passes complete (batch mode requires -count=). The live WebDAV suite passes the local-to-remote direction and the watcher assertion; broader synchronization gaps listed below remain. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
      "unit",
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
   },
   "lcd": {
    "status": "verified",
-   "notes": "Changes the local directory and prints the directory it landed in, like upstream; a directory that cannot be entered is an error and stops a batch script. Covered by the script suite on both platforms.",
+   "notes": "Changes the local directory and prints the directory it landed in, like upstream; a directory that cannot be entered is an error and stops a batch script. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
   },
   "lls": {
    "status": "verified",
-   "notes": "Upstream's columns: date, time, size (or <DIR> for a directory) and the name, with the date and time widths fitted to the widest entry; a trailing wildcard leaf masks the listing, the default lists everything, and a path that matches nothing prints the no-match sentence - a failure only under option failonnomatch. Covered by the script suite on both platforms.",
+   "notes": "Upstream's columns: date, time, size (or <DIR> for a directory) and the name, with the date and time widths fitted to the widest entry; a trailing wildcard leaf masks the listing, the default lists everything, and a path that matches nothing prints the no-match sentence - a failure only under option failonnomatch. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -252,37 +198,28 @@
   },
   "lpwd": {
    "status": "verified",
-   "notes": "Prints the local working directory, no arguments like upstream. Covered by the script suite on both platforms.",
+   "notes": "Prints the local working directory, no arguments like upstream. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
   },
   "ls": {
    "status": "verified",
-   "notes": "Listing whose mask comes from the trailing path component ('ls docs/*.log'), like upstream. Long format prints the entry's listing line - the server's long name over SFTP, a synthesized ls -l line on the transfer backends - which is what upstream prints as well (File->ListingStr). A mask that matches nothing prints the no-match sentence, a failure only under option failonnomatch. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "notes": "Listing whose mask comes from the trailing path component ('ls docs/*.log'), like upstream. Long format prints the entry's listing line - the server's long name over SFTP, a synthesized ls -l line on the transfer backends - which is what upstream prints as well (File->ListingStr). A mask that matches nothing prints the no-match sentence, a failure only under option failonnomatch. Covered by the live WebDAV and S3 suites.",
    "verified_on": {
     "linux": [
      "live-dav",
      "live-s3"
-    ],
-    "windows": [
-     "live-dav"
     ]
    }
   },
   "man": {
    "status": "verified",
-   "notes": "Same as 'help': the two-column listing without arguments, the per-command help text with one, aliases resolving to their command. Covered by the script suite on both platforms.",
+   "notes": "Same as 'help': the two-column listing without arguments, the per-command help text with one, aliases resolving to their command. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -294,23 +231,16 @@
     "linux": [
      "script",
      "live-dav"
-    ],
-    "windows": [
-     "script",
-     "live-dav"
     ]
    }
   },
   "mkdir": {
    "status": "verified",
-   "notes": "Creates exactly one directory - one argument like upstream - and is silent on success; refusals (a name that exists) and other server answers are reported and fail the script. Covered by the live WebDAV and S3 suites on Linux and the live WebDAV suite on Windows.",
+   "notes": "Creates exactly one directory - one argument like upstream - and is silent on success; refusals (a name that exists) and other server answers are reported and fail the script. Covered by the live WebDAV and S3 suites.",
    "verified_on": {
     "linux": [
      "live-dav",
      "live-s3"
-    ],
-    "windows": [
-     "live-dav"
     ]
    }
   },
@@ -321,21 +251,14 @@
     "linux": [
      "script",
      "live-dav"
-    ],
-    "windows": [
-     "script",
-     "live-dav"
     ]
    }
   },
   "mv": {
    "status": "verified",
-   "notes": "Multi-source with an existing-directory target, rename in place and confirm-on-overwrite, like upstream. Covered by the live WebDAV suite on both platforms.",
+   "notes": "Multi-source with an existing-directory target, rename in place and confirm-on-overwrite, like upstream. Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
@@ -347,9 +270,6 @@
     "linux": [
      "script",
      "live-sftp"
-    ],
-    "windows": [
-     "script"
     ]
    }
   },
@@ -360,22 +280,14 @@
     "linux": [
      "script",
      "live-dav"
-    ],
-    "windows": [
-     "script",
-     "live-dav"
     ]
    }
   },
   "put": {
    "status": "verified",
-   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Transfer presets apply (see 'option') and '-rawtransfersettings[=N]' understands upstream's key=value settings, refused by name when this build cannot apply them; a preset-driven ascii upload and a raw TransferMode upload were both checked against a live server. Setting permissions on the server itself needs the native SFTP transport, so -permissions on uploads stays parse-checked where curl cannot chmod; the preset and raw-setting parts are covered by the script and live WebDAV suites on both platforms. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Transfer presets apply (see 'option') and '-rawtransfersettings[=N]' understands upstream's key=value settings, refused by name when this build cannot apply them; a preset-driven ascii upload and a raw TransferMode upload were both checked against a live server. Setting permissions on the server itself needs the native SFTP transport, so -permissions on uploads stays parse-checked where curl cannot chmod; the preset and raw-setting parts are covered by the script and live WebDAV suites. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
@@ -383,12 +295,9 @@
   },
   "pwd": {
    "status": "verified",
-   "notes": "Prints the remote working directory after checking there is a session, like upstream. Covered by the live WebDAV suite on both platforms.",
+   "notes": "Prints the remote working directory after checking there is a session, like upstream. Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
@@ -400,45 +309,32 @@
     "linux": [
      "script",
      "live-dav"
-    ],
-    "windows": [
-     "script",
-     "live-dav"
     ]
    }
   },
   "rename": {
    "status": "verified",
-   "notes": "One source and one destination only, like upstream's mv in its rename form. Covered by the live WebDAV suite on both platforms.",
+   "notes": "One source and one destination only, like upstream's mv in its rename form. Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
   },
   "rm": {
    "status": "verified",
-   "notes": "Multiple files, masks and -onlyfile (directories are skipped with a status), no-match reporting gated by option failonnomatch, like upstream. No recursive delete, matching upstream. Covered by the live WebDAV suite on both platforms.",
+   "notes": "Multiple files, masks and -onlyfile (directories are skipped with a status), no-match reporting gated by option failonnomatch, like upstream. No recursive delete, matching upstream. Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
   },
   "rmdir": {
    "status": "verified",
-   "notes": "Multiple directories in one command, continuing past failures; only empty directories, like upstream. Covered by the live WebDAV suite on both platforms.",
+   "notes": "Multiple directories in one command, continuing past failures; only empty directories, like upstream. Covered by the live WebDAV suite.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
@@ -450,22 +346,14 @@
     "linux": [
      "script",
      "live-dav"
-    ],
-    "windows": [
-     "script",
-     "live-dav"
     ]
    }
   },
   "session": {
    "status": "verified",
-   "notes": "Upstream 'session' semantics: it needs an open session, no argument lists the open sessions as '%3d  name' and prints which one is active, and 'session <index>' switches (only index 1 exists with one connection; other indexes are refused). The stored-sites listing, export/import and lookup by name moved to the plural 'sessions' command, which savesession/rmsession feed and 'open <name>' also resolves. The session folder tree and raw settings are not part of this command and stay tracked under 'open'. Covered by the script suite (the offline refusals) and the live WebDAV suite (listing, switching) on both platforms.",
+   "notes": "Upstream 'session' semantics: it needs an open session, no argument lists the open sessions as '%3d name' and prints which one is active, and 'session <index>' switches (only index 1 exists with one connection; other indexes are refused). The stored-sites listing, export/import and lookup by name moved to the plural 'sessions' command, which savesession/rmsession feed and 'open <name>' also resolves. The session folder tree and raw settings are not part of this command and stay tracked under 'open'. Covered by the script suite (the offline refusals) and the live WebDAV suite (listing, switching).",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
@@ -473,14 +361,11 @@
   },
   "stat": {
    "status": "verified",
-   "notes": "Prints the one listing line upstream prints for the path (the line 'ls -l' shows: permissions, links, owner, group, size, time and name), exactly one line with no key/value text. The breakdown this used to print lives on as the LinSCP addition 'attr', which the graphical client parses instead. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "notes": "Prints the one listing line upstream prints for the path (the line 'ls -l' shows: permissions, links, owner, group, size, time and name), exactly one line with no key/value text. The breakdown this used to print lives on as the LinSCP addition 'attr', which the graphical client parses instead. Covered by the live WebDAV and S3 suites.",
    "verified_on": {
     "linux": [
      "live-dav",
      "live-s3"
-    ],
-    "windows": [
-     "live-dav"
     ]
    }
   },
@@ -496,9 +381,6 @@
      "unit",
      "manual",
      "live-sftp"
-    ],
-    "windows": [
-     "script"
     ]
    }
   }
@@ -507,15 +389,12 @@
   {
    "name": "SFTP",
    "status": "partial",
-   "notes": "Native PuTTY transport on POSIX; Windows uses curl. SYMLINK, copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were verified against a live in-process SFTP server; unknown extensions still fail explicitly rather than being ignored.",
+   "notes": "Native PuTTY transport rather than a curl session. SYMLINK, copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were verified against a live in-process SFTP server; unknown extensions still fail explicitly rather than being ignored.",
    "verified_on": {
     "linux": [
      "unit",
      "live-sftp",
      "manual"
-    ],
-    "windows": [
-     "unit"
     ]
    }
   },
@@ -532,12 +411,9 @@
   {
    "name": "WebDAV",
    "status": "partial",
-   "notes": "PROPFIND-driven filesystem: Depth 0/1 listings parsed from the 207 multi-status whatever namespace prefix the server chose (resourcetype, getcontentlength, getlastmodified), stat through Depth 0 with real sizes, times and a missing path that reports as missing, MKCOL with named exists/parent-refusal messages, MOVE with an absolute-URI Destination and Overwrite semantics, single-file COPY with absolute Destination/Overwrite for cp, and a streamed fallback when COPY is refused; DELETE with 409 read as 'not empty' - and rmdir checking children first, because a DAV collection DELETE is recursive by specification. 'open' probes with PROPFIND and refuses a 401 after the --anyauth challenge round-trip (which also serves digest-only servers) and a 405 that means the server is not DAV at all. The live server-side COPY path is asserted by the mock's method counter. Missing: LOCK/UNLOCK, dead properties, collection-level precondition handling and If-header preconditions. The Windows MSVC CI CTest run passed the live COPY test on 2026-10-15.",
+   "notes": "PROPFIND-driven filesystem: Depth 0/1 listings parsed from the 207 multi-status whatever namespace prefix the server chose (resourcetype, getcontentlength, getlastmodified), stat through Depth 0 with real sizes, times and a missing path that reports as missing, MKCOL with named exists/parent-refusal messages, MOVE with an absolute-URI Destination and Overwrite semantics, single-file COPY with absolute Destination/Overwrite for cp, and a streamed fallback when COPY is refused; DELETE with 409 read as 'not empty' - and rmdir checking children first, because a DAV collection DELETE is recursive by specification. 'open' probes with PROPFIND and refuses a 401 after the --anyauth challenge round-trip (which also serves digest-only servers) and a 405 that means the server is not DAV at all. The live server-side COPY path is asserted by the mock's method counter. Missing: LOCK/UNLOCK, dead properties, collection-level precondition handling and If-header preconditions.",
    "verified_on": {
     "linux": [
-     "live-dav"
-    ],
-    "windows": [
      "live-dav"
     ]
    }
@@ -545,7 +421,7 @@
   {
    "name": "Amazon S3",
    "status": "partial",
-   "notes": "AWS Signature Version 4 signing over curl (AWS4-HMAC-SHA256, pinned to botocore's vectors in the unit suite), s3:// session URLs with region from AWS_REGION, AWS_DEFAULT_REGION, the hostname (s3.<region>.amazonaws.com or .com.cn) or us-east-1, and path-style bucket access: ListBuckets, ListObjectsV2 with delimiter and continuation, HEAD stat, get with range resume and Last-Modified preservation, PutObject for small objects, multipart uploads for files over 16 MiB (8 MiB minimum parts, scaled to stay within 10,000 parts), directory markers with bucket-aware mkdir/rmdir, CopyObject for cp and copy-plus-delete for rename (multipart copy is not implemented), and explicit refusal of unsigned or wrongly signed requests. On a handled failure the client attempts to abort the multipart upload; interrupted uploads restart from the first part and are not resumable. The live TLS mock re-derives signatures and checks multipart initiation, parts, ETags, completion, CopyObject, embedded HTTP-200 Error bodies, and abort cleanup. Evidence is Linux-only. Not implemented: ACLs, versioning, storage classes, SSE options, object metadata beyond content, and a Windows functional claim.",
+   "notes": "AWS Signature Version 4 signing over curl (AWS4-HMAC-SHA256, pinned to botocore's vectors in the unit suite), s3:// session URLs with region from AWS_REGION, AWS_DEFAULT_REGION, the hostname (s3.<region>.amazonaws.com or .com.cn) or us-east-1, and path-style bucket access: ListBuckets, ListObjectsV2 with delimiter and continuation, HEAD stat, get with range resume and Last-Modified preservation, PutObject for small objects, multipart uploads for files over 16 MiB (8 MiB minimum parts, scaled to stay within 10,000 parts), directory markers with bucket-aware mkdir/rmdir, CopyObject for cp and copy-plus-delete for rename (multipart copy is not implemented), and explicit refusal of unsigned or wrongly signed requests. On a handled failure the client attempts to abort the multipart upload; interrupted uploads restart from the first part and are not resumable. The live TLS mock re-derives signatures and checks multipart initiation, parts, ETags, completion, CopyObject, embedded HTTP-200 Error bodies, and abort cleanup. Not implemented: ACLs, versioning, storage classes, SSE options and object metadata beyond content.",
    "verified_on": {
     "linux": [
      "unit",
@@ -556,30 +432,23 @@
   {
    "name": "Transfers",
    "status": "partial",
-   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live on both platforms. S3 multipart uploads report progress between completed parts; generic curl transfers still lack in-flight per-file progress. Interrupted S3 multipart uploads restart from part one rather than resuming remote upload IDs.",
+   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live. S3 multipart uploads report progress between completed parts; generic curl transfers still lack in-flight per-file progress. Interrupted S3 multipart uploads restart from part one rather than resuming remote upload IDs.",
    "verified_on": {
     "linux": [
      "unit",
      "live-sftp",
      "manual"
-    ],
-    "windows": [
-     "unit"
     ]
    }
   },
   {
    "name": "Synchronization",
    "status": "partial",
-   "notes": "Planner with direction, -criteria= (upstream's 'none', 'either' and 'both', or a list of 'time', 'size' and 'checksum'), -filemask=, -delete/-nodelete (option synchdelete as the default), -mirror (any difference resolves toward the source; rejected with 'both'), -transfer=binary|ascii|automatic applied to planned transfers, -preview, -nonrecursive, -interval=, -count= and keepuptodate -continue; 'both' keeps a state record to tell changes from conflicts and refuses the criteria that record cannot honour ('checksum', 'none'). '-criteria=checksum' reads both files - the server's checksum when the transport can ask for it, a downloaded copy otherwise - and a file that cannot be hashed refuses the plan instead of passing for equal; verified live against a server without the extension. Verified live. Linux inotify and Windows ReadDirectoryChangesW provide recursive local-change watchers for keepuptodate, whose local-to-remote direction and native watcher assertion passed in Windows MSVC CI on 2026-10-15. Missing: path exclusions and upstream's conflict resolution UI; planned transfers stage through '.filepart' like get/put when the resume setting and the transfer mode allow it.",
+   "notes": "Planner with direction, -criteria= (upstream's 'none', 'either' and 'both', or a list of 'time', 'size' and 'checksum'), -filemask=, -delete/-nodelete (option synchdelete as the default), -mirror (any difference resolves toward the source; rejected with 'both'), -transfer=binary|ascii|automatic applied to planned transfers, -preview, -nonrecursive, -interval=, -count= and keepuptodate -continue; 'both' keeps a state record to tell changes from conflicts and refuses the criteria that record cannot honour ('checksum', 'none'). '-criteria=checksum' reads both files - the server's checksum when the transport can ask for it, a downloaded copy otherwise - and a file that cannot be hashed refuses the plan instead of passing for equal; verified live against a server without the extension. Verified live. A recursive inotify watcher provides keepuptodate's local-change notification, whose local-to-remote direction and watcher assertion the live WebDAV suite passes. Missing: path exclusions and upstream's conflict resolution UI; planned transfers stage through '.filepart' like get/put when the resume setting and the transfer mode allow it.",
    "verified_on": {
     "linux": [
      "unit",
      "manual",
-     "live-dav"
-    ],
-    "windows": [
-     "script",
      "live-dav"
     ]
    }
@@ -593,25 +462,19 @@
      "script",
      "unit",
      "live-sftp"
-    ],
-    "windows": [
-     "script"
     ]
    }
   },
   {
    "name": "Security/authentication",
    "status": "partial",
-   "notes": "POSIX password/key/agent and host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration is in place under upstream's setting names - SOCKS 4 and 5, HTTP CONNECT, a telnet command or a local command through the PuTTY core, with its DNS, localhost and exclude-list policy - and the curl protocols translate the same settings to --proxy/--proxy-user/--noproxy, refusing a telnet or local-command proxy they cannot run; a proxy password is masked in the echo and in the action log. What the curl path cannot express is ProxyLocalhost=0: curl proxies every host, localhost included. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
+   "notes": "Password, private-key and ssh-agent authentication and the host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration is in place under upstream's setting names - SOCKS 4 and 5, HTTP CONNECT, a telnet command or a local command through the PuTTY core, with its DNS, localhost and exclude-list policy - and the curl protocols translate the same settings to --proxy/--proxy-user/--noproxy, refusing a telnet or local-command proxy they cannot run; a proxy password is masked in the echo and in the action log. What the curl path cannot express is ProxyLocalhost=0: curl proxies every host, localhost included. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
    "verified_on": {
     "linux": [
      "live-sftp",
      "live-dav",
      "script",
      "unit"
-    ],
-    "windows": [
-     "script"
     ]
    }
   },
@@ -633,9 +496,6 @@
     "linux": [
      "gui",
      "gui-search"
-    ],
-    "windows": [
-     "gui-search"
     ]
    }
   },
@@ -645,9 +505,6 @@
    "notes": "Console scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters (%1%..%9% via -parameter), %TIMESTAMP% with relative offsets and formats, %NAME% environment expansion, and an XML action log (-xmllog=) recording every command, result, message and transfer with passwords masked. Missing: the WinSCP .NET assembly and PowerShell APIs, and equivalence with upstream's log format, which our log mirrors in structure but does not copy; the expansions are not applied to -server input, where the graphical client quotes literal paths.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -665,7 +522,7 @@
   {
    "name": "Packaging/platforms",
    "status": "partial",
-   "notes": "Make/CMake and Debian/Windows builds exist; Windows curl may lack SSH protocols. Native builds do not establish functional parity."
+   "notes": "Linux is the only platform this client is built, packaged and tested on: the Makefile build, the CMake/CTest build and the Debian package all run in CI, which installs the .deb and starts the console and graphical clients from the installed paths. The Windows port that used to sit beside them was removed, so no claim in this inventory rests on a second platform. A build that passes does not establish functional parity."
   }
  ],
  "linuxscp_additions": [
@@ -677,12 +534,9 @@
   {
    "name": "savesession / rmsession",
    "status": "verified",
-   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key on save, '-rawsettings' stores the proxy settings with the site the same way - its password encrypted under the same key file, kept byte for byte across a re-save this machine cannot decrypt, dropped with the credential when ProxyMethod=None clears the proxy, and refused at open when the key file is gone rather than connected around - and a stored value that cannot be decrypted is preserved across an unrelated re-save. Covered by the script suite on both platforms.",
+   "notes": "Store and forget a named site in sessions.ini, which 'open <name>' and the graphical site manager then resolve. Upstream has no such script commands; it edits the configuration through its GUI and the .NET assembly. The password given with -password is encrypted under sessions.key on save, '-rawsettings' stores the proxy settings with the site the same way - its password encrypted under the same key file, kept byte for byte across a re-save this machine cannot decrypt, dropped with the credential when ProxyMethod=None clears the proxy, and refused at open when the key file is gone rather than connected around - and a stored value that cannot be decrypted is preserved across an unrelated re-save. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -690,12 +544,9 @@
   {
    "name": "sessions",
    "status": "verified",
-   "notes": "Stored-sites companion of 'session': lists the sites in sessions.ini with their URL and remote directory, opens one by name (as does 'open <name>'), and exports or imports the whole list (sessions export/import). Not an upstream command name - upstream keeps none of this in its script language - while 'session' itself now follows upstream's open-session semantics. Covered by the script suite on both platforms.",
+   "notes": "Stored-sites companion of 'session': lists the sites in sessions.ini with their URL and remote directory, opens one by name (as does 'open <name>'), and exports or imports the whole list (sessions export/import). Not an upstream command name - upstream keeps none of this in its script language - while 'session' itself now follows upstream's open-session semantics. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -703,12 +554,9 @@
   {
    "name": "show",
    "status": "verified",
-   "notes": "Recognised and answered with the reason: this build connects with the SFTP subsystem, so there is no shell state to show, and the command says so instead of failing as an unknown name. Not an upstream script command. Covered by the script suite on both platforms.",
+   "notes": "Recognised and answered with the reason: this build connects with the SFTP subsystem, so there is no shell state to show, and the command says so instead of failing as an unknown name. Not an upstream script command. Covered by the script suite.",
    "verified_on": {
     "linux": [
-     "script"
-    ],
-    "windows": [
      "script"
     ]
    }
@@ -716,13 +564,9 @@
   {
    "name": "del, md, sync, quit, end",
    "status": "verified",
-   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage. Covered on both platforms: sync, quit and end by the script suite, md and del by the live WebDAV suite.",
+   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage. Covered by the script suite (sync, quit, end) and the live WebDAV suite (md, del).",
    "verified_on": {
     "linux": [
-     "script",
-     "live-dav"
-    ],
-    "windows": [
      "script",
      "live-dav"
     ]
@@ -731,14 +575,11 @@
   {
    "name": "attr",
    "status": "verified",
-   "notes": "The key/value attribute block the console printed before 'stat' followed upstream: path, size, permissions, modified time, SizeBytes, ModifiedEpoch and owner lines, parsed by the graphical client (remote_stat). Not an upstream command - upstream's 'stat' prints the single listing line instead. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "notes": "The key/value attribute block the console printed before 'stat' followed upstream: path, size, permissions, modified time, SizeBytes, ModifiedEpoch and owner lines, parsed by the graphical client (remote_stat). Not an upstream command - upstream's 'stat' prints the single listing line instead. Covered by the live WebDAV and S3 suites.",
    "verified_on": {
     "linux": [
      "live-dav",
      "live-s3"
-    ],
-    "windows": [
-     "live-dav"
     ]
    }
   }

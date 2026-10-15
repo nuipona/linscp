@@ -47,9 +47,8 @@ char * DupString(const std::string & text)
     return copy;
 }
 
-/* curl is the transfer engine for every non-PuTTY protocol. On Windows
- * it is the curl.exe that ships with the system (Windows 10 1803+);
-  * FindExecutableOnPath applies PATHEXT there and PATH elsewhere. */
+/* curl is the transfer engine for every protocol the native PuTTY SFTP
+ * transport does not serve. */
 const std::string & CurlExecutable()
 {
     static const std::string executable = [] {
@@ -65,13 +64,13 @@ int RunCurl(const std::vector<std::string> & args, std::string & outStr,
     int rc = RunCapture(args, outStr, errStr);
     if (rc == -1 && errStr.empty())
     {
-        errStr = "Failed to run curl. Install curl (on Windows 10/11 it "
-            "ships as curl.exe) and make sure it is on PATH.";
+        errStr = "Failed to run curl. Install curl (apt install curl) "
+            "and make sure it is on PATH.";
     }
     else if (rc == 127 && FindExecutableOnPath("curl").empty())
     {
-        errStr = "curl was not found on PATH. Install curl (on Windows "
-            "10/11 it ships as curl.exe) to use this protocol.";
+        errStr = "curl was not found on PATH. Install curl (apt install "
+            "curl) to use this protocol.";
     }
     return rc;
 }
@@ -999,15 +998,11 @@ bool IsCurlEndpointUnreachable(int code)
 
 bool ProtocolClient::IsMultiProtocol(const std::string & proto)
 {
+    /* The protocols this curl backend serves. SFTP is not one of them:
+     * it goes through the native PuTTY engine. */
     std::string p = ToLower(proto);
-    if (p == "ftp" || p == "ftps" || p == "http" || p == "https" ||
-        p == "dav" || p == "webdav" || p == "s3" || p == "scp")
-    {
-        return true;
-    }
-    /* SFTP is served by the PuTTY engine where that exists, and by
-     * curl everywhere else (Windows). */
-    return p == "sftp" && !kHasNativeSftp;
+    return p == "ftp" || p == "ftps" || p == "http" || p == "https" ||
+        p == "dav" || p == "webdav" || p == "s3" || p == "scp";
 }
 
 void ProtocolClient::FreeNames(LscpNames * names)
@@ -1115,10 +1110,8 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
                 if (probe.curlCode == 1)
                 {
                     error += " This curl does not support the '" +
-                        options.protocol + "' protocol. The curl.exe built "
-                        "into Windows has no SFTP or SCP support; install a "
-                        "curl built with libssh2, or use a build with the "
-                        "native SFTP transport.";
+                        options.protocol + "' protocol; install a curl built "
+                        "with the support it needs (libssh2 for scp://).";
                 }
                 if (error.empty())
                 {
@@ -1168,15 +1161,14 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
     if (code == 1)
     {
         /*
-         * Worth saying in our own words: the curl.exe that ships with
-         * Windows 10 and 11 is built without SFTP and SCP support, so every
-         * command of such a session fails on it. A user cannot tell that
-         * apart from a broken host.
+         * Worth saying in our own words: a curl built without the protocol
+         * fails every command of such a session, and a user cannot tell that
+         * apart from a broken host. (SFTP is not at risk here: it goes
+         * through the native PuTTY transport.)
          */
         error += " This curl does not support the '" + options.protocol +
-            "' protocol. The curl.exe built into Windows has no SFTP or "
-            "SCP support; install a curl built with libssh2, or use a "
-            "build with the native SFTP transport.";
+            "' protocol; install a curl built with the support it needs "
+            "(libssh2 for scp://).";
     }
     if (error.empty())
     {

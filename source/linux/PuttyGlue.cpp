@@ -5,12 +5,12 @@
  * Three groups of functions live here:
  *
  *  1. The MPEXT callback-set seam. The fork's core was built for
- *     Windows, where every SSH session owns a `struct callback_set'
- *     reached through get_callback_set()/get_seat_callback_set()
- *     (MPEXT means "one callback queue per session"). The console
- *     client has a single session, so all of these return one
- *     statically allocated set; the vendored POSIX platform layer
- *     reaches it through linuxscp_posix_callback_set().
+ *     upstream's Windows front end, where every SSH session owns a
+ *     `struct callback_set' reached through get_callback_set() and
+ *     get_seat_callback_set() (MPEXT means "one callback queue per
+ *     session"). The console client has a single session, so all of
+ *     these return one statically allocated set; the vendored POSIX
+ *     platform layer reaches it through linuxscp_posix_callback_set().
  *
  *  2. Persistent storage (storage.h): saved sessions, the SSH host key
  *     cache and the random seed file, as plain files below the
@@ -226,9 +226,9 @@ std::string SessionPath(const char * name)
 /* ----------------------------------------------------------------------
  * UTF-8 conversions for BinarySink_put_mb_to_wc / put_wc_to_mb
  *
- * The Windows implementation understands the whole list of Windows code
- * pages; the POSIX front end works in UTF-8, which is both CP_UTF8 and
- * (on this platform) the default code page.
+ * The core's own platform implementation understands a whole list of
+ * code pages; this front end works in UTF-8, which is both CP_UTF8 and
+ * the default code page.
  */
 
 bool IsUtf8CodePage(int codepage)
@@ -755,10 +755,10 @@ void linuxscp_critical_section_leave(CRITICAL_SECTION * cs)
     pthread_mutex_unlock(cs);
 }
 
-/* The SSH local version string, sent in the version exchange. In the
- * Windows build this comes from utils/version.c; there it is left out of
- * FORK_BUILD, so the front end provides it. ssh.h declares it without
- * 'const' when MPEXT is set. */
+/* The SSH local version string, sent in the version exchange. Upstream
+ * provides it in utils/version.c, which FORK_BUILD leaves out, so the
+ * front end provides it. ssh.h declares it without 'const' when MPEXT is
+ * set. */
 char sshver[] = "LinSCP-1.0";
 
 /* Connection sharing is supported by the vendored unix/sharing.c. */
@@ -789,7 +789,8 @@ void ldisc_echoedit_update(Ldisc * ldisc)
 
 const char * in_memory_key_data(const Filename * fn)
 {
-    /* Only the Windows build can embed a private key in the binary. */
+    /* No private key is embedded in this binary. */
+    (void)fn;
     return NULL;
 }
 

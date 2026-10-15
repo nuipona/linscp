@@ -8,33 +8,14 @@
 #include <filesystem>
 #include <system_error>
 
-#if defined(_WIN32)
-#include <direct.h>
-#include <io.h>
-#include <sys/stat.h>
-#else
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 namespace linuxscp {
 
 namespace {
 
-#if defined(_WIN32)
-/* Internal strings are UTF-8; std::filesystem wants UTF-8 paths on
- * Windows through u8path. */
-std::filesystem::path ToPath(const std::string & path)
-{
-    return std::filesystem::u8path(path);
-}
-
-std::string FromPath(const std::filesystem::path & path)
-{
-    return path.u8string();
-}
-#else
 std::filesystem::path ToPath(const std::string & path)
 {
     return std::filesystem::path(path);
@@ -44,13 +25,11 @@ std::string FromPath(const std::filesystem::path & path)
 {
     return path.string();
 }
-#endif
 
 bool LocalNameMatches(const std::string & mask, const std::string & name)
 {
-    /* Windows volumes do not distinguish case; POSIX ones do. */
-    return kIsWindows ? MatchesMaskInsensitive(mask, name) :
-        MatchesMask(mask, name);
+    /* Local file systems here distinguish case, so masks do too. */
+    return MatchesMask(mask, name);
 }
 
 } // namespace
@@ -58,16 +37,6 @@ bool LocalNameMatches(const std::string & mask, const std::string & name)
 LocalFileInfo StatLocal(const std::string & path)
 {
     LocalFileInfo result;
-#if defined(_WIN32)
-    struct _stat64 st;
-    if (_stat64(path.c_str(), &st) != 0)
-    {
-        result.error = errno;
-        return result;
-    }
-    result.isDir = (st.st_mode & _S_IFMT) == _S_IFDIR;
-    result.isRegular = (st.st_mode & _S_IFMT) == _S_IFREG;
-#else
     struct stat st;
     if (stat(path.c_str(), &st) != 0)
     {
@@ -76,7 +45,6 @@ LocalFileInfo StatLocal(const std::string & path)
     }
     result.isDir = S_ISDIR(st.st_mode);
     result.isRegular = S_ISREG(st.st_mode);
-#endif
     result.error = 0;
     result.exists = true;
     result.size = static_cast<uint64_t>(st.st_size);
@@ -91,24 +59,6 @@ bool ListLocalDirectory(const std::string & dir, std::vector<std::string> & name
 {
     names.clear();
     error.clear();
-#if defined(_WIN32)
-    std::error_code ec;
-    std::filesystem::directory_iterator it(ToPath(dir), ec);
-    if (ec)
-    {
-        /* std::filesystem reports Win32 error codes here; translate the
-         * common one so callers see the same text as on POSIX. */
-        std::error_code probe;
-        errno = !std::filesystem::exists(ToPath(dir), probe) ? ENOENT : EIO;
-        error = LastSystemError();
-        return false;
-    }
-    for (const auto & entry : it)
-    {
-        names.push_back(FromPath(entry.path().filename()));
-    }
-    return true;
-#else
     DIR * handle = opendir(dir.c_str());
     if (handle == NULL)
     {
@@ -141,7 +91,6 @@ bool ListLocalDirectory(const std::string & dir, std::vector<std::string> & name
         return false;
     }
     return true;
-#endif
 }
 
 bool ExpandLocalWildcard(const std::string & path, std::vector<std::string> & names,
@@ -179,17 +128,10 @@ bool ExpandLocalWildcard(const std::string & path, std::vector<std::string> & na
 bool CreateLocalDirectory(const std::string & path, std::string & error)
 {
     error.clear();
-#if defined(_WIN32)
-    if (_mkdir(path.c_str()) == 0)
-    {
-        return true;
-    }
-#else
     if (mkdir(path.c_str(), 0777) == 0)
     {
         return true;
     }
-#endif
     if (errno != EEXIST)
     {
         error = LastSystemError();
@@ -230,7 +172,7 @@ bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error
     }
     std::string parent = LocalDirName(expanded);
     if (!parent.empty() && parent != expanded && parent != "." &&
-        !(parent.size() == 1 && parent[0] == kLocalPathSeparator))
+        !(parent.size() == 1 && parent[0] == '/'))
     {
         LocalFileInfo parentInfo = StatLocal(parent);
         if (!parentInfo.exists)
@@ -252,11 +194,7 @@ bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error
 bool SetLocalFileMode(const std::string & path, int mode, std::string & error)
 {
     error.clear();
-#if defined(_WIN32)
-    if (_chmod(path.c_str(), mode & 07777) != 0)
-#else
     if (chmod(path.c_str(), static_cast<mode_t>(mode & 07777)) != 0)
-#endif
     {
         error = LastSystemError();
         return false;
@@ -267,14 +205,7 @@ bool SetLocalFileMode(const std::string & path, int mode, std::string & error)
 bool RemoveLocalFile(const std::string & path, std::string & error)
 {
     error.clear();
-#if defined(_WIN32)
-    /* _unlink fails on read-only files where POSIX unlink succeeds;
-     * clear the read-only bit first, as Windows users expect. */
-    _chmod(path.c_str(), _S_IREAD | _S_IWRITE);
-    if (_unlink(path.c_str()) != 0)
-#else
     if (unlink(path.c_str()) != 0)
-#endif
     {
         error = LastSystemError();
         return false;

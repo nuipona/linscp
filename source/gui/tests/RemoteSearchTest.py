@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Offline tests for the GUI's bounded remote full-text search."""
 
-import os
 import pathlib
 import shlex
 import sys
@@ -53,7 +52,7 @@ class FakeTab:
                    "Permissions: %s" % permissions]
 
     def run_capture(self, command, timeout=120):
-        args = shlex.split(command, posix=not gui.IS_WINDOWS)
+        args = shlex.split(command)
         if len(args) < 4 or args[0] != "get" or args[1] != "-transfer=binary":
             return 1, [], ["Unexpected command"]
         remote, local = args[-2], args[-1].strip('"')
@@ -139,7 +138,6 @@ if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(RemoteSearchTests)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     failed = len(result.failures) + len(result.errors)
-    print("evidence: suite=gui-search platform=%s ran=%d skipped=%d failed=%d" %
-          ("windows" if os.name == "nt" else "linux", result.testsRun,
-           len(result.skipped), failed))
+    print("evidence: suite=gui-search platform=linux ran=%d skipped=%d failed=%d" %
+          (result.testsRun, len(result.skipped), failed))
     sys.exit(0 if result.wasSuccessful() else 1)

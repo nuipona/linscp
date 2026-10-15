@@ -14,8 +14,7 @@
  *     matched exactly first and then by an unambiguous prefix, so that
  *     'synch' means 'synchronize' while 'se' is refused as ambiguous (it could be 'session' or 'sessions').
  *
- * The functions never print and never touch the session, so the same code
- * works on POSIX and Windows.
+ * The functions never print and never touch the session.
  */
 
 #ifndef LINUXSCP_SCRIPTPARAMS_H
@@ -79,7 +78,7 @@ bool TryRelativeTime(const std::string & text, std::time_t base, bool add,
  *   %TIMESTAMP#fmt%   the same time formatted with 'fmt'; a signed relative
  *                     offset may precede the '#' ('%TIMESTAMP-1D#yyyymmdd%')
  *   %NAME%            an environment variable, left verbatim when it is not
- *                     set (like ExpandEnvironmentStrings on Windows)
+ *                     set
  *
  * Expansion is not recursive: the substituted text is never scanned again, so
  * a parameter cannot introduce further placeholders.

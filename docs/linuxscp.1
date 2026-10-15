@@ -1,4 +1,4 @@
-.TH LINUXSCP 1 "2026-10-13" "LinSCP 1.0" "LinSCP"
+.TH LINUXSCP 1 "2026-10-15" "LinSCP 1.0" "LinSCP"
 .SH NAME
 linuxscp \- secure file transfer client for the command line
 .SH SYNOPSIS
@@ -465,14 +465,11 @@ line with the number of uploads, downloads, deletions, conflicts and bytes.
 .TP
 .BI keepuptodate " [" options "] [" localdir " [" remotedir ]]"
 Reflect changes in the local directory on the remote directory, as upstream
-WinSCP does. The first synchronization pass runs immediately. On Linux, a
-recursive inotify watcher starts another pass when a local change is reported;
-Windows uses
-.B ReadDirectoryChangesW
-for the same purpose. The
+WinSCP does. The first synchronization pass runs immediately. A recursive
+inotify watcher starts another pass when a local change is reported. The
 .BI \-interval= seconds
 (10 by default, from 1 to 86400) also triggers a full comparison as a safety
-rescan; timer polling is used when native watch setup is unavailable. Give
+rescan; timer polling is used when the watch cannot be set up. Give
 .BI \-count= n
 to stop after
 .I n
@@ -628,8 +625,7 @@ refused in batch mode, and an
 .B sftp://
 or
 .B scp://
-session is required. Reading a key file is a POSIX\-build capability; the
-Windows build says so instead of doing nothing.
+session is required. Key files are read through the bundled PuTTY core.
 .TP
 .BI stat " file"
 Print the listing line of a remote path, the line
@@ -792,13 +788,14 @@ linuxscp \-gui
 .fi
 .RE
 .SH LIMITATIONS
-LinSCP does not implement full WinSCP feature parity. Native POSIX SFTP,
-basic recursive transfers/resume, synchronization, persistent sessions, a
-remote editor and a browser-based graphical interface exist. Other protocols
-use curl and depend on its build capabilities: the curl.exe built into Windows
-has no SFTP or SCP support, and an BopenP of such an endpoint then fails
-with that statement rather than reporting a session that cannot transfer
-anything. WebDAV provides PROPFIND listings, MOVE and single-file COPY, but
+LinSCP does not implement full WinSCP feature parity, and Linux is the only
+platform it is built, packaged and tested on. Native SFTP through the bundled
+PuTTY core, basic recursive transfers/resume, synchronization, persistent
+sessions, a remote editor and a browser-based graphical interface exist.
+Every other protocol uses curl and depends on its build capabilities: when the
+installed curl lacks the protocol, opening such an endpoint fails with that
+statement rather than reporting a session that cannot transfer anything.
+WebDAV provides PROPFIND listings, MOVE and single-file COPY, but
 not locking, dead properties or conditional requests. S3 uses Signature
 Version 4, supports object listing/stat/transfer and CopyObject, and uses
 multipart uploads for files larger than 16 MiB; an interrupted multipart
@@ -810,13 +807,11 @@ are implemented; the .NET/PowerShell automation API and broad GUI parity are
 not.
 .PP
 .B keepuptodate
-reflects local changes on the remote side and runs in the foreground. Linux
-uses a recursive inotify watcher and Windows uses
-.B ReadDirectoryChangesW
-plus a full comparison at each
+reflects local changes on the remote side and runs in the foreground. A
+recursive inotify watcher, plus a full comparison at each
 .BI \-interval=
-(10 seconds by default) as a safety rescan; a timer fallback is used when
-native watch setup fails. A non-interactive run must use
+(10 seconds by default) as a safety rescan, drives it; a timer fallback is
+used when the watch cannot be set up. A non-interactive run must use
 .BR \-count= .
 .PP
 The graphical interface is a local web application, not a remote one: it is

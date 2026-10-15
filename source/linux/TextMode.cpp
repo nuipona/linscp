@@ -80,8 +80,7 @@ bool IsAsciiFileName(const std::string & name)
         RemoteFileName(name) : LocalFileName(name);
     for (size_t i = 0; i < masks.size(); i++)
     {
-        if (MatchesMask(masks[i], leaf) ||
-            (kIsWindows && MatchesMaskInsensitive(masks[i], leaf)))
+        if (MatchesMask(masks[i], leaf))
         {
             return true;
         }

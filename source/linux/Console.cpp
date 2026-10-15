@@ -228,7 +228,7 @@ bool Console::SetLogFile(const std::string & path, std::string & error)
 {
     CloseLogFile();
     /* Binary append: the log also records raw traffic (LogTraffic),
-     * which text mode would corrupt on Windows. */
+     * which a text-mode stream would corrupt. */
     mLog = fopen(path.c_str(), "ab");
     if (mLog == NULL)
     {

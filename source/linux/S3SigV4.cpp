@@ -83,11 +83,7 @@ std::string NormalizeHeaderValue(std::string value)
 void Gmtime(unsigned long long epochSeconds, struct tm & out)
 {
     const time_t t = static_cast<time_t>(epochSeconds);
-#if defined(_WIN32)
-    gmtime_s(&out, &t);
-#else
     gmtime_r(&t, &out);
-#endif
 }
 
 } // namespace

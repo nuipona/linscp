@@ -75,10 +75,7 @@ class LocalEditorTests(unittest.TestCase):
         target = self.root / "target.txt"
         target.write_text("target\n", encoding="utf-8")
         link = self.root / "link.txt"
-        try:
-            link.symlink_to(target)
-        except (OSError, NotImplementedError):
-            self.skipTest("symbolic links are not available on this platform")
+        link.symlink_to(target)
         _, info, error = gui.read_local_text(str(link))
         self.assertEqual(error, "")
         ok, message, _ = gui.write_local_text(str(link), "new\n", info["mtime_ns"])
@@ -91,7 +88,6 @@ if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(LocalEditorTests)
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     failed = len(result.failures) + len(result.errors)
-    print("evidence: suite=gui-local-editor platform=%s ran=%d skipped=%d failed=%d" %
-          ("windows" if os.name == "nt" else "linux", result.testsRun,
-           len(result.skipped), failed))
+    print("evidence: suite=gui-local-editor platform=linux ran=%d skipped=%d failed=%d" %
+          (result.testsRun, len(result.skipped), failed))
     sys.exit(0 if result.wasSuccessful() else 1)

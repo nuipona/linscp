@@ -1,15 +1,13 @@
 /*
- * Platform: the operating-system services the front end needs, with a
- * POSIX and a Windows (Win32) implementation in Platform.cpp.
+ * Platform: the operating-system services the front end needs,
+ * implemented for Linux (POSIX) in Platform.cpp.
  *
  * Everything above this layer (PathUtil, LocalFs, Console, Script,
  * ProtocolClient, Session) is written against these helpers plus the
- * C++ standard library, so the same sources build on Linux and on
- * Windows. The PuTTY SFTP engine is the one exception: it needs the
- * PuTTY Unix platform layer (libs/putty/unix), so on Windows every
- * protocol -- SFTP included -- is served by the curl backend in
- * ProtocolClient.cpp (curl.exe ships with Windows 10/11 and supports
- * sftp/scp/ftp/ftps/http/https). See docs/windows.md.
+ * C++ standard library. SFTP is served by the native PuTTY engine
+ * (Session + SftpClient.c + PuttyGlue.cpp) over the PuTTY Unix platform
+ * layer in libs/putty/unix; the other protocols go through the curl
+ * backend in ProtocolClient.cpp.
  */
 
 #ifndef LINUXSCP_PLATFORM_H
@@ -21,23 +19,7 @@
 
 namespace linuxscp {
 
-#if defined(_WIN32)
-inline constexpr bool kIsWindows = true;
-#else
-inline constexpr bool kIsWindows = false;
-#endif
-
-/* True where the native PuTTY SFTP transport (Session + SftpClient.c +
- * PuttyGlue.cpp) is available. On Windows it is not, and SFTP goes
- * through ProtocolClient like every other protocol. */
-inline constexpr bool kHasNativeSftp = !kIsWindows;
-
-/* The preferred local directory separator ('\\' on Windows, '/'
- * elsewhere). Both separators are accepted in local paths on Windows. */
-inline constexpr char kLocalPathSeparator = kIsWindows ? '\\' : '/';
-
-/* One-time console setup (UTF-8 code page and binary standard streams
- * on Windows). Safe to call before anything is printed. */
+/* One-time console setup. Safe to call before anything is printed. */
 void InitConsole();
 
 bool StdInIsTerminal();
@@ -57,40 +39,38 @@ private:
     EchoOff & operator=(const EchoOff &);
 
     bool mActive;
-    int mFd;        /* POSIX: descriptor the saved mode belongs to */
-    void * mSaved;  /* POSIX: struct termios *, Windows: DWORD mode */
+    int mFd;        /* descriptor the saved mode belongs to */
+    void * mSaved;  /* the saved struct termios */
 };
 
-/* localtime_r (POSIX) / localtime_s (Windows) behind one signature. */
+/* localtime_r behind one signature. */
 bool LocalTime(std::time_t value, std::tm & result);
 
-/* The user's home directory (Windows: %USERPROFILE%, POSIX: $HOME),
- * or an empty string when it cannot be determined. */
+/* The user's home directory ($HOME), or an empty string when it cannot
+ * be determined. */
 std::string HomeDirectory();
 
 /* Per-user configuration directory of the application, without a
- * trailing separator (Windows: %APPDATA%\LinuxSCP, POSIX:
- * $XDG_CONFIG_HOME/LinuxSCP or ~/.config/LinuxSCP). Empty when no home
- * directory is known. The directory is not created. */
+ * trailing separator ($XDG_CONFIG_HOME/LinuxSCP or
+ * ~/.config/LinuxSCP). Empty when no home directory is known. The
+ * directory is not created. */
 std::string ConfigDirectory();
 
-/* The current user name (Windows: %USERNAME%, POSIX: $USER), or an
- * empty string. Used as the default login name by 'open'. */
+/* The current user name ($USER or $LOGNAME), or an empty string. Used
+ * as the default login name by 'open'. */
 std::string CurrentUserName();
 
-/* Directory for temporary files, without a trailing separator (Windows:
- * %TEMP%, POSIX: $TMPDIR or /tmp). Empty when none is known. */
+/* Directory for temporary files, without a trailing separator ($TMPDIR,
+ * $TEMP, $TMP or /tmp). Empty when none is known. */
 std::string TempDirectory();
 
 /* Creates 'path' with all missing parents, accessible to the current
- * user only (0700 on POSIX; the default ACL of the parent on Windows,
- * which is already per-user under the profile directory). Used for the
- * directories that hold a saved password or an editor temporary file. */
+ * user only (0700). Used for the directories that hold a saved password
+ * or an editor temporary file. */
 bool CreatePrivateDirectory(const std::string & path, std::string & error);
 
 /* Sets the permissions of 'path' so that only the current user can read
- * or write it (0600 on POSIX). Returns false when that is not possible;
- * on Windows the file keeps the default ACL of its directory. */
+ * or write it (0600). Returns false when that is not possible. */
 bool RestrictFileToUser(const std::string & path);
 
 /* Sleeps for the given number of milliseconds. */
@@ -129,17 +109,15 @@ unsigned long ParseListingDate(const std::string & monthName,
 int RunCapture(const std::vector<std::string> & args, std::string & out,
     std::string & err);
 
-/* Full path of an executable found on PATH (applying PATHEXT on
- * Windows), or an empty string. A name containing a path separator is
- * checked as given. */
+/* Full path of an executable found on PATH, or an empty string. A name
+ * containing a path separator is checked as given. */
 std::string FindExecutableOnPath(const std::string & name);
 
 /* Directory containing the running executable, or an empty string. */
 std::string ExecutableDirectory();
 
-/* Starts the graphical client (linuxscp-gui). On POSIX this replaces
- * the current process and only returns on failure; on Windows it
- * starts the GUI detached and returns true. */
+/* Starts the graphical client (linuxscp-gui). This replaces the current
+ * process and only returns on failure. */
 bool LaunchGuiApplication(std::string & error);
 
 /* Arguments of the system 'ssh' command client that open an interactive
@@ -157,10 +135,9 @@ std::vector<std::string> BuildSshArguments(const std::string & userName,
 int RunInteractive(const std::vector<std::string> & args, std::string & error);
 
 /* Opens an interactive terminal on the given server: the system ssh in a
- * desktop terminal emulator on POSIX (the terminal from LINUXSCP_TERMINAL,
- * otherwise the first of the common ones that is installed), or PuTTY,
- * Windows Terminal or the OpenSSH client on Windows. Returns false with
- * 'error' set when nothing could be started. */
+ * desktop terminal emulator (the terminal from LINUXSCP_TERMINAL,
+ * otherwise the first of the common ones that is installed). Returns
+ * false with 'error' set when nothing could be started. */
 bool LaunchTerminalForServer(const std::string & userName,
     const std::string & hostName, int portNumber,
     const std::string & privateKeyFile, std::string & error);
