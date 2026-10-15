@@ -18,7 +18,7 @@ class LocalEditorTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="linscp-local-edit-")
         self.root = pathlib.Path(self.temporary.name)
         self.path = self.root / "notes.txt"
-        self.path.write_text("first line\n", encoding="utf-8")
+        self.path.write_bytes(b"first line\n")
         self.tab = types.SimpleNamespace(local_dir=str(self.root))
 
     def tearDown(self):
@@ -39,7 +39,7 @@ class LocalEditorTests(unittest.TestCase):
     def test_save_refuses_a_stale_editor_version(self):
         _, info, error = gui.read_local_text(str(self.path))
         self.assertEqual(error, "")
-        self.path.write_text("changed elsewhere\n", encoding="utf-8")
+        self.path.write_bytes(b"changed elsewhere\n")
         os.utime(self.path, ns=(info["mtime_ns"] + 2_000_000_000,
                                 info["mtime_ns"] + 2_000_000_000))
         ok, message, _ = gui.write_local_text(
