@@ -27,11 +27,13 @@ binary: build
 	install -d $(destdir)/usr/share/applications
 	install -d $(destdir)/usr/share/pixmaps
 	install -d $(destdir)/usr/share/icons/hicolor/scalable/apps
-	install -d $(destdir)/usr/share/linuxscp/gui
+	install -d $(destdir)/usr/share/linuxscp/gui/web
 	install -d $(destdir)/DEBIAN
 	install -m 0755 source/linux/build/linuxscp $(destdir)/usr/bin/linuxscp
 	install -m 0755 source/gui/linuxscp-gui $(destdir)/usr/bin/linuxscp-gui
-	install -m 0644 source/gui/web/* $(destdir)/usr/share/linuxscp/gui/
+	install -m 0644 source/gui/linuxscp_gui.py source/gui/linscp_crypto.py \
+		$(destdir)/usr/share/linuxscp/gui/
+	install -m 0644 source/gui/web/* $(destdir)/usr/share/linuxscp/gui/web/
 	install -m 0644 debian/linuxscp.desktop $(destdir)/usr/share/applications/linuxscp.desktop
 	install -m 0644 debian/linuxscp.png $(destdir)/usr/share/pixmaps/linuxscp.png
 	install -m 0644 debian/linuxscp.svg $(destdir)/usr/share/icons/hicolor/scalable/apps/linuxscp.svg

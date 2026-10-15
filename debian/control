@@ -9,13 +9,16 @@ Rules-Requires-Root: no
 Package: linuxscp
 Architecture: any
 Depends: ${shlibs:Depends}, python3
-Description: graphical and console file transfer client
- LinSCP is a native open-source file transfer client inspired by WinSCP,
- providing both an interactive command-line interface and a dual-pane
- Commander graphical client
- (linuxscp-gui).
+Recommends: curl
+Description: graphical and console file transfer client for Linux
+ LinSCP is a native open-source file transfer client for Linux, inspired
+ by WinSCP. It provides an interactive command-line client (linuxscp) and
+ a dual-pane Commander graphical client (linuxscp-gui) in the browser.
  .
- Provides native SFTP, curl-backed transfers, basic transfer resume and
- recursive synchronization, public-key authentication, and a subset of
- WinSCP scripting. Protocol support depends on the backend; WebDAV and
- Amazon S3 support are incomplete. Full WinSCP feature parity is not provided.
+ SFTP is served by the bundled PuTTY core; scp, ftp, ftps, WebDAV and S3
+ go through curl, which is why it is recommended. The client provides
+ transfer resume and recursive synchronization, public-key, ssh-agent and
+ password authentication, host-key verification, stored sessions and a
+ subset of WinSCP scripting. Protocol support depends on the backend;
+ WebDAV and Amazon S3 support are incomplete. Full WinSCP feature parity
+ is not provided.
