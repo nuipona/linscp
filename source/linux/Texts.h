@@ -1,9 +1,9 @@
 /*
- * Texts: user visible strings of the POSIX front end.
+ * Texts: user visible strings of the front end.
  *
- * The Windows build keeps its strings in source/resource/TextsCore*.rc
- * so that they can be translated; the console client keeps the same
- * discipline with one module holding every message, in English.
+ * Upstream keeps its strings in resource files so that they can be
+ * translated; the console client keeps the same discipline with one
+ * module holding every message, in English.
  */
 
 #ifndef LINUXSCP_TEXTS_H

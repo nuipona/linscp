@@ -21,13 +21,12 @@ what a DAV filesystem has to answer:
   - an upload/download roundtrip with a checksum;
   - keepuptodate uploading local changes and waking on a nested file event.
 
-Unlike the SFTP and S3 suites this one needs no POSIX-only pieces: the
-client uses curl over plain HTTP and the server is the standard
-library, so the suite also runs where CTest runs - Windows included.
+The client uses curl over plain HTTP and the server is the standard
+library, so the suite needs nothing beyond Python and curl.
 
 Evidence convention (same as every other suite):
 
-    evidence: suite=live-dav platform=<sys> ran=N skipped=N failed=N
+    evidence: suite=live-dav platform=linux ran=N skipped=N failed=N
 """
 
 import hashlib
@@ -82,10 +81,11 @@ class LiveDavTests(unittest.TestCase):
     # -- the server ---------------------------------------------------------
     def start_server(self):
         env = dict(os.environ, LSCP_TEST_PORT="0")
+        # Its own process group, so that teardown can stop the server and
+        # anything it left behind without touching the test runner.
         popen_args = dict(env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.PIPE, text=True)
-        if os.name == "posix":
-            popen_args["start_new_session"] = True
+                          stderr=subprocess.PIPE, text=True,
+                          start_new_session=True)
         self.server = subprocess.Popen(
             [sys.executable, str(HERE / "TestDavServer.py")], **popen_args)
         self.port = None
@@ -125,9 +125,8 @@ class LiveDavTests(unittest.TestCase):
         env = dict(os.environ, LSCP_TEST_PORT="0", LSCP_TEST_PROXY_KIND=kind,
                    LSCP_TEST_PROXY_AUTH=credentials)
         popen_args = dict(env=env, stdout=subprocess.PIPE,
-                          stderr=subprocess.STDOUT, text=True)
-        if os.name == "posix":
-            popen_args["start_new_session"] = True
+                          stderr=subprocess.STDOUT, text=True,
+                          start_new_session=True)
         proxy = subprocess.Popen(
             [sys.executable, str(HERE / "TestProxyServer.py")], **popen_args)
         lines = []
@@ -154,12 +153,9 @@ class LiveDavTests(unittest.TestCase):
 
     def stop_proxy(self, proxy, reader):
         if proxy.poll() is None:
-            if os.name == "posix":
-                try:
-                    os.killpg(os.getpgid(proxy.pid), signal.SIGTERM)
-                except (OSError, ProcessLookupError):
-                    proxy.terminate()
-            else:
+            try:
+                os.killpg(os.getpgid(proxy.pid), signal.SIGTERM)
+            except (OSError, ProcessLookupError):
                 proxy.terminate()
             try:
                 proxy.wait(timeout=10)
@@ -218,8 +214,8 @@ class LiveDavTests(unittest.TestCase):
         """mkdir, put and then two levels of listing: the directory as
         a directory, the object with its byte count and date."""
         source = self.root / "hello.txt"
-        # Bytes, not write_text: Windows write_text would translate LF to
-        # CRLF and change the size this test asserts on both platforms.
+        # Bytes, not write_text: the size this test asserts on is the size
+        # of exactly these bytes.
         source.write_bytes(b"hello dav world\n")
         result = self.run_script(
             "mkdir /docs ; mkdir /docs/2026 ; "
@@ -294,8 +290,6 @@ class LiveDavTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(downloaded.read_bytes(), payload)
 
-    @unittest.skipUnless(sys.platform.startswith("linux") or os.name == "nt",
-                         "native directory notifications are unavailable")
     def test_keepuptodate_wakes_on_a_local_change(self):
         """A completed file arrival wakes the native watcher immediately
         instead of waiting for its 30-second safety-rescan interval."""
@@ -682,8 +676,8 @@ def run_and_report():
     suite = unittest.defaultTestLoader.loadTestsFromModule(
         sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
-    line = ("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
-            (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
+    line = ("evidence: suite=%s platform=linux ran=%d skipped=%d failed=%d" %
+            (SUITE_NAME, result.testsRun, len(result.skipped),
              len(result.failures) + len(result.errors)))
     if not result.testsRun and result.skipped:
         reasons = "; ".join(sorted(set(str(reason)[:160]

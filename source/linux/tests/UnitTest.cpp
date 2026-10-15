@@ -76,9 +76,6 @@ using namespace linuxscp;
 
 void SetEnvVar(const char * name, const char * value)
 {
-#if defined(_WIN32)
-    _putenv_s(name, value != NULL ? value : "");
-#else
     if (value != NULL)
     {
         setenv(name, value, 1);
@@ -87,7 +84,6 @@ void SetEnvVar(const char * name, const char * value)
     {
         unsetenv(name);
     }
-#endif
 }
 
 std::string MakeTempDirectory()
@@ -105,11 +101,7 @@ std::string MakeTempDirectory()
              std::to_string(static_cast<unsigned long>(time(NULL))));
         if (std::filesystem::create_directory(candidate, ec))
         {
-#if defined(_WIN32)
-            return candidate.u8string();
-#else
             return candidate.string();
-#endif
         }
         ec.clear();
     }
@@ -119,11 +111,7 @@ std::string MakeTempDirectory()
 bool RemoveDirectoryQuiet(const std::string & path)
 {
     std::error_code ec;
-#if defined(_WIN32)
-    return std::filesystem::remove(std::filesystem::u8path(path), ec) && !ec;
-#else
     return std::filesystem::remove(std::filesystem::path(path), ec) && !ec;
-#endif
 }
 
 std::string Words(const std::vector<std::string> & words)
@@ -145,16 +133,7 @@ void TestSplitCommandLine()
         "[get][two words.txt][dest]");
     CHECK_EQ(Words(SplitCommandLine("get \"two words.txt\" dest")),
         "[get][two words.txt][dest]");
-#if defined(_WIN32)
-    /* A backslash is a path separator on Windows, never an escape:
-     * C:\dir\file.txt must survive word splitting untouched. */
-    CHECK_EQ(Words(SplitCommandLine("put C:\\dir\\file.txt .")),
-        "[put][C:\\dir\\file.txt][.]");
-    CHECK_EQ(Words(SplitCommandLine("get 'two words.txt' dest")),
-        "[get][two words.txt][dest]");
-#else
     CHECK_EQ(Words(SplitCommandLine("get a\\ b.txt")), "[get][a b.txt]");
-#endif
     /* An unterminated quote still yields the word read so far. */
     CHECK_EQ(Words(SplitCommandLine("get 'unterminated")), "[get][unterminated]");
     /* An empty quoted argument is a word of its own. */
@@ -218,7 +197,6 @@ void TestLocalPaths()
         CHECK_EQ(ExpandTilde("~user"), "~user");
     }
     CHECK_EQ(ExpandTilde(""), "");
-#if !defined(_WIN32)
     CHECK_EQ(ExpandTilde("/tmp"), "/tmp");
     const char * oldHomeValue = getenv("HOME");
     const bool hadHome = oldHomeValue != NULL;
@@ -243,44 +221,6 @@ void TestLocalPaths()
     }
     CHECK_FALSE(IsLocalAbsolutePath("tmp/file"));
     CHECK_TRUE(IsLocalAbsolutePath("/tmp"));
-#else
-    /* Drive-letter, rooted and UNC paths are absolute; drive-relative
-     * and plain relative paths are not. */
-    CHECK_TRUE(IsLocalAbsolutePath("C:\\dir\\file.txt"));
-    CHECK_TRUE(IsLocalAbsolutePath("C:/dir/file.txt"));
-    CHECK_TRUE(IsLocalAbsolutePath("\\\\server\\share\\file.txt"));
-    CHECK_TRUE(IsLocalAbsolutePath("\\dir\\file.txt"));
-    CHECK_FALSE(IsLocalAbsolutePath("C:file.txt"));
-    CHECK_FALSE(IsLocalAbsolutePath("dir\\file.txt"));
-
-    CHECK_EQ(LocalDirName("C:\\tmp\\file.txt"), "C:\\tmp");
-    CHECK_EQ(LocalDirName("C:\\file.txt"), "C:\\");
-    CHECK_EQ(LocalDirName("C:/tmp/file.txt"), "C:/tmp");
-    CHECK_EQ(LocalDirName("file.txt"), ".");
-    CHECK_EQ(LocalFileName("C:\\tmp\\file.txt"), "file.txt");
-    CHECK_EQ(LocalFileName("C:\\tmp\\"), "tmp");
-    CHECK_EQ(JoinLocalPath("C:\\tmp", "a.txt"), "C:\\tmp\\a.txt");
-    CHECK_EQ(JoinLocalPath("C:\\tmp\\", "a.txt"), "C:\\tmp\\a.txt");
-    CHECK_EQ(JoinLocalPath("C:\\tmp", "D:\\other.txt"), "D:\\other.txt");
-    CHECK_EQ(JoinLocalPath("C:\\tmp", "\\rooted.txt"), "C:\\rooted.txt");
-
-    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "sub"), "C:\\home\\user\\sub");
-    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "..\\other"), "C:\\home\\other");
-    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "D:\\etc"), "D:\\etc");
-    CHECK_EQ(ResolveLocalPath("C:\\home\\user", "."), "C:\\home\\user");
-    /* Forward slashes are accepted and normalised. */
-    CHECK_EQ(ResolveLocalPath("C:/home/user", "sub"), "C:\\home\\user\\sub");
-
-    /* '~' follows %USERPROFILE% on Windows. */
-    const char * oldProfile = getenv("USERPROFILE");
-    const bool hadProfile = oldProfile != NULL;
-    const std::string savedProfile = hadProfile ? oldProfile : "";
-    SetEnvVar("USERPROFILE", "C:\\Users\\test");
-    CHECK_EQ(ExpandTilde("~"), "C:\\Users\\test");
-    CHECK_EQ(ExpandTilde("~\\docs"), "C:\\Users\\test\\docs");
-    CHECK_EQ(ExpandTilde("~/docs"), "C:\\Users\\test\\docs");
-    SetEnvVar("USERPROFILE", hadProfile ? savedProfile.c_str() : NULL);
-#endif
 }
 
 void TestMasks()
@@ -310,9 +250,6 @@ void TestMasks()
 
 void TestMaskCase()
 {
-    CHECK_TRUE(MatchesMaskInsensitive("*.TXT", "a.txt"));
-    CHECK_TRUE(MatchesMaskInsensitive("*.txt", "A.TxT"));
-    CHECK_FALSE(MatchesMaskInsensitive("*.txt", "a.tar"));
     CHECK_FALSE(MatchesMask("*.TXT", "a.txt"));
 }
 
@@ -321,25 +258,11 @@ void TestPlatformServices()
     /* Process capture returns the exit code and both streams. */
     std::string out;
     std::string err;
-#if defined(_WIN32)
-    std::string cmd = FindExecutableOnPath("cmd");
-    CHECK_TRUE(!cmd.empty());
-    if (!cmd.empty())
-    {
-        std::vector<std::string> args;
-        args.push_back(cmd);
-        args.push_back("/c");
-        args.push_back("echo hello-windows");
-        CHECK_TRUE(RunCapture(args, out, err) == 0);
-        CHECK_TRUE(out.find("hello-windows") != std::string::npos);
-    }
-#else
     std::vector<std::string> args;
     args.push_back("echo");
     args.push_back("hello-posix");
     CHECK_TRUE(RunCapture(args, out, err) == 0);
     CHECK_TRUE(out.find("hello-posix") != std::string::npos);
-#endif
     /* A missing program is a start failure, not a crash. */
     std::vector<std::string> missing;
     missing.push_back("linuxscp-no-such-program-xyz");
@@ -354,13 +277,8 @@ void TestDateParsing()
      * The listing date is read in local time. Pin the zone so that the
      * expected values do not depend on where the tests run.
      */
-#if defined(_WIN32)
-    _putenv_s("TZ", "UTC");
-    _tzset();
-#else
     setenv("TZ", "UTC", 1);
     tzset();
-#endif
 
     /* curl prints Last-Modified in GMT. */
     CHECK_EQ(std::to_string(ParseHttpDate("Tue, 13 Oct 2026 05:21:00 GMT")),
@@ -569,8 +487,7 @@ void TestLocalFs()
     CHECK_TRUE(error.empty());
     CHECK_TRUE(CreateLocalDirectory(dir + "/sub", error));
 
-    /* Binary mode: the size check below is about six bytes, and a text
-     * stream would turn the newline into CRLF on Windows. */
+    /* Binary mode: the size check below counts six bytes. */
     FILE * file = fopen((dir + "/one.txt").c_str(), "wb");
     CHECK_TRUE(file != NULL);
     if (file != NULL)
@@ -2163,11 +2080,7 @@ void TestEditorHelpers()
     (void)text;
     (void)binary;
 
-#if defined(_WIN32)
-    const std::string program = FindExecutableOnPath("cmd");
-#else
     const std::string program = "/bin/echo";
-#endif
     if (!program.empty())
     {
         const std::vector<std::string> words = ResolveEditorCommand(program, error);
@@ -2524,13 +2437,8 @@ void TestTimestampFormatting()
 void TestRelativeTime()
 {
     /* The day arithmetic below assumes no DST shift; UTC makes that true. */
-#if defined(_WIN32)
-    _putenv_s("TZ", "UTC");
-    _tzset();
-#else
     setenv("TZ", "UTC", 1);
     tzset();
-#endif
     const std::time_t base = MakeLocalTime(2020, 6, 15, 12);   /* noon */
     std::time_t result = 0;
     std::string error;

@@ -4,10 +4,8 @@
 
 #include <cstdio>
 
-#if !defined(_WIN32)
 /* from source/putty/utils/version.c (puttyexp.h) */
 extern "C" const char * get_putty_version(void);
-#endif
 
 namespace linuxscp {
 namespace Texts {
@@ -27,13 +25,9 @@ std::string Join(const std::string & left, const std::string & right)
 std::string VersionLine()
 {
     std::string result = std::string(ProductName) + " " + ProductVersion;
-#if defined(_WIN32)
-    result += " (Windows, curl transfer backend)";
-#else
     result += " (PuTTY core ";
     result += get_putty_version();
     result += ")";
-#endif
     return result;
 }
 
@@ -86,8 +80,8 @@ std::string Usage()
 "                    -nonrecursive -filemask=MASK\n"
 "                    -criteria=time|size|checksum|either|both|none\n"
 "  keepuptodate [LOCAL [REMOTE]] [switches]\n"
-"                    reflect local changes on the remote side; Linux and\n"
-"                    Windows watch locally, others poll -interval=SECS\n"
+"                    reflect local changes on the remote side; the local\n"
+"                    tree is watched, -interval=SECS polls instead\n"
 "                    (-count=N bounds the passes; Ctrl-C stops watching)\n"
 "  edit FILE         edit a remote file in an external editor\n"
 "                    (-force, -keep, -editor=COMMAND)\n"

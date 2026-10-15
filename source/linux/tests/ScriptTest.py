@@ -1,4 +1,4 @@
-"""Server-free CLI regression tests, shared by Linux and Windows builds."""
+"""Server-free CLI regression tests for the Linux client."""
 import os
 import pathlib
 import subprocess
@@ -402,10 +402,8 @@ class ScriptTests(unittest.TestCase):
         self.assertTrue(keyfile.is_file())
         key = base64.b64decode(keyfile.read_text().strip())
         self.assertEqual(len(key), 32)
-        if os.name == "posix":
-            # Group or world readable is a bug, whatever the umask was.
-            # Windows has no permission bits to compare against.
-            self.assertEqual(keyfile.stat().st_mode & 0o077, 0)
+        # Group or world readable is a bug, whatever the umask was.
+        self.assertEqual(keyfile.stat().st_mode & 0o077, 0)
 
         # The listing shows the session, never the password.
         result = self.run_commands("sessions")
@@ -721,15 +719,9 @@ class ScriptTests(unittest.TestCase):
         The curl-backed protocols have no connection of their own - every
         command runs its own transfer - so a dead port would otherwise be
         reported as a successful open and each command would fail on its own.
-        Only the native engine is checked, because on Windows curl refuses
-        'sftp' and 'scp' before it ever reaches the port (the curl.exe built
-        into Windows has neither protocol), so a failure there would prove
-        nothing about reachability. The classification of an endpoint that
-        does answer is covered for both platforms by
+        The classification of an endpoint that does answer is covered by
         test_open_accepts_a_server_that_refuses_the_start_directory.
         """
-        if os.name != "posix":
-            self.skipTest("no SFTP-capable curl on this platform to test with")
         for protocol in ("sftp", "scp"):
             with self.subTest(protocol=protocol):
                 result = self.run_commands(
@@ -983,8 +975,8 @@ def run_and_report():
     """
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
-    line = ("evidence: suite=%s platform=%s ran=%d skipped=%d failed=%d" %
-            (SUITE_NAME, sys.platform, result.testsRun, len(result.skipped),
+    line = ("evidence: suite=%s platform=linux ran=%d skipped=%d failed=%d" %
+            (SUITE_NAME, result.testsRun, len(result.skipped),
              len(result.failures) + len(result.errors)))
     if not result.testsRun and result.skipped:
         # A suite that ran nothing is not a pass, and 'skipped' alone does not

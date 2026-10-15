@@ -31,13 +31,9 @@
 #include "PathUtil.h"
 #include "Platform.h"
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#endif
 
 namespace linuxscp {
 
@@ -276,22 +272,6 @@ bool Base64Decode(const std::string & text, std::string & data)
 
 bool RandomBytes(void * buffer, size_t length)
 {
-#if defined(_WIN32)
-    /* RtlGenRandom (SystemFunction036), loaded dynamically: it needs
-     * neither a header of its own nor an extra import library. */
-    typedef BOOLEAN (WINAPI * RtlGenRandomFn)(PVOID, ULONG);
-    static HMODULE advapi = LoadLibraryA("advapi32.dll");
-    if (advapi != NULL)
-    {
-        RtlGenRandomFn fn = reinterpret_cast<RtlGenRandomFn>(
-            GetProcAddress(advapi, "SystemFunction036"));
-        if (fn != NULL && fn(buffer, static_cast<ULONG>(length)))
-        {
-            return true;
-        }
-    }
-    return false;
-#else
     FILE * file = fopen("/dev/urandom", "rb");
     if (file == NULL)
     {
@@ -300,7 +280,6 @@ bool RandomBytes(void * buffer, size_t length)
     const size_t got = fread(buffer, 1, length, file);
     fclose(file);
     return got == length;
-#endif
 }
 
 void DeriveKeys(const std::string & master, unsigned char * encKey,
@@ -412,25 +391,6 @@ KeyReadResult ReadKeyFile(const std::string & path, std::string & key,
 int CreateKeyFileExclusive(const std::string & path,
     const std::string & content, std::string & error)
 {
-#if defined(_WIN32)
-    HANDLE handle = CreateFileA(path.c_str(), GENERIC_WRITE, 0, NULL,
-        CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (handle == INVALID_HANDLE_VALUE)
-    {
-        return GetLastError() == ERROR_FILE_EXISTS ? 1 : -1;
-    }
-    DWORD written = 0;
-    const BOOL ok = WriteFile(handle, content.data(),
-        static_cast<DWORD>(content.size()), &written, NULL);
-    CloseHandle(handle);
-    if (!ok || written != content.size())
-    {
-        error = "The encryption key file '" + path + "' cannot be written.";
-        return -1;
-    }
-    RestrictFileToUser(path);
-    return 0;
-#else
     const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
     if (fd < 0)
     {
@@ -453,7 +413,6 @@ int CreateKeyFileExclusive(const std::string & path,
     close(fd);
     RestrictFileToUser(path);
     return 0;
-#endif
 }
 
 /* The key for encrypting: read it, or create it with fresh randomness.

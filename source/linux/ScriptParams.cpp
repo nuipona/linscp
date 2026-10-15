@@ -656,7 +656,7 @@ bool ExpandScriptParameters(const std::string & line,
         std::string value;
         if (!LookupEnvironmentVariable(name, value))
         {
-            /* Unset: kept verbatim, as on Windows. */
+            /* Unset: kept verbatim, as upstream does. */
             position = close + 1;
             continue;
         }

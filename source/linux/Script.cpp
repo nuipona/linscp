@@ -13,34 +13,17 @@
 #include <map>
 #include <set>
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#elif defined(__linux__)
 #include <dirent.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/inotify.h>
 #include <sys/stat.h>
-#endif
 
-#if !defined(_WIN32)
 /* The public half of a key file, which only the bundled PuTTY core can
  * read on POSIX. */
 #include "PuttyCompat.h"
-#endif
 
-#if defined(_WIN32)
-#include <process.h>
-#define getpid _getpid
-#else
 #include <unistd.h>
-#endif
 
 #include "Console.h"
 #include "HashUtil.h"
@@ -62,54 +45,26 @@ const char * const kPartialExt = ".filepart";
  * this size is transferred through '.filepart' and can be continued. */
 const unsigned long long kDefaultResumeThreshold = 100ull * 1024;
 
-/* Native local-directory watchers wake keepuptodate on file changes; the
- * configured interval remains a full-rescan safety net. Linux uses inotify,
- * Windows uses ReadDirectoryChangesW, and other platforms poll on a timer. */
+/* A local-directory watcher wakes keepuptodate on file changes; the
+ * configured interval remains a full-rescan safety net, and timer polling
+ * is what is left when inotify cannot be set up. */
 class LocalChangeWatcher
 {
 public:
     LocalChangeWatcher()
-#if defined(__linux__)
         : mFd(-1), mAvailable(false)
-#elif defined(_WIN32)
-        : mDirectory(INVALID_HANDLE_VALUE), mEvent(NULL),
-          mRequestPending(false), mAvailable(false)
-#else
-        : mAvailable(false)
-#endif
     {}
 
     ~LocalChangeWatcher()
     {
-#if defined(__linux__)
         if (mFd >= 0)
         {
             close(mFd);
         }
-#elif defined(_WIN32)
-        if (mRequestPending && mDirectory != INVALID_HANDLE_VALUE)
-        {
-            /* The overlapped structure and buffer are members of this
-             * object; wait for cancellation to complete before destroying
-             * them. The watch is always issued and cancelled on this thread. */
-            CancelIo(mDirectory);
-            DWORD ignoredBytes = 0;
-            GetOverlappedResult(mDirectory, &mOverlapped, &ignoredBytes, TRUE);
-        }
-        if (mDirectory != INVALID_HANDLE_VALUE)
-        {
-            CloseHandle(mDirectory);
-        }
-        if (mEvent != NULL)
-        {
-            CloseHandle(mEvent);
-        }
-#endif
     }
 
     bool Start(const std::string & root)
     {
-#if defined(__linux__)
         mRoot = root;
         mFd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
         if (mFd < 0)
@@ -123,38 +78,12 @@ public:
             mFd = -1;
         }
         return mAvailable;
-#elif defined(_WIN32)
-        const std::wstring wideRoot = Utf8PathToWide(root);
-        if (wideRoot.empty())
-        {
-            return false;
-        }
-        mDirectory = CreateFileW(wideRoot.c_str(), FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL,
-            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-            NULL);
-        if (mDirectory == INVALID_HANDLE_VALUE)
-        {
-            return false;
-        }
-        mEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
-        if (mEvent == NULL)
-        {
-            return false;
-        }
-        mAvailable = IssueRead();
-        return mAvailable;
-#else
-        (void)root;
-        return false;
-#endif
     }
 
     bool Available() const { return mAvailable; }
 
     void WaitForChange(unsigned timeoutMilliseconds)
     {
-#if defined(__linux__)
         if (!mAvailable || mFd < 0)
         {
             return;
@@ -199,57 +128,9 @@ public:
             }
             remaining -= slice;
         }
-#elif defined(_WIN32)
-        unsigned remaining = timeoutMilliseconds;
-        if (!mAvailable || mDirectory == INVALID_HANDLE_VALUE || mEvent == NULL)
-        {
-            WaitUsingTimer(remaining);
-            return;
-        }
-        while (remaining > 0 && !Interrupted())
-        {
-            const unsigned slice = remaining < 250u ? remaining : 250u;
-            const DWORD ready = WaitForSingleObject(mEvent,
-                static_cast<DWORD>(slice));
-            if (ready == WAIT_TIMEOUT)
-            {
-                remaining -= slice;
-                continue;
-            }
-            if (ready != WAIT_OBJECT_0)
-            {
-                mAvailable = false;
-                WaitUsingTimer(remaining);
-                return;
-            }
-
-            DWORD bytesRead = 0;
-            const BOOL completed = GetOverlappedResult(mDirectory,
-                &mOverlapped, &bytesRead, FALSE);
-            mRequestPending = false;
-            if (!completed && GetLastError() != ERROR_NOTIFY_ENUM_DIR)
-            {
-                /* A failed watch still gets its full comparison pass now;
-                 * the next wait falls back to the configured timer. */
-                mAvailable = false;
-                return;
-            }
-            /* A zero-byte completion means the notification buffer overflowed;
-             * the full comparison below repairs the missed event. Re-arm first
-             * so changes during that comparison are queued for the next pass. */
-            if (!IssueRead())
-            {
-                mAvailable = false;
-            }
-            return;
-        }
-#else
-        (void)timeoutMilliseconds;
-#endif
     }
 
 private:
-#if defined(__linux__)
     bool AddDirectoryTree(const std::string & root, bool isRoot = false)
     {
         struct stat rootInfo;
@@ -392,75 +273,6 @@ private:
     std::string mRoot;
     std::map<int, std::string> mWatches;
     std::set<std::string> mWatchedPaths;
-#elif defined(_WIN32)
-    static std::wstring Utf8PathToWide(const std::string & path)
-    {
-        if (path.empty() || path.size() > 0x7fffffffu)
-        {
-            return std::wstring();
-        }
-        const int length = static_cast<int>(path.size());
-        int count = MultiByteToWideChar(CP_UTF8, 0, path.data(), length,
-            NULL, 0);
-        UINT codePage = CP_UTF8;
-        if (count <= 0)
-        {
-            /* Match the Windows local-path layer: tolerate a path typed in
-             * the legacy console code page when it is not valid UTF-8. */
-            codePage = CP_ACP;
-            count = MultiByteToWideChar(codePage, 0, path.data(), length,
-                NULL, 0);
-        }
-        if (count <= 0)
-        {
-            return std::wstring();
-        }
-        std::wstring result(static_cast<size_t>(count), L'\0');
-        if (MultiByteToWideChar(codePage, 0, path.data(), length,
-                &result[0], count) <= 0)
-        {
-            return std::wstring();
-        }
-        return result;
-    }
-
-    bool IssueRead()
-    {
-        ResetEvent(mEvent);
-        memset(&mOverlapped, 0, sizeof(mOverlapped));
-        mOverlapped.hEvent = mEvent;
-        const DWORD filter = FILE_NOTIFY_CHANGE_FILE_NAME |
-            FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_SIZE |
-            FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_ATTRIBUTES |
-            FILE_NOTIFY_CHANGE_CREATION;
-        const BOOL started = ReadDirectoryChangesW(mDirectory, mBuffer,
-            static_cast<DWORD>(sizeof(mBuffer)), TRUE, filter, NULL,
-            &mOverlapped, NULL);
-        if (!started && GetLastError() != ERROR_IO_PENDING)
-        {
-            mRequestPending = false;
-            return false;
-        }
-        mRequestPending = true;
-        return true;
-    }
-
-    void WaitUsingTimer(unsigned milliseconds)
-    {
-        while (milliseconds > 0 && !Interrupted())
-        {
-            const unsigned slice = milliseconds < 250u ? milliseconds : 250u;
-            SleepMilliseconds(slice);
-            milliseconds -= slice;
-        }
-    }
-
-    HANDLE mDirectory;
-    HANDLE mEvent;
-    OVERLAPPED mOverlapped;
-    alignas(DWORD) char mBuffer[64 * 1024];
-    bool mRequestPending;
-#endif
     bool mAvailable;
 };
 
@@ -2752,10 +2564,6 @@ bool Script::FinishStage(const TransferStage & stage, std::string & error)
 
     if (!stage.upload)
     {
-#if defined(_WIN32)
-        /* Windows rename does not replace an existing file. */
-        remove(stage.finalPath.c_str());
-#endif
         if (rename(stage.partPath.c_str(), stage.finalPath.c_str()) != 0)
         {
             error = LastSystemError();
@@ -4221,12 +4029,6 @@ bool IsFileSystemRoot(const std::string & path)
     {
         trimmed.erase(trimmed.size() - 1);
     }
-#if defined(_WIN32)
-    if (trimmed.size() == 2 && trimmed[1] == ':')
-    {
-        return true; /* C: */
-    }
-#endif
     if (trimmed.empty())
     {
         return true;
@@ -6136,9 +5938,8 @@ std::string MakeTempPath(const char * suffix)
     for (unsigned int attempt = 0; attempt < 64; attempt++)
     {
         char buffer[512];
-        snprintf(buffer, sizeof(buffer), "%s%slinuxscp-%ld-%s-%lu",
-            dir.c_str(), kIsWindows ? "\\" : "/",
-            static_cast<long>(getpid()), suffix, ++counter);
+        snprintf(buffer, sizeof(buffer), "%s/linuxscp-%ld-%s-%lu",
+            dir.c_str(), static_cast<long>(getpid()), suffix, ++counter);
         const std::string path(buffer);
         FILE * probe = fopen(path.c_str(), "wx");
         if (probe != NULL)
@@ -6656,7 +6457,6 @@ bool Script::CallRemote(const std::vector<std::string> & args, const char * name
     return true;
 }
 
-#if !defined(_WIN32)
 namespace {
 
 /* The part of an authorized_keys line that says which key it is: the
@@ -6681,7 +6481,6 @@ std::string KeyIdentity(const std::string & line)
 }
 
 } // namespace
-#endif
 
 /*
  * 'copyid [<privatekey>]': installs the public half of a key on the server,
@@ -6698,13 +6497,6 @@ bool Script::CopyPublicKey(const std::vector<std::string> & args)
         return SwitchError("copyid", "Syntax: copyid [<keyfile>]; without a "
             "file the private key of the session is used.");
     }
-#if defined(_WIN32)
-    (void)args;
-    /* Say so before connecting, rather than after the user has typed a
-     * passphrase. */
-    return SwitchError("copyid", "Reading a key file needs the POSIX build, "
-        "where the bundled PuTTY core can decode one.");
-#else
     if (!RequireConnection())
     {
         return false;
@@ -6837,7 +6629,6 @@ bool Script::CopyPublicKey(const std::vector<std::string> & args)
     Console::Instance().Status("Installed the public key of '" + keyFile +
         "' in '" + authorizedKeys + "'.");
     return true;
-#endif
 }
 
 bool Script::ApplyRemotePermissions(const std::string & path, const std::string & mode,
@@ -7648,9 +7439,9 @@ const struct ScriptCommandHelpEntry
         { "help", "help [ <command> ]\n"
             "  Prints the list of commands, or the help of one command." },
         { "keepuptodate", "keepuptodate [ <localdir> [ <remotedir> ] ]\n"
-            "  Reflects local changes on the remote side. Linux and Windows\n"
-            "  watch the local tree; other platforms poll. -interval=<seconds>,\n"
-            "  -count=<passes>, -delete, -continue, -filemask=, -transfer=." },
+            "  Reflects local changes on the remote side, watching the local\n"
+            "  tree with inotify. -interval=<seconds>, -count=<passes>,\n"
+            "  -delete, -continue, -filemask=, -transfer=." },
         { "lcd", "lcd <directory>\n"
             "  Changes the local working directory." },
         { "lls", "lls [ <directory>[/<mask>] ]\n"

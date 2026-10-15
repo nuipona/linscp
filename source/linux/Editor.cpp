@@ -15,9 +15,7 @@
 #include <cstdio>
 #include <cstring>
 
-#if !defined(_WIN32)
 #include <unistd.h>
-#endif
 
 #include "Console.h"
 #include "LocalFs.h"
@@ -94,11 +92,7 @@ std::vector<std::string> ResolveEditorCommand(const std::string & configured,
     if (command.empty())
     {
         static const char * const candidates[] = {
-#if defined(_WIN32)
-            "notepad", "notepad++", "code", "gvim"
-#else
             "editor", "nano", "vim", "vi", "emacs", "gedit", "kate", "code"
-#endif
         };
         for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); i++)
         {
@@ -153,14 +147,10 @@ bool PrepareEditorTempFile(const std::string & remotePath, std::string & path,
             "editor file.";
         return false;
     }
-#if defined(_WIN32)
-    const std::string directory = root + "\\linuxscp-edit";
-#else
     char suffix[32];
     snprintf(suffix, sizeof(suffix), "linuxscp-edit-%ld",
         static_cast<long>(getpid()));
     const std::string directory = root + "/." + suffix;
-#endif
     std::string createError;
     if (!CreatePrivateDirectory(directory, createError))
     {

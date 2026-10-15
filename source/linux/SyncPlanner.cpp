@@ -232,8 +232,7 @@ namespace {
 /* Matches one pattern component against one path component. */
 bool MatchesComponent(const std::string & pattern, const std::string & text)
 {
-    return MatchesMask(pattern, text) ||
-        (kIsWindows && MatchesMaskInsensitive(pattern, text));
+    return MatchesMask(pattern, text);
 }
 
 /* A directory mask matches the directory itself and any trailing part

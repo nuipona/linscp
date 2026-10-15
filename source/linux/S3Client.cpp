@@ -32,12 +32,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
-#include <process.h>
-#define getpid _getpid
-#else
 #include <unistd.h>
-#endif
 
 namespace linuxscp {
 
@@ -687,8 +682,8 @@ bool InvokeCurl(const S3Site & site, const SessionOptions & options,
     response.curlCode = rc;
     if (rc == -1 && response.err.empty())
     {
-        transportError = "Failed to run curl. Install curl (on Windows "
-            "10/11 it ships as curl.exe) and make sure it is on PATH.";
+        transportError = "Failed to run curl. Install curl (apt install "
+            "curl) and make sure it is on PATH.";
         return false;
     }
     if (rc != 0 && IsCurlEndpointUnreachable(rc))
