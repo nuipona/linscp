@@ -17,6 +17,7 @@
 #include "SftpClient.h"
 #include "SyncPlanner.h"
 #include "TextMode.h"
+#include "TransferPresets.h"
 
 namespace linuxscp {
 
@@ -72,12 +73,20 @@ struct TransferFlags
     /* '-preservetime=all': also give the transferred directories the
      * timestamps of their source, not just the files. */
     bool preserveTimeDirs;
+    /*
+     * Settings a switch of this command pinned (bit 0 transfer, 1
+     * preservetime, 2 neweronly, 3 resume, 4 permissions). A mask
+     * preset may override the session's values for one file but never
+     * a setting the command line stated itself.
+     */
+    unsigned explicitSettings;
 
     TransferFlags() : deleteSource(false), deleteObsolete(false),
         newerOnly(false), preserveTime(false), recursive(true),
         resume(false), transferMode(TransferMode::Binary), permissions(-1),
         maskGiven(false), resumeSupport(ResumeUnset), resumeThreshold(0),
-        speedKBytesPerSecond(0), append(false), preserveTimeDirs(false) {}
+        speedKBytesPerSecond(0), append(false), preserveTimeDirs(false),
+        explicitSettings(0) {}
 };
 
 class Script
@@ -160,6 +169,10 @@ private:
      * silently ignored. 'uploads' selects the switches of the upload
      * direction ('-permissions=').
      */
+    /* The active preset's settings into fresh flags, before switches. */
+    bool ApplySessionPreset(TransferFlags & flags, std::string & error);
+    /* The first mask preset accepting this file, into its flags. */
+    void ApplyMaskPreset(const std::string & fileName, TransferFlags & flags);
     bool ParseTransferSwitches(const std::string & command, bool uploads,
         const std::vector<std::string> & args, TransferFlags & flags,
         std::vector<std::string> & paths);
@@ -260,6 +273,9 @@ private:
     bool SessionCommand(const std::vector<std::string> & args);
     bool StoredSessionsCommand(const std::vector<std::string> & args);
     bool SaveStoredSession(const std::vector<std::string> & args);
+    bool SavePresetCommand(const std::vector<std::string> & args);
+    bool RemovePresetCommand(const std::vector<std::string> & args);
+    bool ListPresetsCommand(const std::vector<std::string> & args);
     bool RemoveStoredSessionEntry(const std::vector<std::string> & args);
     /* Opens a stored session by name; false when there is no such
      * session, in which case the caller falls back to a URL. */
@@ -404,6 +420,18 @@ private:
     std::string mEditor;
     unsigned long long mEditMaxSize;
     /* 'option transfer' / 'ascii' / 'binary' / '-transfer='. */
+    /*
+     * The active transfer preset: a name chosen with 'option preset',
+     * stored with a site ('savesession -preset=') or, when no name is
+     * set, the first preset whose host/user/directory rule matches the
+     * connection. The store reloads from transfer-presets.ini whenever
+     * a transfer resolves it, so an edit to the file takes effect.
+     */
+    TransferPresetStore mPresets;
+    std::string mActivePresetName;
+    /* Set by 'option preset off': no preset at all for this session,
+     * not even one whose host/user/directory rule matches. */
+    bool mPresetOff = false;
     TransferMode mTransferMode;
     /* 'option include' / 'option exclude' (one WinSCP mask: setting one
      * half replaces the other, like upstream). */

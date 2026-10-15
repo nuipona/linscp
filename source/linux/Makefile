@@ -142,6 +142,7 @@ PUTTY_OBJS := $(foreach s,$(PUTTY_ALL_SRCS),$(call putty_obj,$(s)))
 APP_SRCS := \
 	Session.cpp \
 	SessionStore.cpp \
+	TransferPresets.cpp \
 	SftpClient.c \
 	HashUtil.c \
 	ProtocolClient.cpp \

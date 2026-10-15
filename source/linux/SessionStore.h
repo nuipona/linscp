@@ -65,6 +65,9 @@ struct StoredSession
     std::string passwordError;
     /* Seconds since the epoch of the last successful connect, 0 = never. */
     unsigned long long lastUsed;
+    /* Transfer preset selected for this site ('savesession -preset='),
+     * empty = none; 'open <name>' makes it the session's preset. */
+    std::string preset;
 
     StoredSession() : portNumber(0), passwordStored(false), lastUsed(0) {}
 };

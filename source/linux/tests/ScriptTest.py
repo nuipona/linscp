@@ -698,6 +698,90 @@ class ScriptTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
 
+    def test_transfer_presets_and_permission_switches(self):
+        """Transfer presets end to end without a server: store, list,
+        update, remove, activate through 'option', per-site storage, and
+        the download form of '-permissions' plus '-rawtransfersettings'
+        validation."""
+        # store, list, update, remove
+        result = self.run_commands(
+            "savepreset asciitxt -transfer=ascii -preservetime=on "
+            "-mask=*.txt; presets")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("transfer=ascii", result.stdout)
+        self.assertIn("mask=*.txt", result.stdout)
+        result = self.run_commands(
+            "savepreset asciitxt -transfer=binary; presets")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("transfer=binary", result.stdout)
+        self.assertNotIn("transfer=ascii", result.stdout)
+        result = self.run_commands("rmspreset nosuchpreset")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no transfer preset named", result.stderr)
+
+        # activate, show, clear; unknown names are refused loudly
+        result = self.run_commands(
+            "savepreset p1 -transfer=binary; option preset p1; option")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("preset = p1", result.stdout)
+        result = self.run_commands("option preset nosuchpreset")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("There is no transfer preset named", result.stderr)
+        result = self.run_commands("option preset p1; option preset off; option")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("preset = off", result.stdout)
+
+        # a site stores and validates its preset
+        result = self.run_commands(
+            "savesession sx -host=host.example -preset=unknownpreset")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no transfer preset named", result.stderr)
+        result = self.run_commands(
+            "savepreset p1 -transfer=binary; "
+            "savesession sx -host=host.example -preset=p1; sessions")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("(preset p1)", result.stdout)
+
+        # '-permissions' without a value is understood on both directions
+        # (the run stops at the missing connection, not at the switch)
+        for command in ("get -permissions x /tmp/",
+                        "put -nopermissions x /tmp/",
+                        "put -permissions=640 x /tmp/"):
+            with self.subTest(command=command):
+                result = self.run_commands(command)
+                self.assertEqual(result.returncode, 1, command)
+                self.assertNotIn("Unsupported switch", result.stderr)
+                self.assertNotIn("applies to uploads only", result.stderr)
+
+        # -rawtransfersettings: the optional cap, upstream's own key
+        # names, and honest errors for the settings this build lacks
+        result = self.run_commands(
+            "get -rawtransfersettings=abc x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("number of settings", result.stderr)
+        result = self.run_commands(
+            "get -rawtransfersettings=1 calculateSize=1024 x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("has no equivalent", result.stderr)
+        self.assertIn("calculateSize", result.stderr)
+        result = self.run_commands(
+            "get -rawtransfersettings=1 NoSuchKey=1 x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not known to this build", result.stderr)
+        result = self.run_commands(
+            "get -rawtransfersettings=1 TransferMode=1 ResumeSupport=0 x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("raw transfer setting", result.stderr)
+        self.assertIn("Not connected", result.stderr)
+
+        # savepreset vocabulary errors name the setting at fault
+        result = self.run_commands("savepreset bad -nosuchsetting=1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("nosuchsetting", result.stderr)
+        result = self.run_commands("savepreset bad -speed=lots")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("speed", result.stderr)
+
 
 def run_and_report():
     """Run the suite, then print one line that says what was actually run.

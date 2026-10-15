@@ -143,6 +143,7 @@ std::string ValueOf(const StoredSession & session, const std::string & key,
     if (key == "hostkey") { return session.hostKey; }
     if (key == "remote_directory") { return session.remoteDirectory; }
     if (key == "local_directory") { return session.localDirectory; }
+    if (key == "preset") { return session.preset; }
     /* 'password' never comes through here: Save computes its encrypted
      * value before the file is opened (see the loop that writes). */
     if (key == "port")
@@ -831,6 +832,10 @@ bool SessionStore::Load(std::string & error)
         {
             current.localDirectory = value;
         }
+        else if (key == "preset")
+        {
+            current.preset = value;
+        }
         else if (key == "password")
         {
             if (StartsWith(value, kPasswordPrefix))
@@ -986,7 +991,8 @@ bool SessionStore::Save(std::string & error) const
         fprintf(file, "\n[%s]\n", EscapeValue(sorted[i].name).c_str());
         static const char * const keys[] = {
             "protocol", "host", "port", "username", "private_key", "hostkey",
-            "remote_directory", "local_directory", "password", "last_used"
+            "remote_directory", "local_directory", "password", "last_used",
+            "preset"
         };
         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
         {

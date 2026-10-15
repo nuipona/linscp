@@ -189,6 +189,87 @@ class LiveDavTests(unittest.TestCase):
         self.assertIn("ROUNDTRIP_OK", result.stdout)
         self.assertEqual(sha256_of(source), sha256_of(downloaded))
 
+    def test_transfer_preset_drives_ascii_and_loads_with_the_site(self):
+        """Transfer presets against a real server: the active preset
+        converts a text upload exactly like -transfer=ascii would, and a
+        site that stores the preset loads it when it is opened."""
+        source = self.root / "preset-lf.txt"
+        source.write_bytes(b"a\nb\n")
+        out_active = self.root / "preset-active.txt"
+        out_off = self.root / "preset-off.txt"
+        out_site = self.root / "preset-site.txt"
+
+        # An active preset supplies the settings; 'option preset off'
+        # hands the transfer back to its own (binary) defaults.
+        result = self.run_script(
+            "mkdir /docs ; "
+            "savepreset presetascii -transfer=ascii -host=127.0.0.1 ; "
+            "presets ; option preset presetascii ; "
+            "put %s /docs/preset-ascii.txt ; "
+            "savepreset presetbinary -transfer=binary -host=127.0.0.1 ; "
+            "option preset presetbinary ; "
+            "put %s /docs/preset-binary.txt ; "
+            "option preset off ; "
+            "get /docs/preset-ascii.txt %s ; "
+            "get /docs/preset-binary.txt %s ; "
+            "echo PRESET_OK" % (source, source, out_active, out_off))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("PRESET_OK", result.stdout)
+        self.assertIn("presetascii", result.stdout)
+        self.assertEqual(out_active.read_bytes(), b"a\r\nb\r\n")
+        self.assertEqual(out_off.read_bytes(), b"a\nb\n")
+
+        # The same preset stored with the site: opening the site restores
+        # it, and the conversion happens without any switch on 'put'.
+        result = self.run_script(
+            "savepreset sitepreset -transfer=ascii -host=127.0.0.1 ; "
+            "savesession dasite -protocol=dav -host=127.0.0.1 -port=%d "
+            "-username=%s -password=%s -preset=sitepreset ; "
+            "sessions dasite ; "
+            "put %s /docs/site-ascii.txt ; "
+            "option preset off ; "
+            "get /docs/site-ascii.txt %s ; "
+            "echo SITE_OK" % (self.port, USER, PASSWORD, source, out_site))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SITE_OK", result.stdout)
+        self.assertEqual(out_site.read_bytes(), b"a\r\nb\r\n")
+
+        # Removing the preset leaves the file without it, and the test
+        # takes its presets and site out of the shared configuration
+        # again: a host-matching preset would otherwise (correctly!)
+        # apply to every later test that connects to this server.
+        result = self.run_script(
+            "rmspreset sitepreset ; rmspreset presetascii ; "
+            "rmspreset presetbinary ; rmsession dasite ; presets")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Removed transfer preset", result.stdout)
+        self.assertNotIn("  sitepreset", result.stdout)
+        self.assertNotIn("  presetascii", result.stdout)
+        self.assertNotIn("  presetbinary", result.stdout)
+
+    def test_download_permissions_and_raw_transfer_settings(self):
+        """Two switch families against the wire: a raw transfer setting
+        in upstream's key vocabulary converting an upload, and
+        '-permissions=<mode>' giving the downloaded local file that
+        mode."""
+        source = self.root / "raw-lf.txt"
+        source.write_bytes(b"x\ny\n")
+        got = self.root / "raw-got.txt"
+        protected = self.root / "raw-protected.txt"
+        result = self.run_script(
+            "mkdir /docs ; "
+            "put -rawtransfersettings=1 TransferMode=1 %s /docs/raw.txt ; "
+            "get /docs/raw.txt %s ; "
+            "get -permissions=444 /docs/raw.txt %s ; "
+            "echo RAW_OK" % (source, got, protected))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("RAW_OK", result.stdout)
+        # TransferMode=1 in the raw settings means ascii: the upload
+        # converted LF to CRLF, and the plain binary download shows it.
+        self.assertEqual(got.read_bytes(), b"x\r\ny\r\n")
+        # The download was told to make the local file read-only.
+        self.assertEqual(os.stat(protected).st_mode & 0o200, 0)
+
     def test_mkdir_refuses_an_existing_name(self):
         result = self.run_script(
             "mkdir /docs ; mkdir /docs ; echo SHOULD_NOT_SEE")

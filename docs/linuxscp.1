@@ -287,7 +287,29 @@ and
 .BR \-preservetime " / " \-preservetime=all " (keep the timestamps;"
 with
 .I =all
-those of directories too).
+those of directories too),
+.BR \-permissions " / " \-permissions= mode " / " \-nopermissions ,
+and
+.BR \-rawtransfersettings[=N] .
+On a download,
+.B \-permissions
+without a value gives the local file the permissions of the remote one
+(when the server reports them),
+.I =mode
+sets the octal mode outright
+.RB ( 600 ", " 755 )
+and
+.B \-nopermissions
+leaves whatever the file got while being created.
+.B \-rawtransfersettings
+accepts upstream's own
+.I key=value
+parameter list
+.RB ( TransferMode ", " PreserveTime ", " ResumeSupport ", " CPSLimit
+and the rest, optionally capped with
+.IR =N );
+a setting this build does not apply is refused by name instead of being
+silently dropped.
 .B \-append
 and
 .B \-resume
@@ -308,9 +330,18 @@ Optional switches include
 .BR \-speed= KB ","
 .BR \-resumesupport= on|off|KB ","
 .BR \-preservetime " / " \-preservetime=all ","
+.BR \-permissions " / " \-permissions= mode " / " \-nopermissions ,"
 and
-.BR \-permissions= mode " / " \-nopermissions " (set or keep the"
-permissions of the uploaded file).
+.BR \-rawtransfersettings[=N] .
+On an upload,
+.B \-permissions
+without a value puts the local file's own permissions on the server,
+.I =mode
+sets the octal mode and
+.B \-nopermissions
+asks the server for its defaults; the raw settings are the ones listed
+under
+.BR get .
 The
 .BR \-append " and " \-resume
 switches need the native SFTP transport and exclude each other.
@@ -422,8 +453,13 @@ The options are
 .BR \-password= ,
 .BR \-privatekey= ,
 .BR \-hostkey= ,
-.BR \-remotedir= " and"
-.BR \-localdir= .
+.BR \-remotedir= ,
+.BR \-localdir= " and"
+.BR \-preset= .
+.I \-preset=
+stores the transfer preset the site loads when it is opened (an empty
+value clears a stored one), so a site keeps its copy settings like the
+rest of its session data.
 The password is stored only when
 .I \-password=
 is given, and a host key is stored only when
@@ -435,6 +471,44 @@ stays unpinned. Unknown switches are rejected.
 .BI rmsession " name"
 Remove the stored session called
 .IR name .
+.TP
+.BI savepreset " name setting" ...
+Store or update a transfer preset under
+.IR name .
+A setting is either
+.I key=value
+or a bare switch; the keys are
+.BR transfer= ,
+.BR preservetime= ,
+.BR neweronly ,
+.BR speed= ,
+.BR resumesupport= ,
+.BR permissions= ,
+.BR host= ,
+.BR user= ,
+.BR remotedir= ,
+.BR localdir=
+and
+.BR mask= .
+Saving over an existing preset changes only the settings the command
+names. Unknown settings and invalid values are refused with the key at
+fault.
+.TP
+.BI rmspreset " name"
+Remove the transfer preset called
+.IR name .
+When it was the active preset, transfers go back to their own settings.
+.TP
+.B presets
+List the transfer presets of the user configuration with their settings.
+Presets live in
+.I $XDG_CONFIG_HOME/linuxscp/transfer-presets.ini
+and apply to get/put and their aliases: by name through
+.BR "option preset" ,
+by name with the site through
+.BR "savesession \-preset=" ,
+or by their host, user, directory and mask rules when no preset was
+picked by name. The switches of a transfer always win over the preset.
 .TP
 .BI echo " [" message ]
 Print a message to the console output.
@@ -518,17 +592,37 @@ controls overwrite and delete confirmations.
 controls batch mode. Scripts default to aborting after an error.
 On and abort stop subsequent commands; off and continue proceed, but errors
 still cause a nonzero process exit status.
-.BR option\ resume\ on|off
-controls automatic transfer resumption.
+.BR option\ resume\ on|off|automatic
+controls automatic transfer resumption,
+.BR option\ transfer\ binary|ascii|automatic
+the mode of the following transfers, and
+.BR option\ echo\ on|off
+echoes each command before it runs.
 .BR option\ editor\ program
 and
 .BR option\ editmaxsize\ bytes
 choose the editor used by
 .B edit
 and the largest file it will open.
-.BR option\ transfer\ binary
-is supported. Reconnect settings, ASCII/automatic transfers, file-mask
-switches and other unimplemented compatibility options fail explicitly.
+.BR option\ include\ mask " and " option\ exclude\ mask
+set the persistent file mask (either one replaces both; the value
+.B clear
+resets it), with
+.BR option\ failonnomatch\ on|off ,
+.BR option\ synchdelete\ on|off
+and
+.BR option\ reconnecttime\ seconds|off
+for the related behaviors.
+.BR option\ preset\ name
+makes a transfer preset the default of the following transfer commands
+and
+.B "option preset off"
+stops applying presets altogether for this session.
+A name or a value may be abbreviated when the abbreviation is unique;
+masks, programs and numbers are never guessed. Called with no name,
+.B option
+prints every setting. An option this build does not implement fails by
+name instead of pretending.
 .TP
 .B help
 List the commands with a short description in two columns.

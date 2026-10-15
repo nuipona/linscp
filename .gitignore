@@ -13,3 +13,8 @@ build/
 build-*/
 
 __pycache__/
+
+# npm artifacts of source/gui/tests (installed on demand by CI and locally)
+source/gui/tests/node_modules/
+source/gui/tests/package.json
+source/gui/tests/package-lock.json

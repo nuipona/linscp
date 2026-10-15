@@ -68,9 +68,10 @@ const char * const kCommandNames[] = {
     "close", "copyid", "cp", "del", "delsession", "dir", "echo", "edit",
     "end", "exit", "get", "help", "keepuptodate", "lcd", "lls", "ln",
     "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv", "open",
-    "option", "pwd", "put", "quit", "recv", "rename", "rm", "rmdir",
-    "rmsession", "send", "session", "sessions", "stat", "savesession",
-    "show", "symlink", "sync", "synchronize", "terminal", "?"
+    "option", "presets", "pwd", "put", "quit", "recv", "rename",
+    "rm", "rmdir", "rmsession", "rmspreset", "send", "session", "sessions",
+    "stat", "savepreset", "savesession", "show", "symlink", "sync",
+    "synchronize", "terminal", "?"
 };
 
 std::vector<std::string> CommandNames()
@@ -1930,7 +1931,7 @@ const std::vector<std::string> & OptionNames()
     static const std::vector<std::string> names = {
         "echo", "batch", "confirm", "resume", "transfer", "include",
         "exclude", "failonnomatch", "synchdelete", "reconnecttime",
-        "editor", "editmaxsize"
+        "editor", "editmaxsize", "preset"
     };
     return names;
 }
@@ -2242,6 +2243,285 @@ bool Script::FinishStage(const TransferStage & stage, std::string & error)
  * silently ignored: a script that asks for a setting this client cannot
  * honour must fail rather than transfer something else.
  */
+namespace {
+
+bool RawBool(const std::string & text, bool & value)
+{
+    std::string v = ToLower(text);
+    if (v == "1" || v == "true" || v == "on" || v == "yes")
+    {
+        value = true;
+        return true;
+    }
+    if (v == "0" || v == "false" || v == "off" || v == "no")
+    {
+        value = false;
+        return true;
+    }
+    return false;
+}
+
+bool RawInteger(const std::string & text, long long & value)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    char * end = NULL;
+    const long long parsed = strtoll(text.c_str(), &end, 10);
+    if (end == NULL || *end != '\0')
+    {
+        return false;
+    }
+    value = parsed;
+    return true;
+}
+
+/*
+ * One key=value pair of '-rawtransfersettings', in upstream's own key
+ * names (TCopyParamType::Load). Settings this client does not have are
+ * refused by name rather than silently dropped: a transfer that ran
+ * with less than its script asked for would be worse than one that
+ * stopped.
+ */
+bool ApplyRawTransferSetting(const std::string & rawKey,
+    const std::string & value, TransferFlags & flags, std::string & error)
+{
+    const std::string key = ToLower(rawKey);
+    error.clear();
+    if (key == "transfermode")
+    {
+        long long mode = 0;
+        if (!RawInteger(value, mode) || mode < 0 || mode > 2)
+        {
+            error = "The raw transfer setting 'TransferMode' must be 0 "
+                "(binary), 1 (ascii) or 2 (automatic).";
+            return false;
+        }
+        flags.transferMode = mode == 0 ? TransferMode::Binary :
+            mode == 1 ? TransferMode::Ascii : TransferMode::Automatic;
+        return true;
+    }
+    if (key == "preservetime" || key == "preservetimedirs" ||
+        key == "neweronly")
+    {
+        bool on = false;
+        if (!RawBool(value, on))
+        {
+            error = "The raw transfer setting '" + rawKey + "' must be 1 "
+                "or 0.";
+            return false;
+        }
+        if (key == "preservetime")
+        {
+            flags.preserveTime = on;
+        }
+        else if (key == "preservetimedirs")
+        {
+            flags.preserveTimeDirs = on;
+        }
+        else
+        {
+            flags.newerOnly = on;
+        }
+        return true;
+    }
+    if (key == "resumesupport")
+    {
+        long long mode = 0;
+        if (!RawInteger(value, mode) || mode < 0 || mode > 2)
+        {
+            error = "The raw transfer setting 'ResumeSupport' must be 0 "
+                "(on), 1 (smart) or 2 (off).";
+            return false;
+        }
+        flags.resumeSupport = mode == 0 ? TransferFlags::ResumeOn :
+            mode == 1 ? TransferFlags::ResumeSmart : TransferFlags::ResumeOff;
+        return true;
+    }
+    if (key == "resumethreshold")
+    {
+        long long bytes = 0;
+        if (!RawInteger(value, bytes) || bytes < 0)
+        {
+            error = "The raw transfer setting 'ResumeThreshold' must be a "
+                "number of bytes.";
+            return false;
+        }
+        flags.resumeThreshold = static_cast<unsigned long long>(bytes);
+        return true;
+    }
+    if (key == "cpslimit")
+    {
+        /* Upstream counts bytes per second, this client's -speed= counts
+         * kibibytes; round up so the effective limit is never higher. */
+        long long cps = 0;
+        if (!RawInteger(value, cps) || cps < 0)
+        {
+            error = "The raw transfer setting 'CPSLimit' must be a number "
+                "of bytes per second.";
+            return false;
+        }
+        flags.speedKBytesPerSecond = static_cast<unsigned>((cps + 1023) / 1024);
+        return true;
+    }
+    if (key == "preserverights" || key == "text")
+    {
+        if (key == "preserverights")
+        {
+            bool on = false;
+            if (!RawBool(value, on))
+            {
+                error = "The raw transfer setting 'PreserveRights' must be "
+                    "1 or 0.";
+                return false;
+            }
+            if (!on)
+            {
+                flags.permissions = -1;
+            }
+            else if (flags.permissions == -1)
+            {
+                /* 'Text' carries the mode this build applies when it is
+                 * parsed after this flag; without it the transfer keeps
+                 * the default, as upstream does with an empty text. */
+            }
+            return true;
+        }
+        /* 'Text': the octal mode rights text. Upstream also accepts a
+         * symbolic form here; this build applies what it can parse. */
+        unsigned long mode = 0;
+        std::string modeError;
+        if (!ParsePermissions(value, 0644, false, mode, modeError))
+        {
+            error = "The raw transfer setting 'Text' is not a permission "
+                "mode: " + modeError;
+            return false;
+        }
+        flags.permissions = static_cast<int>(mode & 07777);
+        return true;
+    }
+    static const char * refused[] = {
+        "masks", "includefilemask", "excludefilemask", "negativeexclude",
+        "filenamecase", "preservereadonly", "ignorepermerrors",
+        "addxtodirectories", "cleararchive", "removectrlz", "removebom",
+        "replaceinvalidchars", "localinvalidchars", "calculatesize",
+        "encryptnewfiles", "excludehiddenfiles", "excludeemptydirectories",
+    };
+    for (size_t i = 0; i < sizeof(refused) / sizeof(refused[0]); i++)
+    {
+        if (key == refused[i])
+        {
+            error = "The raw transfer setting '" + rawKey + "' has no "
+                "equivalent in this build and will not be ignored.";
+            return false;
+        }
+    }
+    error = "The raw transfer setting '" + rawKey + "' is not known to "
+        "this build; the settings it accepts are TransferMode, "
+        "PreserveTime, PreserveTimeDirs, ResumeSupport, ResumeThreshold, "
+        "CPSLimit, NewerOnly, PreserveRights and Text.";
+    return false;
+}
+
+} // namespace
+
+/*
+ * The active preset - a name from 'option preset', from the stored
+ * site, or the first preset whose host/user/directory rule matches
+ * this connection - provides the base settings of a transfer.
+ */
+bool Script::ApplySessionPreset(TransferFlags & flags, std::string & error)
+{
+    error.clear();
+    if (mPresetOff)
+    {
+        /* 'option preset off' is an explicit "use no preset", which also
+         * silences the host/user/directory rules until a preset is
+         * picked again. */
+        return true;
+    }
+    std::string loadError;
+    if (!mPresets.Load(loadError))
+    {
+        error = loadError;
+        return false;
+    }
+    const TransferPreset * preset = NULL;
+    if (!mActivePresetName.empty())
+    {
+        preset = mPresets.Find(mActivePresetName);
+        if (preset == NULL)
+        {
+            error = "The transfer preset '" + mActivePresetName + "' does "
+                "not exist in '" + mPresets.Path() + "' any more; pick "
+                "another with 'option preset <name>' or clear it with "
+                "'option preset off'.";
+            return false;
+        }
+    }
+    else
+    {
+        std::string dirError;
+        const std::string localDirectory = GetLocalDirectory(dirError);
+        const SessionOptions & options = mSession.Options();
+        preset = mPresets.MatchSession(options.hostName, options.userName,
+            mRemoteDirectory, localDirectory);
+    }
+    if (preset != NULL)
+    {
+        preset->ApplyTo(flags);
+    }
+    return true;
+}
+
+/*
+ * The first mask preset accepting this file, applied over the base
+ * settings but never over a setting this command's own switches pinned.
+ * Speed limits stay command-wide, so a mask preset's speed is applied
+ * through the session preset only.
+ */
+void Script::ApplyMaskPreset(const std::string & fileName, TransferFlags & flags)
+{
+    if (mPresetOff)
+    {
+        return;
+    }
+    if ((flags.explicitSettings & 31) == 31)
+    {
+        return;
+    }
+    std::string loadError;
+    if (!mPresets.Load(loadError))
+    {
+        return;
+    }
+    const TransferPreset * preset = mPresets.MatchMask(fileName);
+    if (preset == NULL)
+    {
+        return;
+    }
+    /* Copy, clear the pinned bits, apply, restore: ApplyTo writes whole
+     * fields, so a preset field is skipped exactly where a switch
+     * pinned it. */
+    TransferPreset masked = *preset;
+    if (flags.explicitSettings & 1) masked.transferMode = -1;
+    if (flags.explicitSettings & 2)
+    {
+        masked.preserveTime = -1;
+        masked.preserveTimeDirs = -1;
+    }
+    if (flags.explicitSettings & 4) masked.newerOnly = -1;
+    if (flags.explicitSettings & 8)
+    {
+        masked.resumeSupport = -1;
+        masked.resumeThreshold = -1;
+    }
+    if (flags.explicitSettings & 16) masked.permissions = -1;
+    masked.speedLimit = -1;
+    masked.ApplyTo(flags);
+}
+
 bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
     const std::vector<std::string> & args, TransferFlags & flags,
     std::vector<std::string> & paths)
@@ -2251,6 +2531,21 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
      * whichever way the mode was set. */
     bool resumeForced = mResumeMode == ResumeMode::On;
     TransferMode mode = mTransferMode;
+
+    /* The active transfer preset provides the base settings; the
+     * switches below then override them one by one. */
+    {
+        std::string presetError;
+        if (!ApplySessionPreset(flags, presetError))
+        {
+            return SwitchError(command, presetError);
+        }
+        mode = flags.transferMode;
+        if (flags.resumeSupport == TransferFlags::ResumeOn)
+        {
+            resumeForced = true;
+        }
+    }
 
     for (size_t i = 0; i < args.size(); i++)
     {
@@ -2262,7 +2557,8 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
         }
         if (a == "-delete" || a == "-r" || a == "-resume" ||
             a == "-neweronly" || a == "-noneweronly" || a == "-preservetime" ||
-            a == "-nopreservetime" || a == "-append" || a == "-nopermissions")
+            a == "-nopreservetime" || a == "-append" || a == "-nopermissions" ||
+            a == "-permissions")
         {
             if (a == "-delete")
             {
@@ -2271,19 +2567,23 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
             else if (a == "-neweronly")
             {
                 flags.newerOnly = true;
+                flags.explicitSettings |= 4;
             }
             else if (a == "-noneweronly")
             {
                 flags.newerOnly = false;
+                flags.explicitSettings |= 4;
             }
             else if (a == "-preservetime")
             {
                 flags.preserveTime = true;
+                flags.explicitSettings |= 2;
             }
             else if (a == "-nopreservetime")
             {
                 flags.preserveTime = false;
                 flags.preserveTimeDirs = false;
+                flags.explicitSettings |= 2;
             }
             else if (a == "-append")
             {
@@ -2293,15 +2593,78 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
             {
                 flags.resume = true;
                 resumeForced = true;
+                flags.explicitSettings |= 8;
             }
             else if (a == "-nopermissions")
             {
-                if (!uploads)
-                {
-                    return SwitchError(command,
-                        "The '-nopermissions' switch applies to uploads only.");
-                }
                 flags.permissions = -1;
+                flags.explicitSettings |= 16;
+            }
+            else if (a == "-permissions")
+            {
+                /* Without a value: uploads keep the local file's own
+                 * mode on the server, downloads give the local file the
+                 * remote one. */
+                flags.permissions = -2;
+                flags.explicitSettings |= 16;
+            }
+            continue;
+        }
+        if (a == "-rawtransfersettings" ||
+            StartsWith(a, "-rawtransfersettings="))
+        {
+            /* Upstream's bulk form: key=value parameters under
+             * upstream's own key names (TransferMode, PreserveTime,
+             * ResumeSupport, ...). The optional '=N' caps how many
+             * parameters belong to the switch, upstream's idiom for
+             * switches that take a list; uncapped, the parameters are
+             * taken while they look like settings. */
+            int cap = -1;
+            if (StartsWith(a, "-rawtransfersettings="))
+            {
+                const std::string count =
+                    a.substr(strlen("-rawtransfersettings="));
+                char * end = NULL;
+                const long parsed = count.empty() ? -1 :
+                    strtol(count.c_str(), &end, 10);
+                if (end == NULL || *end != '\0' || parsed < 0 ||
+                    static_cast<long>(static_cast<int>(parsed)) != parsed)
+                {
+                    return SwitchError(command, "The value of "
+                        "'-rawtransfersettings' is the number of settings "
+                        "that follow it, as in '-rawtransfersettings=2'.");
+                }
+                cap = static_cast<int>(parsed);
+            }
+            int taken = 0;
+            while (i + 1 < args.size() && (cap < 0 || taken < cap))
+            {
+                const std::string & next = args[i + 1];
+                if (next.empty() || next[0] == '-' ||
+                    next.find('=') == std::string::npos)
+                {
+                    if (cap < 0)
+                    {
+                        break;
+                    }
+                    return SwitchError(command, "'" + next + "' is not a "
+                        "'key=value' raw transfer setting.");
+                }
+                const size_t eq = next.find('=');
+                std::string rawError;
+                if (!ApplyRawTransferSetting(next.substr(0, eq),
+                    next.substr(eq + 1), flags, rawError))
+                {
+                    return SwitchError(command, rawError);
+                }
+                i++;
+                taken++;
+            }
+            if (cap >= 0 && taken < cap)
+            {
+                return SwitchError(command, "'-rawtransfersettings=" +
+                    std::to_string(cap) + "' was given, but only " +
+                    std::to_string(taken) + " setting parameter(s) follow.");
             }
             continue;
         }
@@ -2318,6 +2681,7 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
             }
             flags.preserveTime = true;
             flags.preserveTimeDirs = true;
+            flags.explicitSettings |= 2;
             continue;
         }
         if (StartsWith(a, "-transfer="))
@@ -2333,6 +2697,7 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
                     "'-transfer' is ambiguous: it matches " + matches + ".");
             }
             flags.transferMode = mode;
+            flags.explicitSettings |= 1;
             continue;
         }
         if (StartsWith(a, "-filemask="))
@@ -2347,11 +2712,6 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
         }
         if (StartsWith(a, "-permissions="))
         {
-            if (!uploads)
-            {
-                return SwitchError(command, "The '-permissions' switch applies "
-                    "to uploads only.");
-            }
             unsigned long permissions = 0;
             if (!ParseOctalPermissions(a.substr(strlen("-permissions=")),
                 permissions))
@@ -2360,6 +2720,7 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
                     "be an octal number from 0 through 7777.");
             }
             flags.permissions = static_cast<int>(permissions);
+            flags.explicitSettings |= 16;
             continue;
         }
         if (StartsWith(a, "-speed="))
@@ -2406,6 +2767,7 @@ bool Script::ParseTransferSwitches(const std::string & command, bool uploads,
                     static_cast<unsigned long long>(threshold) * 1024ULL;
             }
             resumeForced = flags.resumeSupport == TransferFlags::ResumeOn;
+            flags.explicitSettings |= 8;
             continue;
         }
         return SwitchError(command, "Unsupported switch '" + a + "'; it will "
@@ -2589,6 +2951,10 @@ bool Script::GetFiles(const std::vector<std::string> & args)
     ResolveTransferMask(flags);
     SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
 
+    /* What every file starts from; a mask preset then adjusts the
+     * settings this command's switches did not pin. */
+    const TransferFlags baseFlags = flags;
+
     std::string destination = paths.size() >= 2 ? paths.back() : ".";
     std::vector<std::string> sourcePatterns = paths.size() >= 2 ?
         std::vector<std::string>(paths.begin(), paths.end() - 1) :
@@ -2690,6 +3056,12 @@ bool Script::GetFiles(const std::vector<std::string> & args)
                 }
                 continue;
             }
+
+            /* This file's own settings: the command's base, overridden
+             * by the preset whose mask accepts it (never by settings
+             * the switches pinned). */
+            flags = baseFlags;
+            ApplyMaskPreset(RemoteFileName(sources[n]), flags);
 
             std::string localPath;
             if (destinationIsDir || sources.size() > 1 || sourcePatterns.size() > 1)
@@ -2832,6 +3204,23 @@ bool Script::GetFiles(const std::vector<std::string> & args)
                 }
                 continue;
             }
+            /* '-permissions' on a download: give the local file the
+             * mode the script asked for, or the remote file's own. */
+            if (flags.permissions >= 0 || flags.permissions == -2)
+            {
+                int localMode = flags.permissions;
+                if (localMode == -2)
+                {
+                    localMode = (sourceAttrs.flags & LSCP_ATTR_PERMISSIONS) != 0 ?
+                        static_cast<int>(sourceAttrs.permissions & 07777) : -1;
+                }
+                if (localMode >= 0 && !SetLocalFileMode(localPath, localMode, error))
+                {
+                    Console::Instance().Error(Texts::LocalError(
+                        "set the permissions of", localPath, error));
+                    mErrors++;
+                }
+            }
             any = true;
             Console::Instance().Status(Texts::FileTransferred(localPath, size));
             if (flags.deleteSource)
@@ -2872,6 +3261,10 @@ bool Script::PutFiles(const std::vector<std::string> & args)
     }
     ResolveTransferMask(flags);
     SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
+
+    /* What every file starts from; a mask preset then adjusts the
+     * settings this command's switches did not pin. */
+    const TransferFlags baseFlags = flags;
 
     std::string destinationArg = paths.size() >= 2 ? paths.back() : ".";
     std::vector<std::string> sourcePatterns = paths.size() >= 2 ?
@@ -2994,6 +3387,12 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             {
                 continue;
             }
+            /* This file's own settings: the command's base, overridden
+             * by the preset whose mask accepts it (never by settings
+             * the switches pinned). */
+            flags = baseFlags;
+            ApplyMaskPreset(LocalFileName(sources[n]), flags);
+
             std::string remotePath = (destinationIsDir || sources.size() > 1 ||
                 sourcePatterns.size() > 1) ?
                 JoinRemotePath(destination, LocalFileName(sources[n])) : destination;
@@ -3087,7 +3486,13 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             }
             else
             {
-                result = RemotePut(uploadPath, stage.partPath, flags.permissions,
+                int putPermissions = flags.permissions;
+                if (putPermissions == -2)
+                {
+                    putPermissions = info.permissions != 0 ?
+                        static_cast<int>(info.permissions & 07777) : -1;
+                }
+                result = RemotePut(uploadPath, stage.partPath, putPermissions,
                     stage.resumeOffset, flags.preserveTime, &size,
                     ProgressCallback, NULL, error, flags.append);
             }
@@ -4061,6 +4466,167 @@ bool Script::EditRemoteFile(const std::vector<std::string> & args)
 }
 
 /* ------------------------------------------------------------------ *
+ * Transfer presets (the copy parameter lists)                         *
+ * ------------------------------------------------------------------ */
+
+bool Script::SavePresetCommand(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    if (args.size() < 2)
+    {
+        console.Error(Texts::WrongArguments("savepreset",
+            "Syntax: savepreset <name> <setting>[=<value>]... "
+            "(settings: transfer=, preservetime=, neweronly, speed=, "
+            "resumesupport=, permissions=, host=, user=, remotedir=, "
+            "localdir=, mask=)."));
+        mErrors++;
+        return false;
+    }
+    const std::string & name = args[0];
+    if (!TransferPresetStore::IsValidName(name))
+    {
+        console.Error(Texts::WrongArguments("savepreset",
+            "The preset name '" + name + "' is not valid."));
+        mErrors++;
+        return false;
+    }
+    std::string error;
+    if (!mPresets.Load(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    /* Saving over an existing preset updates only the settings the
+     * command names, like re-ticking a few boxes of the same
+     * copy-parameter list. */
+    TransferPreset preset;
+    const TransferPreset * previous = mPresets.Find(name);
+    if (previous != NULL)
+    {
+        preset = *previous;
+    }
+    else
+    {
+        preset.name = name;
+    }
+    for (size_t i = 1; i < args.size(); i++)
+    {
+        std::string setting = args[i];
+        if (!setting.empty() && setting[0] == '-')
+        {
+            setting.erase(0, 1);
+        }
+        const size_t eq = setting.find('=');
+        const std::string key = eq != std::string::npos ?
+            setting.substr(0, eq) : setting;
+        const std::string value = eq != std::string::npos ?
+            setting.substr(eq + 1) : std::string();
+        if (!mPresets.ParseSetting(key, value, preset, error))
+        {
+            console.Error(Texts::WrongArguments("savepreset", error));
+            mErrors++;
+            return false;
+        }
+    }
+    if (!mPresets.AddOrUpdate(preset, error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    if (!mPresets.Save(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    console.Status("Stored transfer preset '" + preset.name + "'.");
+    return true;
+}
+
+bool Script::RemovePresetCommand(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    if (args.size() != 1)
+    {
+        console.Error(Texts::WrongArguments("rmspreset",
+            "Syntax: rmspreset <name>."));
+        mErrors++;
+        return false;
+    }
+    std::string error;
+    if (!mPresets.Load(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    const TransferPreset * existing = mPresets.Find(args[0]);
+    if (existing == NULL)
+    {
+        console.Error(Texts::WrongArguments("rmspreset",
+            "There is no transfer preset named '" + args[0] + "' in '" +
+            mPresets.Path() + "'."));
+        mErrors++;
+        return false;
+    }
+    const std::string name = existing->name;
+    if (!mPresets.Remove(name, error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    if (!mPresets.Save(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    if (mActivePresetName == name)
+    {
+        mActivePresetName.clear();
+    }
+    console.Status("Removed transfer preset '" + name + "'.");
+    return true;
+}
+
+bool Script::ListPresetsCommand(const std::vector<std::string> & args)
+{
+    Console & console = Console::Instance();
+    if (!args.empty())
+    {
+        console.Error(Texts::WrongArguments("presets",
+            "Syntax: presets."));
+        mErrors++;
+        return false;
+    }
+    std::string error;
+    if (!mPresets.Load(error))
+    {
+        console.Error(error);
+        mErrors++;
+        return false;
+    }
+    if (mPresets.Presets().empty())
+    {
+        console.Status("There are no transfer presets in '" +
+            mPresets.Path() + "' (create one with 'savepreset').");
+        return true;
+    }
+    console.Status("Transfer presets in '" + mPresets.Path() + "':");
+    for (size_t i = 0; i < mPresets.Presets().size(); i++)
+    {
+        const TransferPreset & preset = mPresets.Presets()[i];
+        console.Status("  " + preset.name +
+            (preset.name == mActivePresetName ? " (active)" : "") +
+            " - " + preset.Describe());
+    }
+    return true;
+}
+
+/* ------------------------------------------------------------------ *
  * Stored sessions (the site manager)                                  *
  * ------------------------------------------------------------------ */
 
@@ -4229,6 +4795,10 @@ bool Script::StoredSessionsCommand(const std::vector<std::string> & args)
         {
             line += "  -> " + sessions[i].remoteDirectory;
         }
+        if (!sessions[i].preset.empty())
+        {
+            line += "  (preset " + sessions[i].preset + ")";
+        }
         console.WriteLine(line);
     }
     return true;
@@ -4241,6 +4811,13 @@ bool Script::OpenStoredSite(const std::string & name)
     {
         return false;
     }
+    /*
+     * The site brings its transfer preset along: a stored site defines
+     * its own defaults, so an empty value clears whatever preset an
+     * earlier connection had left active.
+     */
+    mActivePresetName = stored->preset;
+    mPresetOff = false;
     std::string error;
     if (mSession.IsOpen())
     {
@@ -4335,7 +4912,8 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
         console.Error(Texts::WrongArguments("savesession",
             "Syntax: savesession <name> [-host=HOST] [-port=N] [-username=NAME] "
             "[-protocol=SCHEME] [-privatekey=FILE] [-hostkey=KEY] "
-            "[-remotedir=DIR] [-localdir=DIR] [-password] [-password=PWD]."));
+            "[-remotedir=DIR] [-localdir=DIR] [-preset=NAME] "
+            "[-password] [-password=PWD]."));
         mErrors++;
         return false;
     }
@@ -4363,6 +4941,8 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
 
     std::string localDirectory;
     std::string remoteDirectory = mRemoteDirectory;
+    std::string storedPreset;
+    bool presetGiven = false;
     bool savePassword = false;
     std::string explicitPassword;
     bool passwordGiven = false;
@@ -4403,6 +4983,11 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
         {
             localDirectory = ExpandTilde(a.substr(strlen("-localdir=")));
         }
+        else if (StartsWith(lower, "-preset="))
+        {
+            storedPreset = a.substr(strlen("-preset="));
+            presetGiven = true;
+        }
         else if (lower == "-password")
         {
             savePassword = true;
@@ -4438,6 +5023,42 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
 
     StoredSession session = SessionStore::FromSessionOptions(name, options,
         remoteDirectory, localDirectory);
+    /* The transfer preset of this site: -preset=NAME sets it, -preset=
+     * clears it, and without the switch a re-save keeps whatever the
+     * site already had (a preset is configuration, not a secret). */
+    if (presetGiven)
+    {
+        if (!storedPreset.empty())
+        {
+            std::string presetError;
+            if (!mPresets.Load(presetError))
+            {
+                console.Error(presetError);
+                mErrors++;
+                return false;
+            }
+            const TransferPreset * preset = mPresets.Find(storedPreset);
+            if (preset == NULL)
+            {
+                console.Error(Texts::WrongArguments("savesession",
+                    "There is no transfer preset named '" + storedPreset +
+                    "' in '" + mPresets.Path() + "'; create it with "
+                    "'savepreset' first."));
+                mErrors++;
+                return false;
+            }
+            session.preset = preset->name;
+        }
+        else
+        {
+            session.preset.clear();
+        }
+    }
+    else
+    {
+        const StoredSession * previous = mSessions.Find(name);
+        session.preset = previous != NULL ? previous->preset : std::string();
+    }
     if (savePassword)
     {
         session.password = passwordGiven ? explicitPassword :
@@ -5774,14 +6395,15 @@ bool Script::SetOption(const std::vector<std::string> & args)
 {
     const std::string supported =
         "supported: echo, batch, confirm, resume, transfer, include, exclude, "
-        "failonnomatch, synchdelete, reconnecttime, editor, editmaxsize";
+        "failonnomatch, synchdelete, reconnecttime, editor, editmaxsize, "
+        "preset";
     if (args.empty())
     {
         /* 'option' with no name lists every option and its value, like
          * the upstream client. */
         const char * names[] = { "echo", "batch", "confirm", "resume",
             "transfer", "include", "exclude", "failonnomatch", "synchdelete",
-            "reconnecttime", "editor", "editmaxsize" };
+            "reconnecttime", "editor", "editmaxsize", "preset" };
         for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         {
             std::vector<std::string> one;
@@ -5842,6 +6464,13 @@ bool Script::SetOption(const std::vector<std::string> & args)
         {
             Console::Instance().Status(std::string("transfer = ") +
                 TransferModeName(mTransferMode));
+            return true;
+        }
+        if (name == "preset")
+        {
+            Console::Instance().Status("preset = " +
+                (mActivePresetName.empty() ? std::string("off") :
+                 mActivePresetName));
             return true;
         }
         if (name == "include")
@@ -5920,7 +6549,7 @@ bool Script::SetOption(const std::vector<std::string> & args)
      * second-guessed.
      */
     if (name != "include" && name != "exclude" && name != "editor" &&
-        name != "editmaxsize" && name != "reconnecttime")
+        name != "editmaxsize" && name != "reconnecttime" && name != "preset")
     {
         std::vector<std::string> vocabulary = ToggleNames();
         if (name == "batch")
@@ -6004,6 +6633,35 @@ bool Script::SetOption(const std::vector<std::string> & args)
             return false;
         }
         mTransferMode = mode;
+        return true;
+    }
+    if (name == "preset")
+    {
+        /* The value keeps its case: preset names are free text. */
+        if (value == "off")
+        {
+            mActivePresetName.clear();
+            mPresetOff = true;
+            return true;
+        }
+        std::string loadError;
+        if (!mPresets.Load(loadError))
+        {
+            Console::Instance().Error(loadError);
+            mErrors++;
+            return false;
+        }
+        const TransferPreset * preset = mPresets.Find(args[1]);
+        if (preset == NULL)
+        {
+            Console::Instance().Error(Texts::WrongArguments("option",
+                "There is no transfer preset named '" + args[1] + "' in '" +
+                mPresets.Path() + "'; create it with 'savepreset'."));
+            mErrors++;
+            return false;
+        }
+        mActivePresetName = preset->name;
+        mPresetOff = false;
         return true;
     }
     if (name == "include" || name == "exclude")
@@ -6223,7 +6881,10 @@ const struct ScriptCommandHelpEntry
             "  -resumesupport=on|off|<KB>, -speed=<KB/s>, -neweronly,\n"
             "  -noneweronly, -preservetime, -preservetime=all,\n"
             "  -nopreservetime, -r, -transfer=binary|ascii|automatic,\n"
-            "  -filemask=<mask>." },
+            "  -permissions[=<mode>], -nopermissions,\n"
+            "  -rawtransfersettings[=<count>], -filemask=<mask>.\n"
+            "  Without a value, -permissions gives the downloaded file\n"
+            "  the permissions of the remote one." },
         { "help", "help [ <command> ]\n"
             "  Prints the list of commands, or the help of one command." },
         { "keepuptodate", "keepuptodate [ <localdir> [ <remotedir> ] ]\n"
@@ -6251,12 +6912,24 @@ const struct ScriptCommandHelpEntry
         { "option", "option [ <name> [ <value> ] ]\n"
             "  Shows or changes a setting: echo, batch, confirm, resume,\n"
             "  transfer, include, exclude, failonnomatch, synchdelete,\n"
-            "  reconnecttime, editor, editmaxsize. Without a name it\n"
+            "  reconnecttime, editor, editmaxsize, preset. Without a name it\n"
             "  prints every setting; a name or a value may be abbreviated\n"
             "  as long as the abbreviation is unambiguous." },
+        { "presets", "presets\n"
+            "  Lists the transfer presets from the user configuration.\n"
+            "  A preset is stored with 'savepreset <name> <setting>...'\n"
+            "  (transfer=binary|ascii|automatic, preservetime=on|off|all,\n"
+            "  neweronly, speed=<KB/s>, resumesupport=on|off|<KB>,\n"
+            "  permissions=<octal>|off|fromfile, host=, user=, remotedir=,\n"
+            "  localdir=, mask=); 'rmspreset <name>' removes one.\n"
+            "  'option preset <name>' makes a preset the default for the\n"
+            "  following transfer commands, 'option preset off' disables\n"
+            "  presets for this session (even matching rules); a stored\n"
+            "  site loads its own when it is opened." },
         { "put", "put [ <switches> ] <file> [ <file>... ] [ <target> ]\n"
-            "  Uploads files; the switches of 'get' plus -permissions=\n"
-            "  and -nopermissions; -append adds to the remote file\n"
+            "  Uploads files; the switches of 'get' (on uploads,\n"
+            "  -permissions without a value keeps the local file's own\n"
+            "  mode on the server); -append adds to the remote file\n"
             "  instead of replacing it (native SFTP only, and not\n"
             "  together with -resume)." },
         { "pwd", "pwd\n"
@@ -6268,9 +6941,16 @@ const struct ScriptCommandHelpEntry
             "  Deletes empty remote directories." },
         { "rmsession", "rmsession <name>\n"
             "  Removes the stored session <name>." },
+        { "rmspreset", "rmspreset <name>\n"
+            "  Removes the transfer preset <name>; if it was active,\n"
+            "  transfers go back to their own settings." },
+        { "savepreset", "savepreset <name> <setting>[=<value>]...\n"
+            "  Stores or updates a transfer preset; settings without a\n"
+            "  value (neweronly) are switches. See 'help presets'." },
         { "savesession", "savesession <name> [ options ]\n"
             "  Stores the current session, or the one the options\n"
-            "  describe, under <name>." },
+            "  describe, under <name>; -preset=NAME also stores the\n"
+            "  transfer preset the site should load (-preset= clears it)." },
         { "show", "show\n"
             "  Not available in this build: the connection runs the SFTP\n"
             "  subsystem, so remote shell commands cannot be shown." },
@@ -6553,6 +7233,21 @@ bool Script::ExecuteCommand(const std::string & line)
     if (command == "savesession")
     {
         SaveStoredSession(args);
+        return true;
+    }
+    if (command == "savepreset")
+    {
+        SavePresetCommand(args);
+        return true;
+    }
+    if (command == "rmspreset")
+    {
+        RemovePresetCommand(args);
+        return true;
+    }
+    if (command == "presets")
+    {
+        ListPresetsCommand(args);
         return true;
     }
     if (command == "rmsession" || command == "delsession")

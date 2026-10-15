@@ -16,11 +16,11 @@
     "date": "2026-10-14",
     "suites": {
      "unit": "source/linux/tests/UnitTest.cpp - 728 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
-     "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file).",
+     "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader).",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused (SignatureDoesNotMatch from the server, a secret-key complaint before any request), bucket and object listings through mkdir/put, rmdir refusing a non-empty directory while accepting a marker-less prefix and refusing the bucket itself, an upload/download roundtrip with a checksum, a resumed download that only completes if the server's 206 byte range was used, rename as copy-plus-delete with the source gone afterwards, remove of a missing key failing, stat reporting the server's size and time, and botocore signing one request the server must accept - the reference implementation tying both sides to AWS's own behavior. POSIX-only (curl against 127.0.0.1), so it cannot be cited for Windows.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, search, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored).",
-     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: a wrong password refused by the 401 retry before any command runs, listings built from PROPFIND Depth 1 properties (type, size, date - including on a server that refuses GET on collections), stat carrying the real size and modification time and a missing path saying so, mkdir refusing an existing name, rmdir refusing a non-empty directory and succeeding once emptied, rename through MOVE leaving exactly the destination behind, remove of a missing file failing, and an upload/download roundtrip with a checksum. It then checks the console outputs that need a live session and that upstream defines: stat as exactly one listing line, cd and pwd printing the directory, dir listing, the open-session listing and active line of session, close naming the session it closed and refusing a foreign index, the no-match sentence of an empty mask with and without option failonnomatch, and the md/rename/recv/mget/mput/del/quit aliases doing their command's work. The suite is standard-library-only and the client speaks plain HTTP, so the same run happens on every platform CTest runs on, Windows included.",
+     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: a wrong password refused by the 401 retry before any command runs, listings built from PROPFIND Depth 1 properties (type, size, date - including on a server that refuses GET on collections), stat carrying the real size and modification time and a missing path saying so, mkdir refusing an existing name, rmdir refusing a non-empty directory and succeeding once emptied, rename through MOVE leaving exactly the destination behind, remove of a missing file failing, and an upload/download roundtrip with a checksum. It then checks the console outputs that need a live session and that upstream defines: stat as exactly one listing line, cd and pwd printing the directory, dir listing, the open-session listing and active line of session, close naming the session it closed and refusing a foreign index, the no-match sentence of an empty mask with and without option failonnomatch, and the md/rename/recv/mget/mput/del/quit aliases doing their command's work. It also drives transfer presets: an active ascii preset and a preset stored with its site converting a text upload, an explicit binary preset leaving the bytes alone, -permissions=<mode> on a download, and a raw TransferMode setting end to end. The suite is standard-library-only and the client speaks plain HTTP, so the same run happens on every platform CTest runs on, Windows included.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server."
     }
    },
@@ -29,8 +29,8 @@
     "date": "2026-10-14",
     "suites": {
      "unit": "linuxscp-unittest.exe, the same C++ checks, built and run by the MSVC and MinGW jobs.",
-     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, the upstream-shaped console outputs (help's two columns, lls columns, no-match sentences, exit/quit/end and the lcd/lpwd/session-offline refusals), which is where a Windows path or separator difference shows.",
-     "live-dav": "LiveDavTest.py against TestDavServer.py, the same throwaway WebDAV endpoint the Linux job runs: the full live suite through Windows curl - PROPFIND listings, stat as one listing line, mkdir/rmdir/rename/remove, the upload/download roundtrip, session and close with their upstream-shaped lines, the no-match sentence, and the md/rename/recv/mget/mput/del/quit aliases. This is the suite that carries the Windows evidence for the console commands that need a connection."
+     "script": "ScriptTest.py against linuxscp.exe - the command line, batch modes, exit codes, local listings and help, the upstream-shaped console outputs (help's two columns, lls columns, no-match sentences, exit/quit/end and the lcd/lpwd/session-offline refusals), which is where a Windows path or separator difference shows. The same suite carries the transfer-preset checks on Windows: savepreset/option preset/rmspreset, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation.",
+     "live-dav": "LiveDavTest.py against TestDavServer.py, the same throwaway WebDAV endpoint the Linux job runs: the full live suite through Windows curl - PROPFIND listings, stat as one listing line, mkdir/rmdir/rename/remove, the upload/download roundtrip, session and close with their upstream-shaped lines, the no-match sentence, and the md/rename/recv/mget/mput/del/quit aliases. It also drives transfer presets: an active ascii preset and a preset stored with its site converting a text upload, an explicit binary preset leaving the bytes alone, -permissions=<mode> on a download, and a raw TransferMode setting end to end. This is the suite that carries the Windows evidence for the console commands that need a connection."
     },
     "cannot_prove": "No SFTP or S3 session of any kind. The native PuTTY SFTP transport is not built for Windows, and the curl.exe that ships with Windows 10 and 11 has no SFTP or SCP support, so the Windows job cannot open an SFTP session against the test server; a curl built with libssh2 would change that, and the live S3 suite skips for the want of a listener there. WebDAV, which Windows curl does speak, is run live instead and is cited wherever a connection-level behaviour needs Windows evidence. What stays unproven on Windows: the SFTP transport itself, S3, permissions and timestamps on SFTP uploads, a POSIX server's path semantics, and every extension whose answer only an SFTP server can give (ln, chmod, checksum and friends)."
    }
@@ -42,12 +42,32 @@
    "notes": "Runs the command over SSH exec in a one-shot second connection and prints its output, like upstream 'call'. No interactive shell with a pty."
   },
   "ascii": {
-   "status": "partial",
-   "notes": "Sets 'option transfer ascii' like upstream, with arity checks; the conversion is applied by get/put/synchronize and was verified byte-exact against a live server. No per-site transfer presets."
+   "status": "verified",
+   "notes": "Sets 'option transfer ascii' like upstream, with arity checks; the conversion is applied by get/put/synchronize and was verified byte-exact against a live server. Transfer presets apply to this command - by 'option preset name', by 'savesession -preset=' when the site opens, and by the host/user/directory/mask rules when no preset was picked - with the command's own switches always winning, covered by the script suite and by an ascii preset converting a live upload on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "binary": {
-   "status": "partial",
-   "notes": "Sets 'option transfer binary' like upstream, with arity checks. No per-site transfer presets."
+   "status": "verified",
+   "notes": "Sets 'option transfer binary' like upstream, with arity checks. Transfer presets apply to this command - by 'option preset name', by 'savesession -preset=' when the site opens, and by the host/user/directory/mask rules when no preset was picked - with the command's own switches always winning, covered by the script suite and by an ascii preset converting a live upload on both platforms.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "bye": {
    "status": "verified",
@@ -155,15 +175,16 @@
    }
   },
   "get": {
-   "status": "partial",
-   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Missing: transfer presets, -permissions on downloads and upstream's raw transfer settings. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "status": "verified",
+   "notes": "Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks, size/time criteria), -filemask=, option include/exclude, failonnomatch, resume (binary only, rejected with ASCII), -resumesupport=on|off|<KB>, -append (native SFTP only), -speed=<KB/s>, -neweronly/-noneweronly and -preservetime[=all]. Speed, append, resume and the time preservation were verified against a live SFTP server. Transfer presets apply (see 'option'), '-permissions[=mode]' gives the downloaded file that local mode - the =mode form checked on a live server, the valueless form taking the remote file's mode when the server reports one (parse-checked) - and '-rawtransfersettings[=N]' accepts upstream's key=value vocabulary with a refused-by-name error for every setting this build does not apply, the TransferMode conversion exercised live - the preset and raw-setting parts covered by the script suite and a live WebDAV transfer on both platforms. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
-     "unit",
-     "live-sftp"
+     "script",
+     "live-dav"
     ],
     "windows": [
-     "unit"
+     "script",
+     "live-dav"
     ]
    }
   },
@@ -254,8 +275,18 @@
    }
   },
   "mget": {
-   "status": "partial",
-   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
+   "status": "verified",
+   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Transfer presets of the implementation this alias shares apply (by name, with the site, or by rule), covered by the preset tests of the script and live WebDAV suites. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "mkdir": {
    "status": "verified",
@@ -271,8 +302,18 @@
    }
   },
   "mput": {
-   "status": "partial",
-   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
+   "status": "verified",
+   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Transfer presets of the implementation this alias shares apply (by name, with the site, or by rule), covered by the preset tests of the script and live WebDAV suites. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "mv": {
    "status": "verified",
@@ -300,29 +341,30 @@
    }
   },
   "option": {
-   "status": "partial",
-   "notes": "echo, batch (on/off/abort/continue), confirm, resume, transfer (binary/ascii/automatic), include/exclude (one mask, setting either clears the other, 'clear' resets), synchdelete, failonnomatch, reconnecttime (seconds or off, with automatic reconnect), editor, editmaxsize, and a listing when called with no name. Option and value names may be abbreviated when the abbreviation is unambiguous; masks, programs and numbers are never abbreviated. Missing: transfer presets and per-site persistence of script options.",
+   "status": "verified",
+   "notes": "echo, batch (on/off/abort/continue), confirm, resume, transfer (binary/ascii/automatic), include/exclude (one mask, setting either clears the other, 'clear' resets), synchdelete, failonnomatch, reconnecttime (seconds or off, with automatic reconnect), editor, editmaxsize, and a listing when called with no name. Option and value names may be abbreviated when the abbreviation is unambiguous; masks, programs and numbers are never abbreviated. 'option preset <name>' selects a transfer preset for the following transfers, 'option preset off' disables presets for the session and a missing preset name fails loudly; 'savesession -preset=' persists the preset with the site, which loads it when opened, both directions covered by the script suite and the live WebDAV preset roundtrip.",
    "verified_on": {
     "linux": [
      "script",
-     "unit"
+     "live-dav"
     ],
     "windows": [
      "script",
-     "unit"
+     "live-dav"
     ]
    }
   },
   "put": {
-   "status": "partial",
-   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Missing: transfer presets and upstream's raw transfer settings. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "status": "verified",
+   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, -filemask=, option include/exclude, failonnomatch, -permissions=/-nopermissions, and the -resume, -append, -speed=, -resumesupport=, -neweronly/-noneweronly and -preservetime[=all] switches of 'get' (append and resume are mutually exclusive and need the native SFTP transport). Verified against a live server. Transfer presets apply (see 'option') and '-rawtransfersettings[=N]' understands upstream's key=value settings, refused by name when this build cannot apply them; a preset-driven ascii upload and a raw TransferMode upload were both checked against a live server. Setting permissions on the server itself needs the native SFTP transport, so -permissions on uploads stays parse-checked where curl cannot chmod; the preset and raw-setting parts are covered by the script and live WebDAV suites on both platforms. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
-     "live-sftp",
-     "manual"
+     "script",
+     "live-dav"
     ],
     "windows": [
-     "unit"
+     "script",
+     "live-dav"
     ]
    }
   },
@@ -339,8 +381,18 @@
    }
   },
   "recv": {
-   "status": "partial",
-   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
+   "status": "verified",
+   "notes": "Same implementation as 'get', including its -speed=, -append and -resumesupport= switches. Transfer presets of the implementation this alias shares apply (by name, with the site, or by rule), covered by the preset tests of the script and live WebDAV suites. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "rename": {
    "status": "verified",
@@ -379,8 +431,18 @@
    }
   },
   "send": {
-   "status": "partial",
-   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Missing: transfer presets. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server."
+   "status": "verified",
+   "notes": "Same implementation as 'put', including its -speed=, -append and -resumesupport= switches. Transfer presets of the implementation this alias shares apply (by name, with the site, or by rule), covered by the preset tests of the script and live WebDAV suites. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "verified_on": {
+    "linux": [
+     "script",
+     "live-dav"
+    ],
+    "windows": [
+     "script",
+     "live-dav"
+    ]
+   }
   },
   "session": {
    "status": "verified",
@@ -475,7 +537,7 @@
   {
    "name": "Transfers",
    "status": "partial",
-   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Missing: transfer presets and per-file progress reporting on the curl paths.",
+   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live on both platforms. Missing: per-file progress reporting on the curl paths.",
    "verified_on": {
     "linux": [
      "unit",
@@ -501,7 +563,7 @@
   {
    "name": "Sessions/configuration",
    "status": "partial",
-   "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import and last-used tracking. Stored passwords are encrypted under a sibling 'sessions.key' (created\non first use, user-only access) in a format the graphical client reads and\nwrites too. Missing: folder tree, raw settings and the full upstream\nconfiguration model.",
+   "notes": "sessions.ini site manager shared by the console and the graphical client: session, savesession, rmsession, 'open <name>', export/import, last-used tracking, and the transfer preset a site stores with '-preset=' and loads when it opens. Stored passwords are encrypted under a sibling 'sessions.key' (created\non first use, user-only access) in a format the graphical client reads and\nwrites too. Missing: folder tree, raw settings and the full upstream\nconfiguration model.",
    "verified_on": {
     "linux": [
      "script"
