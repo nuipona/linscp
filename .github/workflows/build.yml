@@ -205,17 +205,26 @@ jobs:
           fi
       - name: Check the package contents
         run: |
+          set -o pipefail
           deb=$(ls ../linuxscp_*_*.deb)
           echo "Built $deb"
-          dpkg-deb --contents "$deb" | tee "$RUNNER_TEMP/contents.txt"
-          # The package is the product: the console client, the GUI launcher
-          # and its web client, the desktop entry, the icon and the manual
-          # page all have to be in it.
+          dpkg-deb --contents "$deb" | tee "$RUNNER_TEMP/contents-raw.txt" |
+            awk '{print $NF}' | sed 's|^\./||' | sort > "$RUNNER_TEMP/contents.txt"
+          echo "Paths in the package:"
+          cat "$RUNNER_TEMP/contents.txt"
+          # The package is the product. The GUI's module and crypto helper
+          # are listed by name because a package that ships only one of them
+          # installs a launcher that cannot start, which is what the previous
+          # packaging did.
           for path in usr/bin/linuxscp usr/bin/linuxscp-gui \
+                      usr/share/linuxscp/gui/linuxscp_gui.py \
+                      usr/share/linuxscp/gui/linscp_crypto.py \
+                      usr/share/linuxscp/gui/web/index.html \
                       usr/share/applications/linuxscp.desktop \
                       usr/share/pixmaps/linuxscp.png \
+                      usr/share/icons/hicolor/scalable/apps/linuxscp.svg \
                       usr/share/man/man1/linuxscp.1.gz; do
-            grep -q " $path\$" "$RUNNER_TEMP/contents.txt" ||
+            grep -qx "$path" "$RUNNER_TEMP/contents.txt" ||
               { echo "::error::$path is missing from the package"; exit 1; }
           done
       - name: Install and smoke test it
