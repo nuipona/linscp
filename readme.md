@@ -16,33 +16,32 @@ downloads in, uploads out.
 ## Requirements
 
 Debian 12 (bookworm) or newer, on any architecture with a GCC or Clang
-toolchain. Native SFTP uses the bundled PuTTY core; other transfer paths require a
-protocol-capable `curl` executable. The GUI requires Python 3. No external
-SSH library is required for native POSIX SFTP.
+toolchain. Native SFTP uses the bundled PuTTY core; the other transfer paths
+require a protocol-capable `curl` executable. The GUI requires Python 3. No
+external SSH library is required for native SFTP.
 
     sudo apt install build-essential dpkg-dev curl python3
 
-On Windows: Windows 10 (1803) or later with CMake and Visual Studio
-2022 or MinGW-w64. The resulting `linuxscp.exe` needs a protocol-capable
-`curl.exe` at run time (plus Python 3 for the GUI). The in-box curl build
-has no SFTP or SCP support, so `open sftp://` reports that instead of starting a session that cannot transfer; a `curl.exe` whose `curl --version` output lists `SSH` is what makes SFTP usable there. See
-[`docs/windows.md`](docs/windows.md).
+LinSCP is a Linux application: the console client, the native SFTP transport,
+the `keepuptodate` watcher, the stored-session files and the desktop
+integration are all built for Linux, and nothing else is supported or tested.
 
 ## Building
 
     make -C source/linux            # -> source/linux/build/linuxscp
     make -C source/linux check      # builds and runs the unit tests
+    make -C source/linux check-live # the script and live-server suites
     make -C source/linux clean
 
-On Windows (or via CMake on any platform):
+CMake builds the same client, and registers the test suites with CTest:
 
-    windows\build.cmd               :: -> build-windows\Release\linuxscp.exe
-    cmake -S . -B build && cmake --build build   # Linux/CMake alternative
+    cmake -S . -B build && cmake --build build -j
+    ctest --test-dir build --output-on-failure
 
 To build a Debian package:
 
-    dpkg-buildpackage -b -us -uc    # -> ../linuxscp_1.0-1_<arch>.deb
-    sudo dpkg -i ../linuxscp_1.0-1_*.deb
+    dpkg-buildpackage -b -us -uc    # -> ../linuxscp_1.0-2_<arch>.deb
+    sudo dpkg -i ../linuxscp_1.0-2_*.deb
 
 See [`docs/debian.md`](docs/debian.md) for details, usage and the verified
 feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
@@ -55,36 +54,37 @@ feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
 ## Commander interface and upstream parity
 
 LinSCP implements a subset of WinSCP workflows, **not full upstream feature
-parity**. It has a command-line interpreter, native SFTP on POSIX, curl-backed
-transfer paths, basic recursive transfers/resume/synchronization, and a
-browser-based dual-pane Commander interface (`linuxscp-gui`) with a dark theme,
-WinSCP-style menu and F1–F10 layout, local and remote file viewing/editing,
-a transfer queue and bounded UTF-8 full-text search of remote files. The
-`keepuptodate` command reflects local changes onto the remote side; Linux watches
-recursively with inotify
-and Windows uses `ReadDirectoryChangesW`, with interval polling as a fallback.
+parity**. It has a command-line interpreter, native SFTP through the bundled
+PuTTY core, curl-backed transfer paths, basic recursive transfers, resume and
+synchronization, and a browser-based dual-pane Commander interface
+(`linuxscp-gui`) with a dark theme, WinSCP-style menu and F1–F10 layout, local
+and remote file viewing/editing, a transfer queue and bounded UTF-8 full-text
+search of remote files. The `keepuptodate` command reflects local changes onto
+the remote side, watching the local tree recursively with inotify and falling
+back to interval polling.
 
 Protocol URL acceptance is not proof of complete support: WebDAV lists and
 stats through PROPFIND, moves with MOVE, and file copies with COPY (falling
-back to a streamed copy when the server refuses COPY); locking, dead properties
-and conditional requests remain gaps. Amazon S3 signs with Signature Version 4,
-lists and stats objects, uses CopyObject for remote copies, and switches uploads
-larger than 16 MiB to multipart requests. Interrupted multipart uploads restart
-from the first part; ACLs, versioning, storage classes and server-side encryption
-options remain unsupported.
-Windows SSH protocols depend on the installed curl build. Scripting covers the
-WinSCP transfer switches (file masks, `-transfer=`, `-resume`, `-append`,
-`-speed=`, `-resumesupport=`, `-preservetime`) with upstream's `.filepart`
-staging for resume-capable transfers, named and rule-based transfer presets,
-unambiguous command and option abbreviations, script parameters with
-`%TIMESTAMP%` and environment expansion, and an XML action log. A session can
-be reached through a proxy: `open -rawsettings ProxyMethod=SOCKS5
-ProxyHost=... ProxyPort=...` applies upstream's proxy settings (SOCKS 4 and 5,
-HTTP CONNECT, a telnet or local command, with their DNS, localhost and
-exclude-list policy), `savesession -rawsettings` stores them with the site and
-encrypts the proxy password, and a setting or proxy this build cannot use is
-refused by name instead of being dropped. The .NET assembly and PowerShell
-automation APIs, SSH tunnels and session folder trees remain open gaps.
+back to a streamed copy when the server refuses COPY); locking, dead
+properties and conditional requests remain gaps. Amazon S3 signs with
+Signature Version 4, lists and stats objects, uses CopyObject for remote
+copies, and switches uploads larger than 16 MiB to multipart requests.
+Interrupted multipart uploads restart from the first part; ACLs, versioning,
+storage classes and server-side encryption options remain unsupported.
+
+Scripting covers the WinSCP transfer switches (file masks, `-transfer=`,
+`-resume`, `-append`, `-speed=`, `-resumesupport=`, `-preservetime`) with
+upstream's `.filepart` staging for resume-capable transfers, named and
+rule-based transfer presets, unambiguous command and option abbreviations,
+script parameters with `%TIMESTAMP%` and environment expansion, and an XML
+action log. A session can be reached through a proxy: `open -rawsettings
+ProxyMethod=SOCKS5 ProxyHost=... ProxyPort=...` applies upstream's proxy
+settings (SOCKS 4 and 5, HTTP CONNECT, a telnet or local command, with their
+DNS, localhost and exclude-list policy), `savesession -rawsettings` stores
+them with the site and encrypts the proxy password, and a setting or proxy
+this build cannot use is refused by name instead of being dropped. The .NET
+assembly and PowerShell automation APIs, SSH tunnels and session folder trees
+remain open gaps.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 for the pinned upstream baseline, command inventory, limitations and tests.
@@ -103,15 +103,20 @@ The supported commands and validation history are listed in
     /libs/putty             POSIX platform layer and charset code vendored from
                             PuTTY 0.85 (libs/putty/unix, libs/putty/charset)
     /logo                   project logo artwork
+    /source/gui             the browser Commander: Python server, web client
+                            and its tests
     /source/linux           the linuxscp client: front end, SFTP glue, tests
                             and the Makefile
     /source/putty           PuTTY SSH/SFTP core (platform-neutral)
+    /tools                  the upstream parity inventory checker
 
 ## Naming
 
 The product is branded **LinSCP**. The established `linuxscp` executable,
 `linuxscp(1)` manual page, `linuxscp-gui` launcher, package name and on-disk
-configuration paths are retained for compatibility. The upstream PuTTY and
+configuration paths are retained for compatibility. `LinSCP` is the name in the
+user-visible strings; `LinuxSCP` remains the name of the configuration
+directory (`~/.config/LinuxSCP`). The upstream PuTTY and
 WinSCP code keeps its original attribution; see [`license.txt`](license.txt).
 
 ## Licence
