@@ -49,8 +49,8 @@ build on any of them:
 * A platform record without a `how`, a dated `date` and described suites is an
   error, because evidence nobody can reproduce is not evidence.
 
-As it stands: 21 entries have evidence recorded on Linux, 13 on Windows, and
-**0 are `verified`**. The gap is not timidity - Windows has no way to test the
+As it stands: 48 entries have evidence recorded on Linux, 38 on Windows,
+and **34 are `verified`**. The gap is not timidity - Windows has no way to test the
 native PuTTY transport, permissions on uploads, or a POSIX server's path
 semantics, and the ledger says so per entry instead of rounding the whole
 inventory down to `partial`.
@@ -59,10 +59,11 @@ The count is not taken on trust either. Each test suite prints one line when
 it finishes - `evidence: suite=live-sftp platform=linux ran=6 skipped=0
 failed=0` - and the CI jobs repeat it as an annotation on the run. A suite that
 could not run because `paramiko` is missing shows up as `skipped=6`, which is
-the case a green check mark used to hide.
+the case a green check mark used to hide. The S3 suite reports its
+reference-signature test skipped the same way when `botocore` is absent.
 
-`edit`, `savesession`, `rmsession`, `sessions`, `show` and the extra aliases
-`del`, `md`, `sync`, `quit` and `end` are in that second list. `edit` in
+`edit`, `savesession`, `rmsession`, `sessions`, `show`, `attr` and the extra
+aliases `del`, `md`, `sync`, `quit` and `end` are in that second list. `edit` in
 particular is a LinuxSCP command: the upstream *script interpreter* has none,
 even though WinSCP edits files from its GUI and through its .NET assembly.
 
@@ -73,13 +74,13 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 | SFTP | Native PuTTY on POSIX, curl on Windows. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Remaining: metadata policies, and the native transport, which has no Windows side to verify. |
 | SCP | curl-dependent transfer path, not WinSCP's remote-shell filesystem engine. Listing and directory operations need a real SCP implementation. |
 | FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
-| WebDAV | HTTP operations exist, but listing does not implement DAV PROPFIND/XML properties. Not a complete WebDAV filesystem. |
-| S3 | URL maps to HTTPS, without AWS SigV4 signing or bucket/object listing. Authenticated Amazon S3 support is **not implemented**. |
-| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. That suite cannot run on Windows at all, because the `curl.exe` built into Windows has no SFTP support, so nothing about a Windows transfer is verified (`docs/windows.md`). Missing: transfer presets, the `.filepart` temporary-name policy and atomic temporary-file policies in general. |
+| WebDAV | A PROPFIND filesystem: Depth 0/1 listings parsed from the 207 multi-status (type, size, date - namespace prefix agnostic), stat with real sizes/times and proper missing-path reporting, MKCOL with named refusals, MOVE with an absolute-URI Destination, DELETE with 409 as 'not empty' and `rmdir` checking children first because DAV collection deletes are recursive; `open` probes with PROPFIND and refuses a 401 after the `--anyauth` challenge or a 405 that means the server is not DAV (`LiveDavTest.py` against a stdlib mock, Windows-portable). Missing: LOCK/UNLOCK, dead properties, COPY, `If` preconditions. |
+| S3 | AWS SigV4 over curl with path-style bucket access: `s3://` URLs (region from `AWS_REGION`/`AWS_DEFAULT_REGION`/the hostname/us-east-1), ListBuckets, ListObjectsV2 with delimiter and continuation, HEAD stat, get with range resume and `Last-Modified` preservation, put, directory markers with bucket-aware `mkdir`/`rmdir`, rename as copy-plus-delete, and refusal of unsigned or wrongly signed requests - signed vectors pinned to botocore in the unit suite and the whole loop against a TLS mock that re-derives signatures itself (`LiveS3Test.py`, Linux-only evidence). Missing: ACLs, versioning, multipart upload, storage classes, SSE options, and any Windows claim. |
+| Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. Resume-capable transfers stage through upstream's `.filepart` name and are renamed into place only when complete - `option resume automatic` (default) from upstream's 100 KB threshold, `on` always, `off` never - so an interrupted transfer never leaves a truncated file under the final name and a continuation reads the staging file instead of splicing the existing destination; the live suite covers both directions, the stale-staging-file restart and `option resume off`. That suite cannot run on Windows at all, because the `curl.exe` built into Windows has no SFTP support, so nothing about a Windows transfer is verified (`docs/windows.md`). Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live on both platforms. Missing: per-file progress reporting on the curl paths. |
 | Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=time\|size\|either\|none`, `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror` and ASCII conversion verified against a live server. Missing: path exclusions and a real watch mode: `keepuptodate` still repeats a full comparison on a timer. |
-| Sessions | `sessions.ini` site manager shared by the console and the GUI: `session`, `savesession`, `rmsession`, `open <name>`, export/import and last-used tracking; the GUI holds one persistent connection per tab. Missing folder trees, raw settings, encrypted passwords and the full upstream configuration model. |
-| Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account, encrypted credential store or upstream key-management UI. |
-| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header; the client has a jsdom regression test. Still not upstream Commander/Explorer: no drag and drop, custom commands, synchronized browsing or localization. |
+| Sessions | `sessions.ini` site manager shared by the console and the GUI: `sessions` (list, open by name, export/import), `savesession`, `rmsession`, `open <name>` and last-used tracking, while `session` itself follows upstream - open-session listing, active line and 1-based switching; the GUI holds one persistent connection per tab. Stored passwords are encrypted under a sibling `sessions.key`, in a format the GUI reads and writes too. Missing folder trees, raw settings and the full upstream configuration model. |
+| Security | POSIX password/key/agent and host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out; proxy/tunnel configuration and curl fingerprint equivalence are incomplete. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account or upstream key-management UI; stored session passwords are encrypted at rest under `sessions.key` rather than kept in the clear. |
+| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header. Synchronized browsing (both panes move as one, with a refusal - not a divergence - when the counterpart folder is missing) and drag and drop between the panes (payload, target highlight, the drop queuing exactly the dragged names, same-pane drops ignored) match WinSCP's Commander, asserted in `ClientTest.js`. Missing: custom commands, localization, and drops from the operating system's file manager. |
 | Editing/search | `edit` downloads, runs the configured editor and uploads on change, with a size limit (`option editmaxsize`) and a refusal when the remote file changed meanwhile; remote search walks directories by name mask. Missing save/upload monitoring of local edits, full-text search, encoding handling and the custom command system. |
 | Automation | CLI scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters, `%TIMESTAMP%` and environment expansion, and an XML action log (`-xmllog=`) with masked passwords. Missing: the .NET assembly and PowerShell APIs, and log-format equivalence - our log mirrors upstream's structure but does not copy a schema, since upstream has no XML session log to copy. |
 | Integration | Debian launcher/icons and external SSH terminal, not full desktop drag/drop, shell integration and extensions. Windows-only mechanisms need equivalent workflows, not silently skipped requirements. |
@@ -101,12 +102,33 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
   ascii|automatic` conversion (CRLF/LF) around every transfer, including
   planned synchronizations. Resuming stays binary-only and is rejected
   explicitly when combined with ASCII.
+* Transfer presets with upstream's copy-parameter vocabulary: named presets
+  (`savepreset`/`rmspreset`/`presets`, `option preset <name|off>`), the
+  preset stored with a site (`savesession -preset=`, restored by `open`) and
+  host/user/directory/mask rules applying one automatically - always under
+  the command's own switches, never over them. `-permissions` now works on
+  downloads too (bare = the remote file's mode, `=octal` = that mode) and
+  `-rawtransfersettings[=N]` accepts upstream's key=value settings with
+  refused-by-name errors for everything this build does not apply, all
+  covered by the script suite and a live WebDAV preset roundtrip on both
+  platforms.
 * New remote commands, each verified against a live in-process SFTP server:
   `cp` (server-side copy-data with streamed fallback, recursive),
   `ln`/`symlink` (SFTP SYMLINK), `checksum <alg> <file>` (server-side
   check-file-name first, local sha-256/sha-1/md5/crc32 through the PuTTY core
   as fallback, printed as `<hash> <file>`), and `call`/`!` (SSH exec in a
   one-shot second connection, leaving the SFTP session open).
+* Console parity pass against upstream `Script.cpp`: `session` now lists the
+  open sessions and switches by 1-based index (the stored sites moved to
+  `sessions`), `close [index]` prints the session it closed and refuses a
+  foreign index, `stat` prints the single listing line upstream prints (the
+  key/value block lives on as the `attr` addition the GUI parses), `lls`
+  prints upstream's date/time/size columns with `<DIR>` for directories,
+  `ls`/`lls` print the no-match sentence gated by `option failonnomatch`,
+  `lcd` prints the directory it changed into, and `help` lists commands in
+  upstream's two columns with aliases resolving to their command - each
+  covered by the script suite and, for anything needing a connection, the
+  live WebDAV suite, which is cited for Windows as well as Linux.
 * Command semantics completed: `cd` with no argument goes home and prints the
   directory, `ls` takes its mask from the trailing path component, `rm`
   supports `-onlyfile`, `rmdir`/`mv` take multiple arguments (with an existing
@@ -156,6 +178,28 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
   is an equivalent record, not an upstream format; passwords in site URLs
   and in `-password=` switches are masked before anything is written, also
   under `option echo on`.
+* Resume-capable transfers stage through `<destination>.filepart` and are
+  renamed into place only when complete, which is upstream's policy
+  (`PartialExt`): `option resume` gained its upstream third value
+  `automatic` as the default (binary files from 100 KB on, rsSmart),
+  alongside `on` (rsOn) and `off` (rsOff), and `-resumesupport=` still
+  overrides all three. The continuation offset is read only from the
+  staging file - never from an existing destination, whose content may be
+  an unrelated complete version - so a destination is replaced whole and
+  never spliced. Two script-visible consequences: an interrupted transfer
+  leaves `name.filepart` instead of a truncated `name`, and a batch
+  overwrite of an existing destination now also needs `option confirm
+  off` when `-resume` finds no staging file to continue, because the
+  overwrite is confirmed before the transfer instead of being assumed
+  from the switch.
+* `savesession <name> -password=...` stores the password encrypted under a
+  key file (`sessions.ini` -> `sessions.key`, created on first use with
+  user-only access) in the `lscp1$` format the graphical client also reads;
+  plaintext entries from before are upgraded on the next save. Omitting
+  `-password` still clears a password that could be read, but a value the
+  key file cannot decrypt is preserved across an unrelated re-save, and
+  `open <name>` reports why a stored password cannot be used instead of
+  silently connecting without it.
 
 These intentional fail-closed changes can break scripts that previously relied
 on silently ignored settings. Review those scripts; do not remove a safety
@@ -188,9 +232,14 @@ an explanation. It does not test behavior.
 kernel picks, in a jail of its own, and covers what a server-free test cannot:
 an open with the wrong password, an open with a pinned host key that does not
 match, `put`/`rm`/`mkdir` into a directory the server will not let us write, a
-download interrupted by Ctrl-C and its `get -resume`, a transfer whose server
-dies under it and the same resume against a restarted server, and
-`-preservetime` in both directions.
+download interrupted by Ctrl-C that stays in `.filepart` and is completed by a
+plain `get`, the same for an interrupted upload, a continuation that must not
+splice an existing destination, a transfer whose server dies under it and the
+same resume against a restarted server, `option resume off` disabling the
+staging, `-preservetime` in both directions, and the shared stored-password
+format: a password encrypted by the GUI's module authenticating the console
+client, a missing key file reported without losing the value, and a
+core-written password decrypted back by the GUI's reader.
 
 The server itself is a plain filesystem-backed SFTP + exec endpoint (user
 `testuser`, `LSCP_TEST_ROOT` as the visible root) that implements `chattr` for
@@ -249,11 +298,11 @@ to say what those suites proved.
 
 1. **Safety and automation:** host keys are verified and pinned rather than
    accepted, and the GUI API is loopback-only behind a per-run token; file
-   masks, ASCII/automatic conversion, reconnect and a live-server test harness
-   are in place. What is left is a user account or encrypted credential store,
-   `copyid`'s authorized_keys editing, batch per-file semantics, parameter
-   expansion and atomic transfers, plus live-server tests for failed opens,
-   denied operations and interruption/data integrity.
+   masks, ASCII/automatic conversion, reconnect, parameter expansion,
+   `.filepart` staging (the atomic temporary-file policy) and a live-server
+   test harness - including refused opens, denied operations and
+   interruption/data integrity - are in place. What is left is a user
+   account and upstream's batch per-file error/prompt semantics.
 2. **Real protocol coverage:** replace generic listing approximations with
    protocol-specific SCP, WebDAV and signed S3 clients; expand FTP/SFTP handling.
    Test CRUD, directory enumeration, metadata, authentication and resume against
@@ -264,8 +313,8 @@ to say what those suites proved.
    workflow and a real file-system watch mode behind `keepuptodate`.
    `-resumesupport=` thresholds and `-append` are in place for the native
    transport, with the curl backends refusing them explicitly.
-4. **Session and desktop capabilities:** session folders, raw settings and
-   encrypted passwords; queue priorities and transfer presets (speed limiting
+4. **Session and desktop capabilities:** session folders and raw settings;
+   queue priorities and transfer presets (speed limiting
    and reconnect exist); local-side
    editing, full-text search and custom commands; Commander/Explorer workflows,
    drag and drop, accessibility and translations, with GUI workflow tests.

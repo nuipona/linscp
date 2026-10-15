@@ -138,6 +138,11 @@ function text(id) {
   return node ? node.textContent.trim() : '<missing #' + id + '>';
 }
 
+function value(id) {
+  const node = window.document.getElementById(id);
+  return node ? node.value : '<missing #' + id + '>';
+}
+
 (async () => {
   await new Promise(resolve => setTimeout(resolve, 400));
 
@@ -259,6 +264,167 @@ function text(id) {
     doc.getElementById('syncModal').className.indexOf('open') >= 0);
   doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   check('Escape closes it', doc.getElementById('syncModal').className.indexOf('open') < 0);
+
+  // ---- Synchronized browsing ------------------------------------------
+  // The boot stub answers every list call with one fixed response, which
+  // cannot show navigation; switch to a path-aware stub for this section.
+  const LOCAL_DIRS = {
+    '/tmp/slowlocal': LOCAL_ENTRIES,
+    '/tmp/slowlocal/sub': [
+      { name: 'inner.txt', size: 3, is_dir: false, date: 'Oct 13 08:00',
+        permissions: '-rw-r--r--' }
+    ]
+  };
+  const REMOTE_DIRS = {
+    '/tmp/slowremote': REMOTE_ENTRIES,
+    '/tmp/slowremote/sub': [
+      { name: 'inner-remote.txt', size: 4, is_dir: false, date: 'Oct 13 08:01',
+        permissions: '-rw-r--r--' }
+    ]
+    // Deliberately no '/tmp/slowremote/testdir' -> '/tmp/slowlocal/testdir'
+    // mapping: 'testdir' exists only on the remote side.
+  };
+  const browseCalls = [];
+  window.fetch = (url, options) => {
+    const raw = String(url).replace('http://localhost:8080', '');
+    const parts = raw.split('?');
+    const path = parts[0];
+    calls.push({ path: path, options: options });
+    browseCalls.push(raw);
+    const params = new URLSearchParams(parts[1] || '');
+    if (path === '/api/local/list' || path === '/api/remote/list') {
+      const isLocal = path === '/api/local/list';
+      const dir = params.get('path') ||
+        (isLocal ? '/tmp/slowlocal' : '/tmp/slowremote');
+      const table = isLocal ? LOCAL_DIRS : REMOTE_DIRS;
+      const body = table[dir] ?
+        { success: true, path: dir, entries: table[dir] } :
+        { success: false, error: 'No such directory: ' + dir };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+    }
+    const body = responses[path];
+    if (body === undefined) {
+      return Promise.resolve(
+        { ok: true, json: () => Promise.resolve({ success: true }) });
+    }
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+  };
+  const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  window.toggleSyncBrowse();
+  check('synchronized browsing lights up when toggled',
+    doc.getElementById('syncBrowseBtn').className.indexOf('active') >= 0,
+    doc.getElementById('syncBrowseBtn').className);
+  await doc.getElementById('localFileList').children[1].ondblclick();
+  await wait(80);
+  check('entering sub locally moved the local pane',
+    value('localPathInput') === '/tmp/slowlocal/sub', value('localPathInput'));
+  check('the remote pane followed into its own sub',
+    value('remotePathInput') === '/tmp/slowremote/sub', value('remotePathInput'));
+  check('the follow asked for the counterpart path',
+    browseCalls.some(url =>
+      url.indexOf('path=' + encodeURIComponent('/tmp/slowremote/sub')) >= 0),
+    browseCalls.slice(-4).join(' | '));
+  check('the counterpane lists the sub contents',
+    text('remoteFileList').indexOf('inner-remote.txt') >= 0,
+    text('remoteFileList'));
+
+  await window.goUp('local');
+  await wait(80);
+  check('going up carries the pair back to the roots',
+    value('localPathInput') === '/tmp/slowlocal' &&
+    value('remotePathInput') === '/tmp/slowremote',
+    value('localPathInput') + ' / ' + value('remotePathInput'));
+
+  // A directory the other side does not have: neither pane moves.
+  await window.openEntry('remote',
+    REMOTE_ENTRIES.find(entry => entry.name === 'testdir'));
+  await wait(80);
+  check('a missing counterpart leaves both panes alone',
+    value('localPathInput') === '/tmp/slowlocal' &&
+    value('remotePathInput') === '/tmp/slowremote',
+    value('localPathInput') + ' / ' + value('remotePathInput'));
+
+  window.toggleSyncBrowse();
+  check('toggling synchronized browsing off',
+    doc.getElementById('syncBrowseBtn').className.indexOf('active') < 0,
+    doc.getElementById('syncBrowseBtn').className);
+  await doc.getElementById('localFileList').children[1].ondblclick();
+  await wait(80);
+  check('with it off the other pane stays put',
+    value('localPathInput') === '/tmp/slowlocal/sub' &&
+    value('remotePathInput') === '/tmp/slowremote',
+    value('localPathInput') + ' / ' + value('remotePathInput'));
+  await window.goUp('local');
+  await wait(80);
+
+  // ---- Drag and drop between the panes --------------------------------
+  function fakeTransfer() {
+    const store = {};
+    return {
+      effectAllowed: '', dropEffect: '',
+      setData(kind, value) { store[kind] = value; },
+      getData(kind) { return store[kind] || ''; }
+    };
+  }
+  const dragDt = fakeTransfer();
+  const dragStart = { dataTransfer: dragDt };
+  window.beginDrag('local', LOCAL_ENTRIES[0], dragStart);
+  check('the drag payload carries the dragged names',
+    JSON.parse(dragDt.getData('text/plain')).names.join(',') === 'a.txt',
+    dragDt.getData('text/plain'));
+  check('the payload names the source pane',
+    JSON.parse(dragDt.getData('text/plain')).side === 'local',
+    dragDt.getData('text/plain'));
+  check('dragging an unselected entry selects it',
+    window.selectedNames('local').join(',') === 'a.txt',
+    window.selectedNames('local').join(','));
+
+  const overEvent = {
+    dataTransfer: dragDt,
+    preventDefault() { this.prevented = true; }
+  };
+  window.dragOverPane('remote', overEvent);
+  check('dragover on the other pane is accepted',
+    overEvent.prevented === true, 'preventDefault not called');
+  check('the drop target highlights',
+    doc.getElementById('remotePane').className.indexOf('drop-target') >= 0,
+    doc.getElementById('remotePane').className);
+
+  const uploadsBefore = calls.filter(
+    call => call.path === '/api/transfer/upload').length;
+  await window.dropOnPane('remote', { dataTransfer: dragDt,
+    preventDefault() {} });
+  await wait(150);
+  const uploadCalls = calls.filter(
+    call => call.path === '/api/transfer/upload');
+  check('dropping on the other pane queues an upload',
+    uploadCalls.length === uploadsBefore + 1,
+    uploadsBefore + ' -> ' + uploadCalls.length);
+  const uploadBody = uploadCalls.length ?
+    JSON.parse(uploadCalls[uploadCalls.length - 1].options.body) : {};
+  check('the upload carries exactly the dragged names',
+    (uploadBody.names || []).join(',') === 'a.txt',
+    JSON.stringify(uploadBody.names));
+  check('the upload is rooted in both panes',
+    uploadBody.local_dir === '/tmp/slowlocal' &&
+    uploadBody.remote_dir === '/tmp/slowremote',
+    uploadBody.local_dir + ' / ' + uploadBody.remote_dir);
+  check('the highlight cleared after the drop',
+    doc.getElementById('remotePane').className.indexOf('drop-target') < 0,
+    doc.getElementById('remotePane').className);
+
+  // A drop on the pane the items came from queues nothing.
+  const sameDt = fakeTransfer();
+  window.beginDrag('local', LOCAL_ENTRIES[0], { dataTransfer: sameDt });
+  const sameBefore = calls.filter(
+    call => call.path === '/api/transfer/upload').length;
+  await window.dropOnPane('local', { dataTransfer: sameDt,
+    preventDefault() {} });
+  await wait(60);
+  check('a same-pane drop does not queue anything',
+    calls.filter(call => call.path === '/api/transfer/upload').length ===
+      sameBefore);
 
   // Every API call has to carry this run's token.
   check('every API call carries the token',

@@ -249,6 +249,21 @@ bool CreateLocalDirectoryRecursive(const std::string & path, std::string & error
     return CreateLocalDirectory(expanded, error);
 }
 
+bool SetLocalFileMode(const std::string & path, int mode, std::string & error)
+{
+    error.clear();
+#if defined(_WIN32)
+    if (_chmod(path.c_str(), mode & 07777) != 0)
+#else
+    if (chmod(path.c_str(), static_cast<mode_t>(mode & 07777)) != 0)
+#endif
+    {
+        error = LastSystemError();
+        return false;
+    }
+    return true;
+}
+
 bool RemoveLocalFile(const std::string & path, std::string & error)
 {
     error.clear();

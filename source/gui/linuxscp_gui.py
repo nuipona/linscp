@@ -49,6 +49,8 @@ import urllib.parse
 from fnmatch import fnmatch
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
+import linscp_crypto
+
 PORT = 8080
 HOST = "127.0.0.1"
 # Filled in by main(): one random token per run, required on every /api/ call.
@@ -238,6 +240,32 @@ def read_stored_sessions():
             current[field] = value
     if current:
         sessions.append(current)
+    for item in sessions:
+        value = item.get("password") or ""
+        item["password_locked"] = False
+        item["password_error"] = ""
+        if value.startswith("lscp1$"):
+            # Encrypted under the key file next to sessions.ini; a
+            # failure here leaves the session usable without the
+            # password (a key may be enough) but says why.
+            item["password"] = ""
+            try:
+                key = linscp_crypto.load_key(
+                    linscp_crypto.key_path_for(path))
+                item["password"] = linscp_crypto.decrypt(value, key)
+                if not item["password"]:
+                    item["password"] = ""
+                    item["password_locked"] = True
+                    item["password_error"] = \
+                        "the stored password in the file is empty"
+            except linscp_crypto.PasswordError as exc:
+                item["password_locked"] = True
+                item["password_error"] = str(exc)
+        elif value:
+            # Plaintext from a file written before the encryption
+            # existed; the console client rewrites it encrypted on the
+            # next save.
+            pass
     sessions.sort(key=lambda item: item["name"].lower())
     return sessions
 
@@ -984,6 +1012,11 @@ def save_stored_session(name, session, pin_hostkey=False):
         if key == "hostkey" and str(value).strip() == "*" and not pin_hostkey:
             continue
         command += ' %s="%s"' % (flag, str(value).replace('"', ""))
+    # Keep a usable password across edits: the console client encrypts
+    # it into sessions.ini itself. A locked one (no readable key file)
+    # is not in 'session' and stays as it is in the file.
+    if session.get("password"):
+        command += ' -password="%s"' % str(session["password"]).replace('"', "")
     code, stdout, stderr = run_linuxscp(command, session)
     if code == 0:
         add_log("Saved session '%s'" % name, "success")
@@ -1711,8 +1744,12 @@ def transfer_switches(body):
 
 
 def remote_stat(tab, remote_path, timeout=30):
-    """Parse the 'stat' output of the core into a dictionary."""
-    code, lines = tab.run("stat " + quote_remote(remote_path), timeout=timeout)
+    """Parse the 'attr' output of the core into a dictionary.
+
+    'attr' is the key/value breakdown of a remote file's attributes; the
+    upstream-shaped 'stat' prints a single listing line instead.
+    """
+    code, lines = tab.run("attr " + quote_remote(remote_path), timeout=timeout)
     if code != 0:
         return None
     info = {"path": remote_path, "size": 0, "mtime": 0, "is_dir": False,

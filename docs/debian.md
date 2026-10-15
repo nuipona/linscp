@@ -123,7 +123,11 @@ directory and created if it does not exist.
 Directory transfers are recursive by default or with the `-r` switch. Both `get`
 and `put` support WinSCP switches:
 * `-r`: transfer directories recursively.
-* `-resume`: resume interrupted transfers at the target byte offset.
+* `-resume`: resume interrupted transfers at the target byte offset. The bytes
+  of a resume-capable transfer arrive in a `<name>.filepart` staging file and
+  move onto the destination only when the file is complete, so an interrupted
+  transfer never leaves a truncated file under the final name; a retry
+  continues the staging file and never splices the existing destination.
 * `-delete`: remove source files after a successful transfer.
 * `-neweronly` / `-noneweronly`: transfer only files newer than the target, or
   ignore the dates again (`-noneweronly` is the default).
@@ -136,7 +140,10 @@ and `put` support WinSCP switches:
   for no limit. The native engine is paced between chunks, the curl paths get
   `--limit-rate`.
 * `-resumesupport=on|off|<KB>`: whether an interrupted file is continued at an
-  offset, and from what size on; `option resume on|off` is the default.
+  offset, and from what size on; `option resume on|off|automatic` is the
+  default. `automatic` is upstream's setting: binary files of at least 100 KB
+  (the threshold in kilobytes with `-resumesupport=`) are staged through
+  `.filepart`, `on` stages every eligible transfer and `off` none.
 * `-transfer=binary|ascii|automatic` and `-filemask=<masks>`: as for
   `synchronize`.
 An unknown switch, a value that is not one of the words above, or `-append`
@@ -179,8 +186,9 @@ Overwrite and delete confirmations are enabled by default. Interactive runs
 ask before replacing or removing data. In `-batch` or other non-interactive
 runs, an operation that needs confirmation fails without reading from stdin;
 put `option confirm off` in a trusted script to disable those checks.
-`option resume on|off` controls automatic transfer resumption across batch
-sessions. Scripts default to aborting after an error;
+`option resume on|off|automatic` controls automatic transfer resumption
+(`automatic`, the default, continues binary files from 100 KB on, like
+upstream) across batch sessions. Scripts default to aborting after an error;
 `option batch on|off|abort|continue` configures script batch mode. `on`/`abort`
 stop subsequent commands, while `off`/`continue` proceed but preserve a nonzero
 exit status. `echo`
@@ -247,10 +255,9 @@ This is deliberate: an ignored filter or setting would silently change what a
 script transfers or deletes.
 
 `keepuptodate` polls on a timer rather than watching the filesystem, so it is
-not the upstream background watcher, and there is no `stop` command. The
-`.filepart` temporary-name policy, queue priorities, S3 signing, DAV
-`PROPFIND` listing and WinSCP's `.NET` assembly are not implemented; see the
-pinned audit for the full list.
+not the upstream background watcher, and there is no `stop` command. Queue
+priorities, S3 signing, DAV `PROPFIND` listing and WinSCP's `.NET` assembly
+are not implemented; see the pinned audit for the full list.
 
 ### Authentication
 
@@ -265,6 +272,14 @@ pinned audit for the full list.
   load such keys into the agent instead.
 * **Password**: `-password=` or `LINUXSCP_PASSWORD`. In interactive mode the
   client asks; in `-batch` mode it fails rather than prompting.
+* **Stored password**: `savesession <name> -password=...` writes it encrypted
+  as `lscp1$...` under `sessions.key` next to `sessions.ini` (created on
+  first use, readable by this account only), never in the clear; a
+  plaintext entry from before that is rewritten encrypted on the next save.
+  Without the key file, `open <name>` says the stored password cannot be
+  used and continues without it (a key or an agent may still be enough),
+  and an unrelated re-save keeps the unreadable value instead of
+  destroying it. The graphical client reads and writes the same format.
 
 ### Host keys
 
@@ -392,6 +407,7 @@ implementation includes:
   `-parameter` with `%1%`..`%9%`, `%TIMESTAMP%` and `%ENVIRONMENT%`
   expansion, and an XML action log (`-xmllog=`).
 * Stored sessions shared with the GUI (`session`, `savesession`, `rmsession`,
-  export and import).
+  export and import), including the encrypted stored-password format both
+  clients read.
 * Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
 * Native Debian `.deb` packaging with standard menu launchers and icons.

@@ -62,6 +62,8 @@ bool MatchesMaskInsensitive(const std::string & mask, const std::string & name);
 std::string FormatSize(uint64_t size);
 std::string FormatPermissions(unsigned long permissions);
 std::string FormatFileTime(unsigned long time);
+std::string FormatFileDate(unsigned long time);
+std::string FormatFileClock(unsigned long time);
 
 /*
  * Permission parsing, for 'chmod' and for '-permissions='. The values are

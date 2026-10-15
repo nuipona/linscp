@@ -18,6 +18,7 @@ built into Windows has no SFTP or SCP support, so there is no session for
 these tests to open - not a slow test, an impossible one. A Windows install
 that puts a curl built with libssh2 on PATH gets these tests back.
 """
+import base64
 import hashlib
 import importlib.util
 import os
@@ -221,17 +222,58 @@ class LiveSftpTests(unittest.TestCase):
             os.chmod(locked, 0o700)
 
     @posix_only("Ctrl-C is delivered as a signal")
-    def test_interrupted_get_can_be_resumed_and_the_file_is_intact(self):
-        """Ctrl-C in the middle of a download must leave a partial file that
-        'get -resume' completes byte for byte - and must not touch the
-        source."""
+    def test_interrupted_get_stages_in_filepart_and_resumes(self):
+        """Ctrl-C in the middle of a download must leave the partial bytes
+        in '<name>.filepart' - the final name is written only when the file
+        is complete - and a retry must finish it byte for byte without
+        ever touching the source."""
         source = self.write_in_jail("big.bin", 6 << 20)
         digest = sha256_of(source)
         target = self.local / "big.bin"
+        part = self.local / "big.bin.filepart"
         client = self.start_detached("get -speed=512 /big.bin %s" % target)
         deadline = time.time() + 60
         while time.time() < deadline:
-            if target.exists() and target.stat().st_size >= (1 << 20):
+            if part.exists() and part.stat().st_size >= (1 << 20):
+                break
+            if client.poll() is not None:
+                self.fail("the download ended before it could be interrupted: " +
+                          client.stderr.read())
+            time.sleep(0.05)
+        else:
+            self.fail("the download never got far enough to interrupt")
+        # The safety property: nothing under the final name until it is whole.
+        self.assertFalse(target.exists())
+        client.send_signal(signal.SIGINT)
+        # Drain the pipes rather than just waiting: an interrupt has to be
+        # reported, and the child has to be reaped with its output read.
+        self.assertNotEqual(client.wait(timeout=60), 0)
+        client.communicate(timeout=60)
+        self.assertTrue(part.exists())
+        self.assertFalse(target.exists())
+        partial = part.stat().st_size
+        self.assertLess(partial, source.stat().st_size)
+        self.assertEqual(sha256_of(source), digest)
+
+        # The default 'option resume automatic' continues the staging file.
+        result = self.run_script("get /big.bin %s" % target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
+        self.assertEqual(target.stat().st_size, source.stat().st_size)
+        self.assertEqual(sha256_of(target), digest)
+
+    @posix_only("Ctrl-C is delivered as a signal")
+    def test_option_resume_off_transfers_without_a_staging_file(self):
+        """'option resume off' is upstream's rsOff: the file is written
+        under its final name directly, staging file or not."""
+        source = self.write_in_jail("nostage.bin", 200 << 10)
+        target = self.local / "nostage.bin"
+        part = self.local / "nostage.bin.filepart"
+        client = self.start_detached(
+            "option resume off ; get -speed=1024 /nostage.bin %s" % target)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if target.exists() and target.stat().st_size >= (32 << 10):
                 break
             if client.poll() is not None:
                 self.fail("the download ended before it could be interrupted: " +
@@ -240,29 +282,93 @@ class LiveSftpTests(unittest.TestCase):
         else:
             self.fail("the download never got far enough to interrupt")
         client.send_signal(signal.SIGINT)
-        # Drain the pipes rather than just waiting: an interrupt has to be
-        # reported, and the child has to be reaped with its output read.
         self.assertNotEqual(client.wait(timeout=60), 0)
         client.communicate(timeout=60)
-        partial = target.stat().st_size
-        self.assertLess(partial, source.stat().st_size)
-        self.assertEqual(sha256_of(source), digest)
+        self.assertFalse(part.exists())
+        self.assertTrue(target.exists())
 
-        result = self.run_script("get -resume /big.bin %s" % target)
+    def test_staged_resume_continues_the_staging_file_not_the_old_final(self):
+        """The complete file already at the destination must be replaced
+        whole, never spliced with the tail of a new download: only the
+        staging file supplies the offset."""
+        source = self.write_in_jail("fresh.bin", 2 << 20)
+        digest = sha256_of(source)
+        target = self.local / "fresh.bin"
+        part = self.local / "fresh.bin.filepart"
+        target.write_bytes(b"OLD CONTENT OF A COMPLETE FILE\n" * 4096)
+        with open(source, "rb") as src, open(part, "wb") as dst:
+            dst.write(src.read(512 << 10))
+        # A continuation needs no confirmation; a fresh overwrite would.
+        result = self.run_script("get /fresh.bin %s" % target)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 
+    def test_stale_filepart_bigger_than_the_source_is_replaced(self):
+        """A staging file that cannot have come from this source (it is
+        bigger than the source) is dropped, not resumed."""
+        source = self.write_in_jail("smallfresh.bin", 200 << 10)
+        digest = sha256_of(source)
+        target = self.local / "smallfresh.bin"
+        part = self.local / "smallfresh.bin.filepart"
+        part.write_bytes(b"\x5a" * (300 << 10))
+        result = self.run_script("get /smallfresh.bin %s" % target)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
+        self.assertEqual(sha256_of(target), digest)
+
+    @posix_only("Ctrl-C is delivered as a signal")
+    def test_interrupted_put_stages_in_filepart_and_resumes(self):
+        """The upload direction stages too: an interrupted 'put' leaves
+        the remote final name alone and the retry continues the remote
+        staging file."""
+        local = self.local / "upload-big.bin"
+        block = os.urandom(1 << 16)
+        with open(local, "wb") as handle:
+            for _ in range(64):  # 4 MiB
+                handle.write(block)
+        digest = sha256_of(local)
+        remote = self.root / "upload-big.bin"
+        remote_part = self.root / "upload-big.bin.filepart"
+        client = self.start_detached(
+            "put -speed=512 %s /upload-big.bin" % local)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if remote_part.exists() and remote_part.stat().st_size >= (1 << 20):
+                break
+            if client.poll() is not None:
+                self.fail("the upload ended before it could be interrupted: " +
+                          client.stderr.read())
+            time.sleep(0.05)
+        else:
+            self.fail("the upload never got far enough to interrupt")
+        self.assertFalse(remote.exists())
+        client.send_signal(signal.SIGINT)
+        self.assertNotEqual(client.wait(timeout=60), 0)
+        client.communicate(timeout=60)
+        self.assertTrue(remote_part.exists())
+        self.assertFalse(remote.exists())
+        self.assertLess(remote_part.stat().st_size, local.stat().st_size)
+
+        result = self.run_script("put %s /upload-big.bin" % local)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(remote_part.exists())
+        self.assertEqual(remote.stat().st_size, local.stat().st_size)
+        self.assertEqual(sha256_of(remote), digest)
+
     def test_resume_across_a_connection_that_died(self):
         """The connection going away mid-transfer is the case '-resume' exists
-        for: the retry has to finish the file, not restart it or splice it."""
+        for: the retry has to finish the file, not restart it or splice it,
+        and the bytes arrive in the staging file as upstream does it."""
         source = self.write_in_jail("dying.bin", 8 << 20)
         digest = sha256_of(source)
         target = self.local / "dying.bin"
+        part = self.local / "dying.bin.filepart"
         client = self.start_detached("get -speed=256 /dying.bin %s" % target)
         deadline = time.time() + 60
         while time.time() < deadline:
-            if target.exists() and target.stat().st_size >= (1 << 20):
+            if part.exists() and part.stat().st_size >= (1 << 20):
                 break
             if client.poll() is not None:
                 break
@@ -271,9 +377,10 @@ class LiveSftpTests(unittest.TestCase):
         self.stop_server(force=True)
         result = client.communicate(timeout=90)
         self.assertNotEqual(client.returncode, 0)
-        partial = target.stat().st_size
+        partial = part.stat().st_size
         self.assertGreater(partial, 0)
         self.assertLess(partial, source.stat().st_size)
+        self.assertFalse(target.exists())
         self.assertIn("failed", (result[0] + result[1]).lower())
 
         # The port and the process are replaced together; the next 'open'
@@ -282,10 +389,171 @@ class LiveSftpTests(unittest.TestCase):
         self.start_server()
         result = self.run_script("get -resume /dying.bin %s" % target, timeout=180)
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(part.exists())
         self.assertEqual(target.stat().st_size, source.stat().st_size)
         self.assertEqual(sha256_of(target), digest)
 
     @posix_only("curl cannot set the modification time of an upload")
+    # -- stored passwords, shared with the GUI ------------------------------
+    def clean_sessions(self):
+        """This config directory is shared by the class; a session file
+        left behind by one test must not decide the next one's outcome."""
+        for name in ("sessions.ini", "sessions.key"):
+            candidate = self.config / name
+            if candidate.exists():
+                candidate.unlink()
+
+    def run_stored(self, command, timeout=60):
+        """Run a script that is NOT prefaced with an open-by-URL, so a
+        stored session's own credentials are what gets used."""
+        argv = [BINARY, "-batch", "-hostkey=*",
+                "-command=" + command]
+        return subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout,
+                              env=dict(os.environ,
+                                       LINUXSCP_CONFIG_DIR=str(self.config)))
+
+    def gui_crypto(self):
+        """The graphical client's own reader for sessions.ini."""
+        gui_dir = HERE.parents[1] / "gui"
+        if str(gui_dir) not in sys.path:
+            sys.path.insert(0, str(gui_dir))
+        import linscp_crypto
+        return linscp_crypto
+
+    @posix_only("the test writes the key file with POSIX permissions")
+    def test_password_encrypted_by_python_opens_the_core(self):
+        """The whole point of the shared format: a password encrypted by
+        the GUI's module must authenticate the console client."""
+        linscp_crypto = self.gui_crypto()
+        self.clean_sessions()
+        try:
+            key = os.urandom(32)
+            (self.config / "sessions.key").write_text(
+                base64.b64encode(key).decode("ascii") + "\n")
+            (self.config / "sessions.ini").write_text(
+                "[vault]\n"
+                "protocol=sftp\n"
+                "host=127.0.0.1\n"
+                "port=%d\n"
+                "username=%s\n"
+                "password=%s\n" %
+                (self.port, USER, linscp_crypto.encrypt(PASSWORD, key)),
+                encoding="utf-8")
+
+            result = self.run_stored("open vault ; ls ; echo OPENED")
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+            self.assertIn("OPENED", result.stdout)
+
+            # Listing the sessions never prints the password either.
+            result = self.run_stored("sessions")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotIn(PASSWORD, result.stdout + result.stderr)
+        finally:
+            self.clean_sessions()
+
+    @posix_only("the test writes the key file with POSIX permissions")
+    def test_missing_key_file_is_reported_and_the_password_preserved(self):
+        """An undecryptable password stops nobody who has a key, says so
+        loudly, and survives a re-save that cannot read it."""
+        linscp_crypto = self.gui_crypto()
+        self.clean_sessions()
+        try:
+            key = os.urandom(32)
+            key_bytes = base64.b64encode(key).decode("ascii") + "\n"
+            (self.config / "sessions.key").write_text(key_bytes)
+            (self.config / "sessions.ini").write_text(
+                "[vault]\n"
+                "protocol=sftp\n"
+                "host=127.0.0.1\n"
+                "port=%d\n"
+                "username=%s\n"
+                "password=%s\n" %
+                (self.port, USER, linscp_crypto.encrypt(PASSWORD, key)),
+                encoding="utf-8")
+            before = (self.config / "sessions.ini").read_text(encoding="utf-8")
+            (self.config / "sessions.key").unlink()
+
+            result = self.run_stored("open vault")
+            combined = result.stdout + result.stderr
+            self.assertEqual(result.returncode, 1, combined)
+            self.assertIn("cannot be used", combined)
+            self.assertIn("sessions.key", combined)
+            # The file itself was not rewritten on the way to failure.
+            self.assertEqual(
+                (self.config / "sessions.ini").read_text(encoding="utf-8"),
+                before)
+
+            # An unrelated re-save must keep the value it cannot read.
+            result = self.run_stored(
+                "savesession vault -host=127.0.0.1 -port=%d -username=%s" %
+                (self.port, USER))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            text = (self.config / "sessions.ini").read_text(encoding="utf-8")
+            blob = None
+            for line in before.splitlines():
+                if line.startswith("password="):
+                    blob = line.split("=", 1)[1]
+            self.assertTrue(blob and blob.startswith("lscp1$"), before)
+            self.assertIn("password=" + blob, text)
+
+            # Key restored: the same session opens, by decryption.
+            (self.config / "sessions.key").write_text(key_bytes)
+            result = self.run_stored("open vault ; ls ; echo STILL_GOT_IT")
+            self.assertEqual(result.returncode, 0,
+                             result.stdout + result.stderr)
+            self.assertIn("STILL_GOT_IT", result.stdout)
+        finally:
+            self.clean_sessions()
+
+    @posix_only("the test writes the key file with POSIX permissions")
+    def test_password_stored_by_the_core_decrypts_in_python(self):
+        """And the other direction: what the console client encrypts has
+        to come back out through the GUI's reader, password and all."""
+        linscp_crypto = self.gui_crypto()
+        gui_dir = HERE.parents[1] / "gui"
+        if str(gui_dir) not in sys.path:
+            sys.path.insert(0, str(gui_dir))
+        self.clean_sessions()
+        try:
+            result = self.run_stored(
+                "savesession katsite -host=127.0.0.1 -port=%d -username=%s "
+                "-password=%s" % (self.port, USER, PASSWORD))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("stored encrypted", result.stdout)
+
+            text = (self.config / "sessions.ini").read_text(encoding="utf-8")
+            self.assertNotIn(PASSWORD, text)
+            blob = None
+            for line in text.splitlines():
+                if line.startswith("password="):
+                    blob = line.split("=", 1)[1]
+            self.assertTrue(blob and blob.startswith("lscp1$"), text)
+
+            key = linscp_crypto.load_key(
+                linscp_crypto.key_path_for(str(self.config / "sessions.ini")))
+            self.assertEqual(linscp_crypto.decrypt(blob, key), PASSWORD)
+
+            # The GUI's own session reader (the one the site list uses)
+            # reports it as usable, not locked.
+            import linuxscp_gui
+            old = os.environ.get("LINUXSCP_CONFIG_DIR")
+            os.environ["LINUXSCP_CONFIG_DIR"] = str(self.config)
+            try:
+                sessions = linuxscp_gui.read_stored_sessions()
+            finally:
+                if old is None:
+                    os.environ.pop("LINUXSCP_CONFIG_DIR", None)
+                else:
+                    os.environ["LINUXSCP_CONFIG_DIR"] = old
+            match = [s for s in sessions if s["name"] == "katsite"]
+            self.assertEqual(len(match), 1, sessions)
+            self.assertEqual(match[0]["password"], PASSWORD)
+            self.assertFalse(match[0].get("password_locked"))
+        finally:
+            self.clean_sessions()
+
     def test_timestamps_survive_in_both_directions(self):
         """'-preservetime' means the server time and the local time agree
         after a transfer, whichever way the bytes went - which only a real

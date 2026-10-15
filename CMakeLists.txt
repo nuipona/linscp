@@ -45,9 +45,12 @@ set(FRONTEND source/linux)
 set(FRONTEND_SOURCES
   ${FRONTEND}/Session.cpp
   ${FRONTEND}/SessionStore.cpp
+  ${FRONTEND}/TransferPresets.cpp
   ${FRONTEND}/SyncPlanner.cpp
   ${FRONTEND}/Editor.cpp
   ${FRONTEND}/ProtocolClient.cpp
+  ${FRONTEND}/S3SigV4.cpp
+  ${FRONTEND}/S3Client.cpp
   ${FRONTEND}/Script.cpp
   ${FRONTEND}/ScriptParams.cpp
   ${FRONTEND}/Console.cpp
@@ -104,6 +107,16 @@ if(Python3_Interpreter_FOUND)
   # never held up by a missing Python dependency.
   add_test(NAME live-sftp-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveSftpTest.py
+    $<TARGET_FILE:linuxscp>)
+  # Starts the throwaway S3 endpoint in tests/ over TLS; standard-library
+  # only, with botocore an optional extra one test skips without.
+  add_test(NAME live-s3-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveS3Test.py
+    $<TARGET_FILE:linuxscp>)
+  # The WebDAV endpoint is standard-library-only and the client speaks
+  # plain HTTP, so this suite runs wherever CTest does, Windows included.
+  add_test(NAME live-dav-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveDavTest.py
     $<TARGET_FILE:linuxscp>)
   add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)

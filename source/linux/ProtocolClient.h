@@ -8,6 +8,15 @@
 
 namespace linuxscp {
 
+/*
+ * The curl exit codes that say the endpoint itself is unusable (it
+ * could not be reached, the transport failed, it refused us at the
+ * protocol level). Anything else is the server answering, which
+ * 'open' must not second-guess. Shared with S3Client.cpp, whose
+ * requests are signed but whose transport is the same curl.
+ */
+bool IsCurlEndpointUnreachable(int code);
+
 class ProtocolClient
 {
 public:

@@ -28,6 +28,7 @@
 #include "Console.h"
 #include "Editor.h"
 #include "SessionStore.h"
+#include "S3SigV4.h"
 #include "SyncPlanner.h"
 
 namespace {
@@ -668,6 +669,8 @@ void TestScriptCommands()
     CHECK_TRUE(script.ExecuteLine("option resume on"));
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option resume off"));
+    CHECK_TRUE(script.ErrorCount() == 0);
+    CHECK_TRUE(script.ExecuteLine("option resume automatic"));
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.ExecuteLine("option batch abort"));
     CHECK_TRUE(script.ErrorCount() == 0);
@@ -1320,6 +1323,110 @@ void TestSyncStateFile()
 }
 
 /* ------------------------------------------------------------------ *
+ * Amazon S3 request signing (AWS Signature Version 4)                 *
+ * ------------------------------------------------------------------ */
+
+/*
+ * The vectors come from outside this code: the signing key is the
+ * worked example in AWS's "Signature Version 4 signing process"
+ * documentation (20150830 / us-east-1 / iam), and the two requests
+ * were signed by botocore 1.43 with a frozen clock (2026-01-15
+ * 10:30:00 UTC = epoch 1768473000). If any step of the construction
+ * here drifts, one of them stops matching.
+ */
+void TestS3SigV4()
+{
+    using namespace linuxscp::s3sig;
+
+    const std::string secret = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    CHECK_EQ(HexEncode(SigningKey(secret, "20150830", "us-east-1", "iam")),
+        "c4afb1cc5771d871763a393e44b703571b55cc28424d1a5e86da6ed3c154a4b9");
+
+    /* Encoding rules: the S3 flavor, '~' kept, uppercase hex. */
+    CHECK_EQ(UriEncode("a b/c+d~e", true), "a%20b/c%2Bd~e");
+    CHECK_EQ(UriEncode("a b/c+d~e", false), "a%20b%2Fc%2Bd~e");
+    CHECK_EQ(CanonicalQuery("b=2&a=1&a=0&a=10"), "a=0&a=1&a=10&b=2");
+    CHECK_EQ(CredentialScope("20260115", "us-east-1", "s3"),
+        "20260115/us-east-1/s3/aws4_request");
+    CHECK_EQ(AmzDate(1768473000ULL), "20260115T103000Z");
+    CHECK_EQ(DateStamp(1768473000ULL), "20260115");
+
+    const std::string emptyHash =
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+
+    /* A signed ListObjectsV2-style GET. */
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair("x-amz-date", "20260115T103000Z"));
+    headers.push_back(std::make_pair("host", "s3.example.com"));
+    headers.push_back(std::make_pair("x-amz-content-sha256", emptyHash));
+    const std::string canonical = CanonicalRequest("GET", "/bucket",
+        "delimiter=%2F&list-type=2&max-keys=100&prefix=docs%2Fa",
+        headers, emptyHash);
+    const std::string expectedCanonical =
+        "GET\n"
+        "/bucket\n"
+        "delimiter=%2F&list-type=2&max-keys=100&prefix=docs%2Fa\n"
+        "host:s3.example.com\n"
+        "x-amz-content-sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+        "x-amz-date:20260115T103000Z\n"
+        "\n"
+        "host;x-amz-content-sha256;x-amz-date\n"
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    CHECK_EQ(canonical, expectedCanonical);
+    const std::string scope = CredentialScope("20260115", "us-east-1", "s3");
+    const std::string toSign = StringToSign("20260115T103000Z", scope,
+        canonical);
+    const std::string signature = SignatureHex(toSign,
+        SigningKey(secret, "20260115", "us-east-1", "s3"));
+    CHECK_EQ(signature,
+        "7d151aa653d4a54778780085f0edbe6d135ed056a28e85bada65053d6e2e35ba");
+    CHECK_EQ(AuthorizationHeader("AKIDEXAMPLE", scope,
+                 "host;x-amz-content-sha256;x-amz-date", signature),
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260115/us-east-1/s3/aws4_request, "
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+        "Signature=7d151aa653d4a54778780085f0edbe6d135ed056a28e85bada65053d6e2e35ba");
+
+    /* And the whole Sign() pipeline, which must land on the same bytes
+     * (this is what the client actually calls). */
+    SignedRequest signed1 = Sign("GET", "/bucket",
+        "delimiter=%2F&list-type=2&max-keys=100&prefix=docs%2Fa",
+        "s3.example.com", std::vector<std::pair<std::string, std::string> >(),
+        emptyHash, 1768473000ULL, "us-east-1", "AKIDEXAMPLE", secret);
+    CHECK_EQ(signed1.canonicalRequest, expectedCanonical);
+    CHECK_EQ(signed1.signedHeaders, "host;x-amz-content-sha256;x-amz-date");
+    CHECK_EQ(signed1.authorization,
+        "AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260115/us-east-1/s3/aws4_request, "
+        "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
+        "Signature=7d151aa653d4a54778780085f0edbe6d135ed056a28e85bada65053d6e2e35ba");
+
+    /* A PUT with reserved characters in the key, UNSIGNED-PAYLOAD. */
+    std::vector<std::pair<std::string, std::string> > putHeaders;
+    putHeaders.push_back(std::make_pair("x-amz-date", "20260115T103000Z"));
+    putHeaders.push_back(std::make_pair("host", "s3.example.com"));
+    putHeaders.push_back(std::make_pair("x-amz-content-sha256",
+        "UNSIGNED-PAYLOAD"));
+    const std::string canonical2 = CanonicalRequest("PUT",
+        "/bucket/hello%20world%2Bdir/f.txt", "",
+        putHeaders, "UNSIGNED-PAYLOAD");
+    const std::string expectedCanonical2 =
+        "PUT\n"
+        "/bucket/hello%20world%2Bdir/f.txt\n"
+        "\n"
+        "host:s3.example.com\n"
+        "x-amz-content-sha256:UNSIGNED-PAYLOAD\n"
+        "x-amz-date:20260115T103000Z\n"
+        "\n"
+        "host;x-amz-content-sha256;x-amz-date\n"
+        "UNSIGNED-PAYLOAD";
+    CHECK_EQ(canonical2, expectedCanonical2);
+    const std::string signature2 = SignatureHex(
+        StringToSign("20260115T103000Z", scope, canonical2),
+        SigningKey(secret, "20260115", "us-east-1", "s3"));
+    CHECK_EQ(signature2,
+        "4e1f492da78c20e5bab873603c6ba95cba1ffd7b22d0275497cb4cc3d2dfbc56");
+}
+
+/* ------------------------------------------------------------------ *
  * Stored sessions                                                     *
  * ------------------------------------------------------------------ */
 
@@ -1413,6 +1520,203 @@ void TestSessionStore()
         CHECK_TRUE(reread.Find("backup") == NULL);
     }
 
+    /*
+     * The stored-password format is shared with the graphical client
+     * (source/gui/linscp_crypto.py). These vectors were produced by
+     * that implementation against key 00..1f and nonce 00..0f: if the
+     * construction here ever drifts, decrypting them fails.
+     */
+    {
+        std::string key;
+        for (size_t i = 0; i < 32; i++)
+        {
+            key += static_cast<char>(i);
+        }
+        std::string plain;
+        std::string error;
+        const std::string kat1 =
+            "lscp1$AAECAwQFBgcICQoLDA0ODzNWSp01TpOx8x81IxUhAo51bcOMpoJg2g83"
+            "SWf7byn+amPfGSNCsg==";
+        const std::string kat2 =
+            "lscp1$AAECAwQFBgcICQoLDA0ODyh/TZpwV840DnvHA0xT2r+AMLWGHq75A+y"
+            "WlakWbPb1Vamz4fx1qXAujDW+jENVNco73r8LQnf9okOrUaR9J3/jO9TylMxS"
+            "ZCsE0g==";
+        CHECK_TRUE(SessionStore::DecryptPassword(kat1, key, plain, error));
+        CHECK_EQ(plain, "kitten2");
+        CHECK_TRUE(SessionStore::DecryptPassword(kat2, key, plain, error));
+        CHECK_EQ(plain, "p@ss word: with $paces/slashes+plus\nnewline");
+
+        /* Round trip, and no plaintext anywhere near the ciphertext. */
+        std::string encoded;
+        CHECK_TRUE(SessionStore::EncryptPassword("hunter2!*()", key, encoded,
+            error));
+        CHECK_TRUE(encoded.compare(0, 6, "lscp1$") == 0);
+        CHECK_TRUE(encoded.find("hunter2") == std::string::npos);
+        std::string back;
+        CHECK_TRUE(SessionStore::DecryptPassword(encoded, key, back, error));
+        CHECK_EQ(back, "hunter2!*()");
+
+        /* Tampering and wrong keys are refused, not decoded to garbage.
+         * The flip has to land inside the base64 data: the last
+         * characters are padding, where 'A' (all zero bits) can decode
+         * to exactly the bytes the pad stood for - a 1-in-N chance of
+         * a 'tamper' that changes nothing, which showed up as a flaky
+         * pair of checks. Mid-string, every flip moves real bits. */
+        std::string tampered = encoded;
+        const size_t tamperAt = 6 + encoded.size() / 2;
+        tampered[tamperAt] =
+            tampered[tamperAt] == 'A' ? 'B' : 'A';
+        CHECK_FALSE(SessionStore::DecryptPassword(tampered, key, back, error));
+        CHECK_TRUE(!error.empty());
+        CHECK_FALSE(SessionStore::DecryptPassword(encoded,
+            std::string(32, 'x'), back, error));
+        CHECK_FALSE(SessionStore::DecryptPassword("no-such-format", key, back,
+            error));
+        CHECK_FALSE(SessionStore::EncryptPassword(std::string(5000, 'a'), key,
+            encoded, error));
+    }
+
+    /*
+     * On disk: encrypted, under a key file that appears with the first
+     * stored password and decrypts again on the next load.
+     */
+    {
+        const std::string secure = temporary + "/secure";
+        const std::string ini = secure + "/sessions.ini";
+        const std::string keyPath = secure + "/sessions.key";
+        SessionStore store(ini);
+        CHECK_EQ(store.KeyPath(), keyPath);
+        CHECK_FALSE(std::filesystem::exists(keyPath)); /* nothing yet */
+
+        StoredSession session;
+        session.name = "vault";
+        session.hostName = "vault.example.com";
+        session.protocol = "sftp";
+        session.password = "correct horse battery staple";
+        std::string error;
+        CHECK_TRUE(store.AddOrUpdate(session, error));
+        CHECK_TRUE(store.Save(error));
+
+        CHECK_TRUE(std::filesystem::exists(keyPath));
+        /* The file holds the ciphertext, never the password. */
+        FILE * file = fopen(ini.c_str(), "rb");
+        CHECK_TRUE(file != NULL);
+        std::string content;
+        if (file != NULL)
+        {
+            char buffer[4096];
+            size_t got;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                content.append(buffer, got);
+            }
+            fclose(file);
+        }
+        CHECK_TRUE(content.find("correct horse battery staple") ==
+            std::string::npos);
+        CHECK_TRUE(content.find("password=lscp1$") != std::string::npos);
+
+        /* And a fresh load decrypts it back. */
+        SessionStore reread(ini);
+        const StoredSession * found = reread.Find("vault");
+        CHECK_TRUE(found != NULL);
+        CHECK_EQ(found != NULL ? found->password : std::string("missing"),
+            "correct horse battery staple");
+        CHECK_TRUE(found != NULL && found->passwordRaw.empty());
+        CHECK_TRUE(found != NULL && found->passwordError.empty());
+
+        /*
+         * Without the key file the entry stays locked: the value is
+         * preserved byte for byte across a save, and the reason is
+         * reported for whoever tries to use it.
+         */
+        std::string keyFileContent;
+        file = fopen(keyPath.c_str(), "rb");
+        CHECK_TRUE(file != NULL);
+        if (file != NULL)
+        {
+            char buffer[512];
+            const size_t got = fread(buffer, 1, sizeof(buffer), file);
+            keyFileContent.assign(buffer, got);
+            fclose(file);
+        }
+        CHECK_TRUE(remove(keyPath.c_str()) == 0);
+
+        SessionStore locked(ini);
+        const StoredSession * held = locked.Find("vault");
+        CHECK_TRUE(held != NULL);
+        CHECK_TRUE(held != NULL && held->password.empty());
+        CHECK_TRUE(held != NULL && held->passwordStored);
+        CHECK_TRUE(held != NULL && !held->passwordRaw.empty());
+        CHECK_TRUE(held != NULL && !held->passwordError.empty());
+        const std::string blob = held != NULL ? held->passwordRaw : "";
+        CHECK_TRUE(blob.compare(0, 6, "lscp1$") == 0);
+        CHECK_TRUE(locked.Save(error));
+        SessionStore afterLockedSave(ini);
+        const StoredSession * stillHeld = afterLockedSave.Find("vault");
+        CHECK_TRUE(stillHeld != NULL && stillHeld->passwordRaw == blob);
+        CHECK_TRUE(stillHeld != NULL && stillHeld->password.empty());
+
+        /* Put the key back and the same value decrypts again. */
+        file = fopen(keyPath.c_str(), "wb");
+        CHECK_TRUE(file != NULL);
+        if (file != NULL)
+        {
+            fwrite(keyFileContent.data(), 1, keyFileContent.size(), file);
+            fclose(file);
+        }
+        SessionStore restored(ini);
+        const StoredSession * back2 = restored.Find("vault");
+        CHECK_TRUE(back2 != NULL);
+        CHECK_EQ(back2 != NULL ? back2->password : std::string("missing"),
+            "correct horse battery staple");
+        CHECK_TRUE(back2 != NULL && back2->passwordError.empty());
+    }
+
+    /*
+     * A plaintext password from before the encryption existed is read,
+     * and the next save upgrades it without ever writing it back in
+     * the clear.
+     */
+    {
+        const std::string legacyPath = temporary + "/legacy.ini";
+        FILE * file = fopen(legacyPath.c_str(), "wb");
+        CHECK_TRUE(file != NULL);
+        if (file != NULL)
+        {
+            fputs("[legacy]\nprotocol=sftp\nhost=old.example.com\n"
+                "password=hunter2-plain\n", file);
+            fclose(file);
+        }
+        SessionStore legacy(legacyPath);
+        const StoredSession * found = legacy.Find("legacy");
+        CHECK_TRUE(found != NULL);
+        CHECK_EQ(found != NULL ? found->password : std::string("missing"),
+            "hunter2-plain");
+        std::string error;
+        CHECK_TRUE(legacy.Save(error));
+
+        file = fopen(legacyPath.c_str(), "rb");
+        std::string content;
+        if (file != NULL)
+        {
+            char buffer[4096];
+            size_t got;
+            while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+            {
+                content.append(buffer, got);
+            }
+            fclose(file);
+        }
+        CHECK_TRUE(content.find("hunter2-plain") == std::string::npos);
+        CHECK_TRUE(content.find("password=lscp1$") != std::string::npos);
+
+        SessionStore upgraded(legacyPath);
+        const StoredSession * again = upgraded.Find("legacy");
+        CHECK_EQ(again != NULL ? again->password : std::string("missing"),
+            "hunter2-plain");
+    }
+
     /* Names are validated. */
     CHECK_FALSE(SessionStore::IsValidName(""));
     CHECK_FALSE(SessionStore::IsValidName(" leading"));
@@ -1498,9 +1802,11 @@ void TestNewScriptCommands()
     Console::Instance().SetBatchMode(false);
 
     /* The store is reachable through the script engine, and an empty one
-     * is reported instead of failing. */
+     * is reported instead of failing. 'sessions' is the stored-site
+     * listing; bare 'session' now follows upstream and needs a
+     * connection. */
     Script script;
-    CHECK_TRUE(script.ExecuteLine("session"));
+    CHECK_TRUE(script.ExecuteLine("sessions"));
     CHECK_TRUE(script.ErrorCount() == 0);
     CHECK_TRUE(script.Sessions().Empty());
 
@@ -1863,6 +2169,7 @@ int main()
     TestSyncPlanOrder();
     TestSyncStateFile();
     TestSessionStore();
+    TestS3SigV4();
     TestEditorHelpers();
     TestNewScriptCommands();
     TestPermissionModes();

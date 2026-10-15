@@ -173,6 +173,26 @@ class ScriptTests(unittest.TestCase):
                      "include", "exclude", "failonnomatch", "synchdelete",
                      "reconnecttime", "editor", "editmaxsize"):
             self.assertIn(name + " = ", result.stdout)
+        # The default resume mode is upstream's 'automatic' (rsSmart):
+        # binary files from a 100 KB threshold stage through .filepart.
+        self.assertIn("resume = automatic", result.stdout)
+
+    def test_option_resume_values(self):
+        for value, shown in (("on", "on"), ("off", "off"),
+                             ("automatic", "automatic"), ("aut", "automatic")):
+            with self.subTest(value=value):
+                result = self.run_commands(f"option resume {value}; option resume")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("resume = " + shown, result.stdout)
+        result = self.run_commands("option resume sometimes")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("on, off or automatic", result.stderr)
+        # 'option resume on' forces binary transfers, so an ASCII transfer
+        # is refused before any connection, like an explicit -resume.
+        result = self.run_commands("option resume on; get -transfer=ascii x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("binary only", result.stderr)
+        self.assertNotIn("Not connected", result.stderr)
 
     def test_option_echo_prints_commands(self):
         result = self.run_commands("option echo on; echo HELLO")
@@ -271,7 +291,7 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("Not connected", result.stderr)
 
     def test_stored_sessions(self):
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("no stored sessions", result.stdout)
 
@@ -280,7 +300,7 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Stored session 'demo'", result.stdout)
 
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("demo", result.stdout)
         self.assertIn("sftp://alice@demo.example.com:2222", result.stdout)
@@ -296,23 +316,99 @@ class ScriptTests(unittest.TestCase):
 
         result = self.run_commands("rmsession demo")
         self.assertEqual(result.returncode, 0, result.stderr)
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertIn("no stored sessions", result.stdout)
+
+    def test_savesession_stores_password_encrypted(self):
+        """A password given to savesession is written encrypted under a
+        key file, never in the clear, and the session list stays quiet
+        about it."""
+        import base64
+
+        result = self.run_commands(
+            "savesession secret -host=secret.example.com -username=alice "
+            "-password=hunter2-plain")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("stored encrypted", result.stdout)
+        self.assertIn("sessions.key", result.stdout)
+
+        stored = pathlib.Path(self.config) / "sessions.ini"
+        keyfile = pathlib.Path(self.config) / "sessions.key"
+        text = stored.read_text(encoding="utf-8")
+        self.assertNotIn("hunter2-plain", text)
+        self.assertIn("password=lscp1$", text)
+        self.assertTrue(keyfile.is_file())
+        key = base64.b64decode(keyfile.read_text().strip())
+        self.assertEqual(len(key), 32)
+        if os.name == "posix":
+            # Group or world readable is a bug, whatever the umask was.
+            # Windows has no permission bits to compare against.
+            self.assertEqual(keyfile.stat().st_mode & 0o077, 0)
+
+        # The listing shows the session, never the password.
+        result = self.run_commands("sessions")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("hunter2", result.stdout)
+
+        # Saving again without -password clears a password it could read
+        # (the documented way to remove one).
+        result = self.run_commands(
+            "savesession secret -host=secret.example.com -username=alice")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("password=", stored.read_text(encoding="utf-8"))
+
+    def test_savesession_keeps_a_password_it_cannot_decrypt(self):
+        """Without the key file the encrypted value is unreadable, and an
+        unrelated re-save must not destroy what it cannot see."""
+        import base64
+
+        result = self.run_commands(
+            "savesession locked -host=locked.example.com -password=keepme")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        stored = pathlib.Path(self.config) / "sessions.ini"
+        keyfile = pathlib.Path(self.config) / "sessions.key"
+        text = stored.read_text(encoding="utf-8")
+        blob = None
+        for line in text.splitlines():
+            if line.startswith("password="):
+                blob = line.split("=", 1)[1]
+        self.assertIsNotNone(blob)
+        self.assertTrue(blob.startswith("lscp1$"))
+        self.assertNotIn("keepme", text)
+        saved_key = keyfile.read_bytes()
+        keyfile.unlink()
+
+        # Re-save without the password: the entry is replaced, but the
+        # value it could not decrypt stays exactly as it was.
+        result = self.run_commands(
+            "savesession locked -host=locked.example.com -port=22")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = stored.read_text(encoding="utf-8")
+        self.assertIn("password=" + blob, text)
+        self.assertNotIn("keepme", text)
+
+        # With the key restored the same value decrypts again (the core
+        # reports the failure rather than using an empty password; the
+        # success side is covered by the live suite).
+        keyfile.write_bytes(saved_key)
+        key = base64.b64decode(saved_key.decode().strip())
+        self.assertEqual(len(key), 32)
 
     def test_session_export_import(self):
         self.run_commands("savesession one -host=one.example.com")
         exported = pathlib.Path(self.config) / "exported.ini"
-        result = self.run_commands(f'session export "{exported}"')
+        result = self.run_commands(f'sessions export "{exported}"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Exported 1 session", result.stdout)
         self.assertTrue(exported.is_file())
 
         result = self.run_commands("rmsession one")
         self.assertEqual(result.returncode, 0, result.stderr)
-        result = self.run_commands(f'session import "{exported}"')
+        result = self.run_commands(f'sessions import "{exported}"')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Imported 1 session", result.stdout)
-        result = self.run_commands("session")
+        result = self.run_commands("sessions")
         self.assertIn("one.example.com", result.stdout)
 
     def test_savesession_rejects_unknown_switches(self):
@@ -368,18 +464,114 @@ class ScriptTests(unittest.TestCase):
             (root / "directory").mkdir()
             result = self.run_commands(f'lls "{root}"')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(),
-                             ["directory", "hello world.txt", "other.bin"])
+            # Upstream's columns: date, time, size (or <DIR>), then name.
+            lines = result.stdout.splitlines()
+            self.assertEqual(len(lines), 3)
+            self.assertRegex(lines[0], r"\d{2}:\d{2} +<DIR> +directory$")
+            self.assertRegex(lines[1], r"\d{2}:\d{2} +4 hello world\.txt$")
+            self.assertRegex(lines[2], r"\d{2}:\d{2} +4 other\.bin$")
             result = self.run_commands(f'lls "{root / "*.txt"}"')
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(), ["hello world.txt"])
+            self.assertEqual(len(result.stdout.splitlines()), 1)
+            self.assertRegex(result.stdout,
+                             r"\d{2}:\d{2} +4 hello world\.txt$")
+            # A path that matches nothing is a no-match line, not a
+            # failure - unless failonnomatch turns it into one.
             result = self.run_commands(f'lls "{root / "missing"}"')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("No files found matching", result.stdout)
+            self.assertIn("No such file or directory", result.stdout)
+            result = self.run_commands(f'lls "{root / "*.none"}"')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("No files found matching '*.none'", result.stdout)
+            result = self.run_commands(
+                f'option failonnomatch on; lls "{root / "missing"}"')
             self.assertEqual(result.returncode, 1)
+            self.assertIn("No files found matching", result.stderr)
 
-    def test_help_alias(self):
+    def test_help_lists_commands_and_command_help(self):
+        """'help' lists every command in upstream's name/description
+        columns; 'help <command>' (aliases included) prints its help."""
+        result = self.run_commands("help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"(?m)^ascii\s+Transfers files")
+        self.assertRegex(result.stdout,
+                         r"(?m)^session\s+Lists the open sessions")
+        self.assertRegex(result.stdout, r"(?m)^attr\s+Prints path, size")
         result = self.run_commands("man")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("Commands:", result.stdout)
+        self.assertRegex(result.stdout, r"(?m)^ascii\s+Transfers files")
+        result = self.run_commands("help rename")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("mv <source>", result.stdout)
+        result = self.run_commands("help nosuchthing")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Unknown command", result.stderr)
+
+    def test_exit_and_bye_end_the_script(self):
+        """exit and bye stop the script where they are, like upstream's
+        continue flag: nothing after them runs."""
+        for stopper in ("exit", "bye"):
+            with self.subTest(stopper=stopper):
+                result = self.run_commands(f"echo ONE; {stopper}; echo TWO")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("ONE", result.stdout)
+                self.assertNotIn("TWO", result.stdout)
+
+    def test_lcd_prints_where_it_went(self):
+        """lcd reports the directory it changed into, like cd does."""
+        with tempfile.TemporaryDirectory(prefix="linuxscp lcd ") as tmp:
+            result = self.run_commands(f'lpwd; lcd "{tmp}"; lpwd; echo MARK')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.splitlines()
+            changed = lines[1]
+            self.assertIn(changed, (str(pathlib.Path(tmp)),
+                                    str(pathlib.Path(tmp).resolve())))
+            self.assertEqual(lines[2], changed)
+            self.assertIn("MARK", result.stdout)
+            result = self.run_commands(f'lcd "{tmp}/nope-here"; echo AFTER')
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn("AFTER", result.stdout)
+
+    def test_show_is_refused_with_the_reason(self):
+        """'show' exists only to say that this build has no shell state:
+        the connection runs the SFTP subsystem."""
+        result = self.run_commands("show ; echo AFTER")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("SFTP subsystem", result.stderr)
+        self.assertNotIn("AFTER", result.stdout)
+
+    def test_exit_aliases_end_the_script(self):
+        """quit and end stand for exit; '?' stands for help."""
+        for stopper in ("quit", "end"):
+            with self.subTest(stopper=stopper):
+                result = self.run_commands(f"echo ONE; {stopper}; echo TWO")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("ONE", result.stdout)
+                self.assertNotIn("TWO", result.stdout)
+        result = self.run_commands("?")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"(?m)^ascii\s+Transfers files")
+
+    def test_sync_alias_reaches_synchronize(self):
+        """'sync' validates as synchronize does - an unknown switch is
+        named as such rather than as an unknown command."""
+        result = self.run_commands(
+            "sync local -criteria=whenever ; echo AFTER")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("synchronize", result.stderr)
+        self.assertNotIn("Unknown command", result.stderr)
+
+    def test_session_and_close_need_a_connection(self):
+        """Like upstream's CheckSession, 'session' and 'close' refuse to
+        run before anything is open - argument checks happen after."""
+        for command in ("session", "session 1", "close", "close 1",
+                        "close 2"):
+            with self.subTest(command=command):
+                result = self.run_commands(command + "; echo AFTER")
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("Not connected", result.stderr)
+                self.assertNotIn("AFTER", result.stdout)
 
 
     def test_xml_action_log(self):
@@ -505,6 +697,90 @@ class ScriptTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 server.server_close()
+
+    def test_transfer_presets_and_permission_switches(self):
+        """Transfer presets end to end without a server: store, list,
+        update, remove, activate through 'option', per-site storage, and
+        the download form of '-permissions' plus '-rawtransfersettings'
+        validation."""
+        # store, list, update, remove
+        result = self.run_commands(
+            "savepreset asciitxt -transfer=ascii -preservetime=on "
+            "-mask=*.txt; presets")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("transfer=ascii", result.stdout)
+        self.assertIn("mask=*.txt", result.stdout)
+        result = self.run_commands(
+            "savepreset asciitxt -transfer=binary; presets")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("transfer=binary", result.stdout)
+        self.assertNotIn("transfer=ascii", result.stdout)
+        result = self.run_commands("rmspreset nosuchpreset")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no transfer preset named", result.stderr)
+
+        # activate, show, clear; unknown names are refused loudly
+        result = self.run_commands(
+            "savepreset p1 -transfer=binary; option preset p1; option")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("preset = p1", result.stdout)
+        result = self.run_commands("option preset nosuchpreset")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("There is no transfer preset named", result.stderr)
+        result = self.run_commands("option preset p1; option preset off; option")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("preset = off", result.stdout)
+
+        # a site stores and validates its preset
+        result = self.run_commands(
+            "savesession sx -host=host.example -preset=unknownpreset")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no transfer preset named", result.stderr)
+        result = self.run_commands(
+            "savepreset p1 -transfer=binary; "
+            "savesession sx -host=host.example -preset=p1; sessions")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("(preset p1)", result.stdout)
+
+        # '-permissions' without a value is understood on both directions
+        # (the run stops at the missing connection, not at the switch)
+        for command in ("get -permissions x /tmp/",
+                        "put -nopermissions x /tmp/",
+                        "put -permissions=640 x /tmp/"):
+            with self.subTest(command=command):
+                result = self.run_commands(command)
+                self.assertEqual(result.returncode, 1, command)
+                self.assertNotIn("Unsupported switch", result.stderr)
+                self.assertNotIn("applies to uploads only", result.stderr)
+
+        # -rawtransfersettings: the optional cap, upstream's own key
+        # names, and honest errors for the settings this build lacks
+        result = self.run_commands(
+            "get -rawtransfersettings=abc x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("number of settings", result.stderr)
+        result = self.run_commands(
+            "get -rawtransfersettings=1 calculateSize=1024 x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("has no equivalent", result.stderr)
+        self.assertIn("calculateSize", result.stderr)
+        result = self.run_commands(
+            "get -rawtransfersettings=1 NoSuchKey=1 x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("is not known to this build", result.stderr)
+        result = self.run_commands(
+            "get -rawtransfersettings=1 TransferMode=1 ResumeSupport=0 x /tmp/")
+        self.assertEqual(result.returncode, 1)
+        self.assertNotIn("raw transfer setting", result.stderr)
+        self.assertIn("Not connected", result.stderr)
+
+        # savepreset vocabulary errors name the setting at fault
+        result = self.run_commands("savepreset bad -nosuchsetting=1")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("nosuchsetting", result.stderr)
+        result = self.run_commands("savepreset bad -speed=lots")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("speed", result.stderr)
 
 
 def run_and_report():

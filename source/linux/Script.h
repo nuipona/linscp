@@ -17,8 +17,19 @@
 #include "SftpClient.h"
 #include "SyncPlanner.h"
 #include "TextMode.h"
+#include "TransferPresets.h"
 
 namespace linuxscp {
+
+/*
+ * Upstream's TResumeSupport, as the persistent 'option resume' setting:
+ * 'Automatic' is upstream's default rsSmart (binary files from a size
+ * threshold on resume), 'On' is rsOn and 'Off' rsOff. It decides what a
+ * transfer does when no '-resumesupport=' switch overrides it, and with
+ * it whether the transfer stages its data in the '.filepart' name that
+ * upstream uses before moving the completed file into place.
+ */
+enum class ResumeMode { Automatic, On, Off };
 
 struct TransferFlags
 {
@@ -62,12 +73,20 @@ struct TransferFlags
     /* '-preservetime=all': also give the transferred directories the
      * timestamps of their source, not just the files. */
     bool preserveTimeDirs;
+    /*
+     * Settings a switch of this command pinned (bit 0 transfer, 1
+     * preservetime, 2 neweronly, 3 resume, 4 permissions). A mask
+     * preset may override the session's values for one file but never
+     * a setting the command line stated itself.
+     */
+    unsigned explicitSettings;
 
     TransferFlags() : deleteSource(false), deleteObsolete(false),
         newerOnly(false), preserveTime(false), recursive(true),
         resume(false), transferMode(TransferMode::Binary), permissions(-1),
         maskGiven(false), resumeSupport(ResumeUnset), resumeThreshold(0),
-        speedKBytesPerSecond(0), append(false), preserveTimeDirs(false) {}
+        speedKBytesPerSecond(0), append(false), preserveTimeDirs(false),
+        explicitSettings(0) {}
 };
 
 class Script
@@ -150,20 +169,81 @@ private:
      * silently ignored. 'uploads' selects the switches of the upload
      * direction ('-permissions=').
      */
+    /* The active preset's settings into fresh flags, before switches. */
+    bool ApplySessionPreset(TransferFlags & flags, std::string & error);
+    /* The first mask preset accepting this file, into its flags. */
+    void ApplyMaskPreset(const std::string & fileName, TransferFlags & flags);
     bool ParseTransferSwitches(const std::string & command, bool uploads,
         const std::vector<std::string> & args, TransferFlags & flags,
         std::vector<std::string> & paths);
     /* Whether one file of this size is resumed under 'flags'. */
     bool Resumes(const TransferFlags & flags, unsigned long long size) const;
+
+    /*
+     * One file's journey through the '.filepart' staging name that upstream
+     * uses for resume-capable transfers: bytes are written to '<final>'
+     * while they are incomplete, and the finished file is moved onto
+     * '<final>' only once it is complete, so an interrupted transfer never
+     * leaves a truncated file where a whole one belongs.
+     */
+    struct TransferStage
+    {
+        /* The transfer uses the staging name at all. */
+        bool staged;
+        /* Direction: upload writes a remote staging file, download a
+         * local one. */
+        bool upload;
+        /* A usable '<final>.filepart' existed: continue at 'resumeOffset'
+         * instead of transferring from byte zero. */
+        bool continuing;
+        /* The staging file already holds every byte: skip the transfer
+         * and only move the file into place. */
+        bool complete;
+        /* The staging file exists but cannot be continued (it is bigger
+         * than the source, or the source size is unknown): it is removed
+         * before the transfer starts. */
+        bool stale;
+        unsigned long long resumeOffset;
+        std::string finalPath;
+        std::string partPath;
+        TransferStage() : staged(false), upload(false), continuing(false),
+            complete(false), stale(false), resumeOffset(0) {}
+    };
+
+    /*
+     * Resolves staging for one transfer. 'eligible' is the caller's
+     * decision that this transfer may resume at all (Resumes() and no
+     * '-append'); 'upload' selects the direction; 'totalSize' is the size
+     * of the source, 0 when it is unknown. Read-only: the existing staging
+     * file is inspected and a continuation is announced, but nothing is
+     * written or removed - that happens in PrepareStage, after the caller
+     * has confirmed overwriting the destination.
+     */
+    bool ResolveStage(bool eligible, bool upload,
+        const std::string & finalPath, unsigned long long totalSize,
+        TransferStage & stage, std::string & error);
+    /* Removes a staging file that cannot be continued; clears 'stale'
+     * once nothing is in the way. No-op otherwise. */
+    bool PrepareStage(TransferStage & stage, std::string & error);
+    /*
+     * Moves a completed staging file onto its final path. Locally this is
+     * the POSIX rename, which replaces an existing file in one step;
+     * remotely the destination is removed first, because not every
+     * protocol's rename replaces. On failure the complete data stays in
+     * the staging file and 'error' says so.
+     */
+    bool FinishStage(const TransferStage & stage, std::string & error);
+
     /* Reports a switch 'get' or 'put' cannot honour and counts an error;
      * always returns false, so that a parser can 'return SwitchError(...)'. */
     bool SwitchError(const std::string & command, const std::string & hint);
     bool ListLocal(const std::vector<std::string> & args);
     bool OpenSite(const std::vector<std::string> & args);
-    void CloseSite();
+    void CloseSite(const std::vector<std::string> & args);
     bool ChangeRemoteDirectory(const std::vector<std::string> & args);
     void PrintRemoteDirectory();
     bool ListRemote(const std::vector<std::string> & args);
+    void NoMatch(const std::string & mask, const std::string & error);
     bool ChangeLocalDirectory(const std::vector<std::string> & args);
     void PrintLocalDirectory();
     bool GetFiles(const std::vector<std::string> & args);
@@ -191,7 +271,11 @@ private:
     bool KeepUpToDate(const std::vector<std::string> & args);
     bool EditRemoteFile(const std::vector<std::string> & args);
     bool SessionCommand(const std::vector<std::string> & args);
+    bool StoredSessionsCommand(const std::vector<std::string> & args);
     bool SaveStoredSession(const std::vector<std::string> & args);
+    bool SavePresetCommand(const std::vector<std::string> & args);
+    bool RemovePresetCommand(const std::vector<std::string> & args);
+    bool ListPresetsCommand(const std::vector<std::string> & args);
     bool RemoveStoredSessionEntry(const std::vector<std::string> & args);
     /* Opens a stored session by name; false when there is no such
      * session, in which case the caller falls back to a URL. */
@@ -224,6 +308,7 @@ private:
     bool ApplyRemotePermissions(const std::string & path, const std::string & mode,
         bool recursive, unsigned long long & changed);
     bool StatRemote(const std::vector<std::string> & args);
+    bool AttrRemote(const std::vector<std::string> & args);
     bool SetOption(const std::vector<std::string> & args);
     void OpenTerminal(const std::vector<std::string> & args);
     void PrintHelp(const std::vector<std::string> & args);
@@ -287,11 +372,15 @@ private:
     int RemoteSetTimes(const std::string & path, unsigned long atime,
         unsigned long mtime, std::string & error);
     /* The same transfers with ASCII line-ending conversion applied
-     * around the binary transfer when the mode asks for it. */
+     * around the binary transfer when the mode asks for it.
+     * 'sourceSize' is the size of the file being transferred, used for
+     * the '.filepart' staging decision; 0 when it is unknown. */
     int RemoteGetMode(const std::string & remote, const std::string & local,
-        TransferMode mode, unsigned long long * size, std::string & error);
+        TransferMode mode, unsigned long long sourceSize,
+        unsigned long long * size, std::string & error);
     int RemotePutMode(const std::string & local, const std::string & remote,
-        TransferMode mode, unsigned long long * size, std::string & error);
+        TransferMode mode, unsigned long long sourceSize,
+        unsigned long long * size, std::string & error);
     int RemoteRemove(const std::string & path, std::string & error);
     int RemoteRemoveDir(const std::string & path, std::string & error);
     int RemoteMakeDir(const std::string & path, int permissions, std::string & error);
@@ -321,7 +410,8 @@ private:
     BatchMode mBatchMode;
     bool mBatchConfigured;
     bool mConfirm;
-    bool mResume;
+    /* 'option resume': upstream's persistent resume setting. */
+    ResumeMode mResumeMode;
     bool mExit;
     int mErrors;
     bool mLastCommandFailed;
@@ -330,6 +420,18 @@ private:
     std::string mEditor;
     unsigned long long mEditMaxSize;
     /* 'option transfer' / 'ascii' / 'binary' / '-transfer='. */
+    /*
+     * The active transfer preset: a name chosen with 'option preset',
+     * stored with a site ('savesession -preset=') or, when no name is
+     * set, the first preset whose host/user/directory rule matches the
+     * connection. The store reloads from transfer-presets.ini whenever
+     * a transfer resolves it, so an edit to the file takes effect.
+     */
+    TransferPresetStore mPresets;
+    std::string mActivePresetName;
+    /* Set by 'option preset off': no preset at all for this session,
+     * not even one whose host/user/directory rule matches. */
+    bool mPresetOff = false;
     TransferMode mTransferMode;
     /* 'option include' / 'option exclude' (one WinSCP mask: setting one
      * half replaces the other, like upstream). */
