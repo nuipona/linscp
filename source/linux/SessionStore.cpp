@@ -1147,7 +1147,7 @@ bool SessionStore::Save(std::string & error) const
         error = std::string("Cannot write the session file '") + mPath + "'.";
         return false;
     }
-    fprintf(file, "# LinuxSCP stored sessions. Names may contain '/' to group\n");
+    fprintf(file, "# LinSCP stored sessions. Names may contain '/' to group\n");
     fprintf(file, "# sessions into folders. Passwords are only stored when\n");
     fprintf(file, "# they are saved explicitly, encrypted under sessions.key.\n");
     for (size_t i = 0; i < sorted.size(); i++)

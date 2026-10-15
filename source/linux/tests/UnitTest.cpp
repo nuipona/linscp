@@ -1,5 +1,5 @@
 /*
- * Unit tests for the platform-neutral parts of the LinuxSCP front end:
+ * Unit tests for the platform-neutral parts of the LinSCP front end:
  * command line splitting, path handling, file masks, the output
  * formatting helpers, site URL parsing and local file system access.
  *

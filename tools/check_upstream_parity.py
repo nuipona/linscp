@@ -156,7 +156,7 @@ def main():
         print(f"Evidence recorded per platform ({summary}); "
               f"{evidence['verified']} of {evidence['entries']} entries verified.")
     print(f"Upstream {inventory['upstream']['commit']}: "
-          f"{len(commands)} commands, {additions} LinuxSCP-specific entries, "
+          f"{len(commands)} commands, {additions} LinSCP-specific entries, "
           f"{len(inventory['features'])} feature areas, {gaps} tracked gaps. "
           "Inventory validation is not a parity certification.")
     if args.require_full and gaps:

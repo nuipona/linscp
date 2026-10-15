@@ -1,9 +1,9 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=LinuxSCP
-GenericName=File Transfer Client
-Comment=Dual-Pane SFTP, FTP, WebDAV and S3 File Transfer Client
+Name=LinSCP
+GenericName=Secure File Transfer Client
+Comment=Dual-Pane File Transfer Client with SFTP, FTP, WebDAV and S3
 Exec=linuxscp-gui %u
 Icon=linuxscp
 Terminal=false

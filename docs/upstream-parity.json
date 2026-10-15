@@ -473,7 +473,7 @@
   },
   "stat": {
    "status": "verified",
-   "notes": "Prints the one listing line upstream prints for the path (the line 'ls -l' shows: permissions, links, owner, group, size, time and name), exactly one line with no key/value text. The breakdown this used to print lives on as the LinuxSCP addition 'attr', which the graphical client parses instead. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
+   "notes": "Prints the one listing line upstream prints for the path (the line 'ls -l' shows: permissions, links, owner, group, size, time and name), exactly one line with no key/value text. The breakdown this used to print lives on as the LinSCP addition 'attr', which the graphical client parses instead. Covered by the live WebDAV suite on both platforms and the live S3 suite on Linux.",
    "verified_on": {
     "linux": [
      "live-dav",
@@ -672,7 +672,7 @@
   {
    "name": "edit",
    "status": "partial",
-   "notes": "Downloads the remote file, runs $LINUXSCP_EDITOR/$EDITOR or option editor, and uploads it back when it changed, refusing files over option editmaxsize and refusing to overwrite a file modified since the download. No local-side edit, no editor fallback chain or encoding handling beyond the installed editor. Upstream's script interpreter has no 'edit' command at the pinned commit, so this is a LinuxSCP command rather than parity work."
+   "notes": "Downloads the remote file, runs $LINUXSCP_EDITOR/$EDITOR or option editor, and uploads it back when it changed, refusing files over option editmaxsize and refusing to overwrite a file modified since the download. No local-side edit, no editor fallback chain or encoding handling beyond the installed editor. Upstream's script interpreter has no 'edit' command at the pinned commit, so this is a LinSCP command rather than parity work."
   },
   {
    "name": "savesession / rmsession",

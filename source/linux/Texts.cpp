@@ -12,7 +12,7 @@ extern "C" const char * get_putty_version(void);
 namespace linuxscp {
 namespace Texts {
 
-const char * const ProductName = "LinuxSCP";
+const char * const ProductName = "LinSCP";
 const char * const ProductVersion = "1.0";
 
 namespace {
@@ -40,7 +40,7 @@ std::string VersionLine()
 std::string Usage()
 {
     return
-"LinuxSCP " + std::string(ProductVersion) + " - secure file transfer client\n"
+"LinSCP " + std::string(ProductVersion) + " - secure file transfer client\n"
 "\n"
 "  linuxscp [options] [sftp://[user[:password]@]host[:port]/[path]]\n"
 "\n"

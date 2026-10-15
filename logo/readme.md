@@ -1,4 +1,4 @@
-# LinuxSCP logo
+# LinSCP logo
 
 The mark is a fairy penguin - *Eudyptula minor*, the smallest penguin, whose
 feathers are slate blue - with a blue arrow arriving from the left (downloads)

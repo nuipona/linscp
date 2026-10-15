@@ -1,6 +1,6 @@
-# LinuxSCP on Windows
+# LinSCP on Windows
 
-LinuxSCP runs on Windows 10 (1803) and later, and on Windows 11, with
+LinSCP runs on Windows 10 (1803) and later, and on Windows 11, with
 the same commands, script syntax and exit codes as on Linux. This
 document covers building, installing and using the Windows build, and
 the places where Windows behaviour differs.
@@ -171,7 +171,7 @@ backend are:
 | Symptom | What to do |
 | --- | --- |
 | `curl was not found on PATH` | You are on a stripped Windows image; install curl or add `%SystemRoot%\System32` to `PATH`. Windows 10 1803+ always has `curl.exe`. |
-| `Cannot start the LinuxSCP core binary` (GUI) | Build the console client (`windows\build.cmd`) or put `linuxscp.exe` next to `linuxscp_gui.py` / on `PATH`, then restart the GUI. |
+| `Cannot start the LinSCP core binary` (GUI) | Build the console client (`windows\build.cmd`) or put `linuxscp.exe` next to `linuxscp_gui.py` / on `PATH`, then restart the GUI. |
 | `Permission denied` with a key that works in PuTTY | The key is probably `.ppk`; export an OpenSSH key from PuTTYgen (see above). |
 | Host key verification failed in batch mode | Record the key in `%USERPROFILE%\.ssh\known_hosts` (e.g. with Windows' `ssh` client), pin the MD5 fingerprint, or use `-hostkey=*` for one-off targets. |
 | Paths with spaces fail | Quote them in scripts: `get "my file.txt" "C:\My Documents"` — a backslash is a path separator, never an escape character, in the Windows build. |

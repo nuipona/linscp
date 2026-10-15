@@ -1,4 +1,4 @@
-/* Smoke test for the LinuxSCP Commander web client: boots the real page in
+/* Smoke test for the LinSCP Commander web client: boots the real page in
  * jsdom with a stubbed backend and checks that the UI renders and reacts. */
 const fs = require('fs');
 const path = require('path');
@@ -19,9 +19,11 @@ const { JSDOM } = loadJsdom();
 /* Usage: node ClientTest.js [path/to/index.html]
  *
  * Needs jsdom:  npm install jsdom   (in any directory on NODE_PATH or above
- * the page). The backend is stubbed, so no LinuxSCP build is required. */
+ * the page). The backend is stubbed, so no LinSCP build is required. */
 const PAGE = process.argv[2] || path.join(__dirname, '..', 'web', 'index.html');
-const html = fs.readFileSync(PAGE, 'utf8');
+  const html = fs.readFileSync(PAGE, 'utf8');
+  const themeCss = fs.readFileSync(path.join(__dirname, '..', 'web', 'theme.css'), 'utf8');
+  const iconSvg = fs.readFileSync(path.join(__dirname, '..', 'web', 'icon.svg'), 'utf8');
 
 const LOCAL_ENTRIES = [
   { name: 'a.txt', size: 9, is_dir: false, date: 'Oct 13 07:07', permissions: '-rw-r--r--' },
@@ -65,6 +67,11 @@ const responses = {
   },
   '/api/remote/edit': { success: true, path: '/tmp/slowremote/keep.txt',
     content: 'keep\n', info: { size: 5, mtime: 1791875271, temp: '/tmp/x', path: '/tmp/slowremote/keep.txt' } },
+  '/api/local/edit': { success: true, path: '/tmp/slowlocal/a.txt',
+    content: 'local text\n', info: { size: 11, mtime: 1791875271, mtime_ns: 1791875271000000000 } },
+  '/api/local/save': { success: true,
+    info: { size: 12, mtime: 1791875272, mtime_ns: 1791875272000000000 } },
+  '/api/transfer/move': { success: true },
   '/api/sync/preview': { success: true, plan: {
     header: { local: '/tmp/slowlocal', remote: '/tmp/slowremote', mode: 'both', criteria: 'time', mask: '(none)' },
     items: [
@@ -169,6 +176,15 @@ function options(id) {
   check('boot listed the remote pane', paths.includes('/api/remote/list'));
 
   const doc = window.document;
+  check('Commander opens with the dark theme',
+    doc.documentElement.dataset.theme === 'dark' && themeCss.includes('--bg: #0e131a'));
+  check('app icon uses a dark badge', iconSvg.includes('fill="#101821"'));
+  check('Commander menu matches the Local / Mark / Files layout',
+    ['Local', 'Mark', 'Files', 'Commands', 'Tabs', 'Options', 'Remote', 'Help']
+      .every(label => Array.from(doc.querySelectorAll('.menu-item')).some(item => item.textContent.trim() === label)));
+  check('function-key strip exposes all ten Commander actions',
+    doc.querySelectorAll('.function-keys .fn-key').length === 10 &&
+      text('helpModal').indexOf('F5 copy') >= 0);
   check('local pane rendered 3 rows',
     doc.getElementById('localFileList').children.length === 3,
     doc.getElementById('localFileList').children.length);
@@ -195,9 +211,16 @@ function options(id) {
   check('summary counts the selection', text('remoteSummary').indexOf('1 selected') >= 0,
     text('remoteSummary'));
 
-  await window.editSelected();
+  await window.viewSelected('remote');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  check('F3 opens the selected remote text file read-only',
+    doc.getElementById('editorModal').className.indexOf('open') >= 0 &&
+      doc.getElementById('editorText').readOnly &&
+      doc.getElementById('editorSaveBtn').style.display === 'none');
+  window.closeEditor();
+  await window.editSelected('remote');
   await new Promise(resolve => setTimeout(resolve, 100));
-  check('editor opened', doc.getElementById('editorModal').className.indexOf('open') >= 0);
+  check('F4 opens the selected remote file in the editor', doc.getElementById('editorModal').className.indexOf('open') >= 0);
   check('editor loaded the content', doc.getElementById('editorText').value === 'keep\n',
     JSON.stringify(doc.getElementById('editorText').value));
 
@@ -214,6 +237,24 @@ function options(id) {
     save && JSON.parse(save.options.body).content === 'keep\nmore\n');
   check('save sent the base modification time',
     save && JSON.parse(save.options.body).base_mtime === 1791875271);
+
+  // Local and remote panels use the same bounded editor workflow.
+  doc.getElementById('localFileList').children[0]
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await window.editSelected('local');
+  await new Promise(resolve => setTimeout(resolve, 80));
+  check('F4 edits a local text file too',
+    doc.getElementById('editorText').value === 'local text\n' &&
+      !doc.getElementById('editorText').readOnly);
+  doc.getElementById('editorText').value = 'edited locally\n';
+  doc.getElementById('editorText').dispatchEvent(new window.Event('input', { bubbles: true }));
+  await window.saveEditorFile();
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const localSave = calls.filter(call => call.path === '/api/local/save').pop();
+  check('local save posts the content and conflict timestamp',
+    localSave && JSON.parse(localSave.options.body).content === 'edited locally\n' &&
+      JSON.parse(localSave.options.body).base_mtime_ns === 1791875271000000000);
+  window.closeEditor();
 
   // Synchronize: preview renders the plan.
   window.openSynchronize();
@@ -333,11 +374,30 @@ function options(id) {
   doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true }));
   check('Ctrl+A selects every entry', text('localSummary').indexOf('3 selected') >= 0,
     text('localSummary'));
+  doc.getElementById('localFileList').children[0]
+    .dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  const uploadsBeforeF5 = calls.filter(call => call.path === '/api/transfer/upload').length;
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'F5', bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const f5Upload = calls.filter(call => call.path === '/api/transfer/upload').pop();
+  check('F5 copies from the focused local panel',
+    calls.filter(call => call.path === '/api/transfer/upload').length === uploadsBeforeF5 + 1 &&
+      f5Upload && JSON.parse(f5Upload.options.body).names.join(',') === 'a.txt');
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'F6', bubbles: true }));
+  await new Promise(resolve => setTimeout(resolve, 100));
+  const f6Move = calls.filter(call => call.path === '/api/transfer/move').pop();
+  check('F6 queues a move to the opposite panel',
+    f6Move && JSON.parse(f6Move.options.body).direction === 'upload' &&
+      JSON.parse(f6Move.options.body).names.join(',') === 'a.txt');
+  const localChmodBefore = calls.filter(call => call.path === '/api/local/chmod').length;
   doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'F9', bubbles: true }));
-  check('F9 opens the synchronize dialog',
-    doc.getElementById('syncModal').className.indexOf('open') >= 0);
+  await new Promise(resolve => setTimeout(resolve, 80));
+  check('F9 opens properties for the focused panel',
+    calls.filter(call => call.path === '/api/local/chmod').length > localChmodBefore);
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'F1', bubbles: true }));
+  check('F1 opens Help', doc.getElementById('helpModal').className.indexOf('open') >= 0);
   doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  check('Escape closes it', doc.getElementById('syncModal').className.indexOf('open') < 0);
+  check('Escape closes the modal', doc.getElementById('helpModal').className.indexOf('open') < 0);
 
   // ---- Synchronized browsing ------------------------------------------
   // The boot stub answers every list call with one fixed response, which

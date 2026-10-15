@@ -1,9 +1,9 @@
-# LinuxSCP on Debian/Linux
+# LinSCP on Debian/Linux
 
-This document covers the Debian build of LinuxSCP. It builds a single console
+This document covers the Debian build of LinSCP. It builds a single console
 client, `linuxscp`, from the platform-neutral PuTTY core (`source/putty`), a
 POSIX platform layer vendored from upstream PuTTY 0.85 (`libs/putty/unix`,
-`libs/putty/charset`) and the LinuxSCP front end in `source/linux`.
+`libs/putty/charset`) and the LinSCP front end in `source/linux`.
 
 The whole repository is the Debian application; see the top-level
 [readme.md](../readme.md) for an overview. For the Windows build of the
@@ -220,7 +220,7 @@ The same text is installed as the `linuxscp(1)` manual page; its source is
 open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
 ```
 
-In addition to `sftp://`, `ssh://` and `scp://`, LinuxSCP supports standard
+In addition to `sftp://`, `ssh://` and `scp://`, LinSCP supports standard
 URL schemes `ftp://`, `ftps://`, `dav://` / `webdav://`, and `s3://`,
 as well as bare `host[:port]`. These curl-backed paths do not establish full
 protocol support: WebDAV has PROPFIND listings and basic COPY/MOVE operations;
@@ -232,7 +232,7 @@ end up in the script file.
 
 ### Graphical Desktop Client (`linuxscp-gui`)
 
-LinuxSCP includes a standalone Norton/WinSCP Commander graphical interface:
+LinSCP includes a standalone dark-themed, WinSCP-style Commander graphical interface:
 * Launch with `linuxscp-gui` or `linuxscp -gui`.
 * Dual-pane explorer with local filesystem on the left and remote server on the right.
 * Background transfer queue with live progress metrics and transfer speeds.
@@ -338,7 +338,7 @@ client-side commands run as your normal user):
 mkdir -p /tmp/sshtest && cd /tmp/sshtest
 ssh-keygen -q -t ed25519 -f id_client -N ""
 cp id_client.pub authorized_keys && chmod 600 authorized_keys
-printf 'hello from LinuxSCP\n' > hello.txt
+printf 'hello from LinSCP\n' > hello.txt
 : > empty.txt
 dd if=/dev/urandom of=large.bin bs=1M count=2 status=none
 ssh-keygen -q -t rsa -b 2048 -f host_key -N ""
@@ -394,7 +394,7 @@ layer's events to standard output as they happen.
 
 ## Current capabilities and limitations
 
-LinuxSCP does not provide full WinSCP parity. See
+LinSCP does not provide full WinSCP parity. See
 [the pinned upstream audit](upstream-parity.md) for remaining work. Current
 implementation includes:
 * Native POSIX SFTP and curl-backed transfers (protocol/build dependent;

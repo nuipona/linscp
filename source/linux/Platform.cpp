@@ -858,7 +858,7 @@ bool LaunchGuiApplication(std::string & error)
         guiBin = "linuxscp-gui";
     }
     execlp(guiBin, guiBin, static_cast<char *>(NULL));
-    error = std::string("Failed to launch LinuxSCP GUI: ") + strerror(errno);
+    error = std::string("Failed to launch LinSCP GUI: ") + strerror(errno);
     return false;
 #endif
 }

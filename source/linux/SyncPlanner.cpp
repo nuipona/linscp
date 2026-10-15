@@ -1689,7 +1689,7 @@ bool SyncState::Save(const std::string & path, std::string & error) const
         error = std::string("Cannot write the synchronization state '") + path + "'.";
         return false;
     }
-    fprintf(file, "# LinuxSCP synchronization state, written %llu\n", NowSeconds());
+    fprintf(file, "# LinSCP synchronization state, written %llu\n", NowSeconds());
     for (std::map<std::string, SyncStateEntry>::const_iterator it = mEntries.begin();
         it != mEntries.end(); ++it)
     {

@@ -1,6 +1,6 @@
 # WinSCP parity audit and implementation plan
 
-**Full feature parity is not achieved.** LinuxSCP is a substantially reduced,
+**Full feature parity is not achieved.** LinSCP is a substantially reduced,
 cross-platform client using part of WinSCP's PuTTY code, not a build of the
 complete upstream application. A protocol URL being accepted, a similar GUI,
 or a passing build is not evidence of behavioral parity.
@@ -24,7 +24,7 @@ certification or a completed security review.
 [upstream-parity.json](upstream-parity.json) tracks the **40** command names
 that upstream registers in its script implementation at that commit (aliases
 and the internal `copyid` included), plus 15 feature areas, and lists the
-LinuxSCP-specific commands separately under `linuxscp_additions` so that they
+LinSCP-specific commands separately under `linuxscp_additions` so that they
 are not mistaken for upstream coverage. `partial` means some implementation
 exists, not that every variant works. `missing` includes commands recognized
 only to print an unsupported error.
@@ -32,7 +32,7 @@ only to print an unsupported error.
 ### What counts as evidence
 
 `docs/upstream-parity.json` carries a `verification` block, and it is the
-reason a status in this file means something. It lists the platforms LinuxSCP
+reason a status in this file means something. It lists the platforms LinSCP
 ships on, and for each one: the command that produces the evidence, the test
 suites that exist there and what each can see, and - for Windows - what it
 cannot see at all. An entry then records its own `verified_on`: a map from
@@ -64,7 +64,7 @@ reference-signature test skipped the same way when `botocore` is absent.
 
 `edit`, `savesession`, `rmsession`, `sessions`, `show`, `attr` and the extra
 aliases `del`, `md`, `sync`, `quit` and `end` are in that second list. `edit` in
-particular is a LinuxSCP command: the upstream *script interpreter* has none,
+particular is a LinSCP command: the upstream *script interpreter* has none,
 even though WinSCP edits files from its GUI and through its .NET assembly.
 
 ## Major gaps
