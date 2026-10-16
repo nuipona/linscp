@@ -2,16 +2,15 @@
   <img src="logo/linuxscp-mark.png" alt="LinSCP logo" width="160" height="160" />
 </p>
 
+<img width="1681" height="1148" alt="image" src="https://github.com/user-attachments/assets/642f19d0-e14f-4f45-a8d7-02b2654d77b5" />
+
+
 # LinSCP
 
 LinSCP is a free, open-source file transfer client for Debian GNU/Linux. It
 connects to SFTP servers over SSH and transfers files from a command line, a
 script or an interactive prompt. The client is built from source with `make`
 and packaged as a `.deb`.
-
-The logo is a fairy penguin (*Eudyptula minor*, the smallest penguin) with a
-blue arrow arriving from the left and a green arrow leaving to the right -
-downloads in, uploads out.
 
 ## Requirements
 
@@ -52,11 +51,6 @@ To build a Debian package:
 
 See [`docs/debian.md`](docs/debian.md) for details, usage and the verified
 feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
-
-For English/Spanish browser and shared CLI localization, language selection
-and catalog development, see
-[`docs/localization.md`](docs/localization.md). Remaining upstream-parity work
-is tracked in [`docs/remaining-parity-plan.md`](docs/remaining-parity-plan.md).
 
 ## Usage
 
@@ -141,15 +135,6 @@ The supported commands and validation history are listed in
                             and the Makefile
     /source/putty           PuTTY SSH/SFTP core (platform-neutral)
     /tools                  the upstream parity inventory checker
-
-## Naming
-
-The product is branded **LinSCP**. The established `linuxscp` executable,
-`linuxscp(1)` manual page, `linuxscp-gui` launcher, package name and on-disk
-configuration paths are retained for compatibility. `LinSCP` is the name in the
-user-visible strings; `LinuxSCP` remains the name of the configuration
-directory (`~/.config/LinuxSCP`). The upstream PuTTY and
-WinSCP code keeps its original attribution; see [`license.txt`](license.txt).
 
 ## Licence
 
