@@ -613,6 +613,15 @@ class LiveCurlTests(unittest.TestCase):
 def run_and_report():
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
+    # A failure has to name itself in the evidence lines: CI surfaces those
+    # as annotations, and the raw log of a failed run is not always
+    # available to whoever has to fix it.
+    for test, report in list(result.failures) + list(result.errors):
+        lines = [line.strip() for line in report.strip().splitlines()
+                 if line.strip()]
+        detail = lines[-1] if lines else "no detail"
+        print("evidence: FAILED %s: %s" %
+              (test.id().split(".")[-1], detail[-300:]))
     line = ("evidence: suite=%s platform=linux ran=%d skipped=%d failed=%d" %
             (SUITE_NAME, result.testsRun, len(result.skipped),
              len(result.failures) + len(result.errors)))

@@ -167,18 +167,23 @@ jobs:
             "$GITHUB_WORKSPACE/source/gui/web/index.html"
       - name: Live curl protocol regressions
         run: |
+          # The suite's evidence lines are surfaced as annotations whatever
+          # its exit status: a failing run has to say which case failed and
+          # what it said, not just that the step did not pass.
           set -o pipefail
+          status=0
           "$RUNNER_TEMP/live-test-venv/bin/python" \
             -u source/linux/tests/LiveCurlTest.py source/linux/build/linuxscp 2>&1 |
-            tee "$RUNNER_TEMP/live-curl-tests.log"
+            tee "$RUNNER_TEMP/live-curl-tests.log" || status=$?
+          grep '^evidence: ' "$RUNNER_TEMP/live-curl-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
           grep -E 'evidence: suite=live-curl .*ran=[1-9]' \
             "$RUNNER_TEMP/live-curl-tests.log" > /dev/null || {
             echo "::error::the live curl suite ran no tests"
             exit 1
           }
-          grep '^evidence: ' "$RUNNER_TEMP/live-curl-tests.log" |
-            { while IFS= read -r line; do
-              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
+          exit $status
       - name: GUI integration regression tests
         run: |
           python3 source/gui/tests/BrowserUploadTest.py
