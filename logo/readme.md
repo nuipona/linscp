@@ -18,5 +18,7 @@ and a green arrow leaving to the right (uploads).
 ## Licence
 
 The artwork in this folder is original to this fork and is **not** covered by
-the GNU General Public License that covers the code. See section B of
-[`../license.txt`](../license.txt).
+the GNU General Public License that covers the code. The same artwork is copied
+to `../debian/linuxscp.png`, `../debian/linuxscp.svg`,
+`../source/gui/web/favicon.png` and `../source/gui/web/icon.svg`, and those
+copies carry the same licence. See section B of [`../license.txt`](../license.txt).
