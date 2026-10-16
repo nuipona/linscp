@@ -1,6 +1,7 @@
 """Server-free CLI regression tests for the Linux client."""
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -36,6 +37,40 @@ class ScriptTests(unittest.TestCase):
                                       env=env)
         return subprocess.run([BINARY, "-command=" + text],
                               capture_output=True, text=True, timeout=10, env=env)
+
+    def test_gui_launcher_is_selected_beside_the_running_binary(self):
+        with tempfile.TemporaryDirectory(prefix="linscp-install-") as temp:
+            binary = pathlib.Path(temp) / "linuxscp"
+            launcher = pathlib.Path(temp) / "linuxscp-gui"
+            shutil.copyfile(BINARY, binary)  # not a symlink: /proc/self/exe is resolved
+            binary.chmod(0o755)
+            launcher.write_text("#!/bin/sh\necho ADJACENT_GUI\n", encoding="utf-8")
+            launcher.chmod(0o755)
+            result = subprocess.run([str(binary), "-gui"],
+                                    capture_output=True, text=True, timeout=10,
+                                    env=self.environment())
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("ADJACENT_GUI", result.stdout)
+
+    def test_gui_launcher_finds_source_tree_from_make_and_cmake_builds(self):
+        with tempfile.TemporaryDirectory(prefix="linscp-source-") as temp:
+            root = pathlib.Path(temp)
+            launcher = root / "source" / "gui" / "linuxscp-gui"
+            launcher.parent.mkdir(parents=True)
+            launcher.write_text("#!/bin/sh\necho SOURCE_TREE_GUI\n", encoding="utf-8")
+            launcher.chmod(0o755)
+            for directory in (root / "source" / "linux" / "build",
+                              root / "build"):
+                directory.mkdir(parents=True)
+                binary = directory / "linuxscp"
+                shutil.copyfile(BINARY, binary)
+                binary.chmod(0o755)
+                with self.subTest(directory=directory):
+                    result = subprocess.run([str(binary), "-gui"],
+                                            capture_output=True, text=True,
+                                            timeout=10, env=self.environment())
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertIn("SOURCE_TREE_GUI", result.stdout)
 
     def test_default_abort(self):
         for file in (False, True):
@@ -142,6 +177,25 @@ class ScriptTests(unittest.TestCase):
         result = self.run_commands("echo %TIMESTAMP#yyyymmdd%")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout.strip(), r"^[0-9]{8}$")
+
+    def test_literal_commands_preserve_file_names_with_percent_signs(self):
+        # The task queue uses -command rather than the persistent -server.
+        # Neither a timestamp nor an environment variable in a file name
+        # must be expanded on the way to the transfer process.
+        env = self.environment({"LSCP_TEST_DROP": "expanded"})
+        result = subprocess.run(
+            [BINARY, "-literal", "-command=echo %TIMESTAMP% %LSCP_TEST_DROP%"],
+            capture_output=True, text=True, timeout=10, env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("%TIMESTAMP% %LSCP_TEST_DROP%", result.stdout)
+        result = subprocess.run(
+            [BINARY, "-command=echo %LSCP_TEST_DROP%"],
+            capture_output=True, text=True, timeout=10, env=env)
+        self.assertIn("expanded", result.stdout)
+        result = subprocess.run([BINARY, "-literal", "-script=-"], input="echo bad\n",
+                                capture_output=True, text=True, timeout=10, env=env)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-literal requires -command", result.stderr)
 
     def test_parameters_are_not_expanded_in_server_mode(self):
         # The GUI talks to -server and may send a file name that holds a

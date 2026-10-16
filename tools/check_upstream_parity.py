@@ -10,8 +10,44 @@ import json
 import pathlib
 import re
 import sys
+from collections import Counter
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+REPORT = ROOT / "docs/linux-feature-inventory.md"
+
+# A suite name in the ledger must resolve to the test source it claims to
+# run. These are test files, not implementation files. A method/check quoted
+# in the capability matrix must still exist there when the code changes.
+# A pinned baseline must not become 'full' by deleting known missing rows.
+# New capabilities may be added freely; removing one of these requires a
+# deliberate review of the checker and the upstream scope together.
+REQUIRED_GAP_IDS = {
+    "scp.shell-directory-engine", "scp.command-and-metadata",
+    "ftp.active-passive", "ftp.listings-and-mlsd", "ftp.tls-policy",
+    "dav.locks", "dav.dead-properties-and-preconditions",
+    "s3.multipart-restart-and-copy", "s3.object-options",
+    "transfer.curl-progress", "sync.conflict-ui",
+    "sessions.folder-tree", "security.curl-pins-and-tls",
+    "security.gssapi-and-tunnels", "security.gui-account",
+    "gui.desktop-drop-compatibility", "gui.desktop-local-drop",
+    "gui.explorer-custom-commands", "editing.monitor-local-changes",
+    "editing.encoding-policy", "automation.dotnet", "automation.powershell",
+    "desktop.shell-and-extensions", "locale.translations",
+    "locale.accessibility", "platform.debian-package",
+}
+
+CASE_SOURCES = {
+    "unit": "source/linux/tests/UnitTest.cpp",
+    "script": "source/linux/tests/ScriptTest.py",
+    "live-sftp": "source/linux/tests/LiveSftpTest.py",
+    "live-s3": "source/linux/tests/LiveS3Test.py",
+    "live-dav": "source/linux/tests/LiveDavTest.py",
+    "gui": "source/gui/tests/ClientTest.js",
+    "gui-search": "source/gui/tests/RemoteSearchTest.py",
+    "gui-local-editor": "source/gui/tests/LocalEditorTest.py",
+    "gui-browser-upload": "source/gui/tests/BrowserUploadTest.py",
+    "gui-desktop-uri": "source/gui/tests/DesktopUriTest.py",
+}
 
 
 def upstream_commands(script, header):
@@ -79,7 +115,7 @@ def check_verification(inventory, entries, errors):
         suites[name] = set(listed)
     covered = {name: 0 for name in suites}
     for entry in entries:
-        label = entry.get("name", entry.get("command", "?"))
+        label = entry.get("name", entry.get("id", entry.get("command", "?")))
         claimed = entry.get("verified_on")
         if entry["status"] == "verified" and not claimed:
             errors.append(f"{label} is verified but cites no evidence: name "
@@ -112,11 +148,156 @@ def check_verification(inventory, entries, errors):
             "entries": len(entries)}
 
 
+def check_capabilities(inventory, errors, root=ROOT):
+    """Validate the granular Linux matrix, not just the 15 parent headings.
+
+    Every area must be broken into individually reviewable behaviours. A
+    'verified' row names a real test case, not merely a suite that might have
+    run something unrelated. An unimplemented row cannot cite implementation
+    or evidence, and a partial row must tell the user exactly what is left.
+    """
+    rows = inventory.get("capabilities")
+    if not isinstance(rows, list) or not rows:
+        errors.append("Inventory has no capability matrix")
+        return []
+    areas = {item["name"] for item in inventory["features"]}
+    found = Counter()
+    seen = set()
+    for row in rows:
+        label = row.get("id", "?")
+        if not re.fullmatch(r"[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*", str(label)):
+            errors.append(f"Invalid capability id: {label}")
+        if label in seen:
+            errors.append(f"Duplicate capability id: {label}")
+        seen.add(label)
+        area = row.get("area")
+        if area not in areas:
+            errors.append(f"{label}: unknown feature area: {area}")
+        else:
+            found[area] += 1
+        status = row.get("status")
+        if status not in ("verified", "partial", "missing"):
+            errors.append(f"{label}: invalid capability status: {status}")
+        if not str(row.get("notes", "")).strip():
+            errors.append(f"{label}: explain the Linux implementation or absence")
+        if status in ("partial", "missing") and not str(row.get("gap", "")).strip():
+            errors.append(f"{label}: a {status} capability needs a concrete gap")
+        if status == "verified" and row.get("gap"):
+            errors.append(f"{label}: verified while still listing a gap")
+        source = row.get("source", [])
+        if not isinstance(source, list):
+            errors.append(f"{label}: source must be a list of repository files")
+            source = []
+        if status == "missing" and source:
+            errors.append(f"{label}: missing yet names an implementation")
+        if status in ("verified", "partial") and not source:
+            errors.append(f"{label}: no implementation location")
+        for path in source:
+            if not isinstance(path, str) or pathlib.PurePosixPath(path).is_absolute() or \
+                    ".." in pathlib.PurePosixPath(path).parts or \
+                    not (root / path).is_file():
+                errors.append(f"{label}: implementation source does not exist: {path}")
+
+        checks = row.get("checks", {})
+        if not isinstance(checks, dict):
+            errors.append(f"{label}: checks must name suites and test cases")
+            checks = {}
+        if status == "missing" and checks:
+            errors.append(f"{label}: missing yet cites test cases")
+        if status == "verified" and not checks:
+            errors.append(f"{label}: verified without a test case")
+        cited = set(row.get("verified_on", {}).get("linux", [])) if isinstance(
+            row.get("verified_on"), dict) else set()
+        if checks and set(checks) != cited:
+            errors.append(f"{label}: verified_on.linux must match checked suites")
+        if not checks and row.get("verified_on"):
+            errors.append(f"{label}: cites evidence without test cases")
+        for suite, cases in checks.items():
+            file = CASE_SOURCES.get(suite)
+            if not file or not (root / file).is_file():
+                errors.append(f"{label}: unknown test suite {suite}")
+                continue
+            if not isinstance(cases, list) or not cases:
+                errors.append(f"{label}: {suite} names no test case")
+                continue
+            text = (root / file).read_text()
+            for case in cases:
+                if not isinstance(case, str) or not case.strip():
+                    errors.append(f"{label}: empty test case in {suite}")
+                    continue
+                if suite == "gui":
+                    # The JS harness calls check('description', condition).
+                    expression = r"check\(\s*['\"]" + re.escape(case) + r"['\"]"
+                else:
+                    # Python's test_* methods and the named C++ Test* functions.
+                    expression = r"\b(?:def|void)\s+" + re.escape(case) + r"\s*\("
+                if not re.search(expression, text):
+                    errors.append(f"{label}: {suite} has no test case {case}")
+    for area in sorted(areas - found.keys()):
+        errors.append(f"Feature area has no capability rows: {area}")
+    if inventory.get("upstream", {}).get("commit") == \
+            "69edabbe2dc2c62661a7d3fc7e2396b5f42d504d":
+        for id in sorted(REQUIRED_GAP_IDS - seen):
+            errors.append(f"Pinned upstream gap was dropped from the inventory: {id}")
+    return rows
+
+
+def matrix_report(inventory):
+    """The human-readable inventory, generated from the checked JSON rows."""
+    rows = inventory["capabilities"]
+    counts = Counter(row["status"] for row in rows)
+    lines = [
+        "# Linux feature inventory",
+        "",
+        "Source: [upstream-parity.json](upstream-parity.json), pinned to " +
+        inventory["upstream"]["repository"] + " `" +
+        inventory["upstream"]["commit"] + "`. **This is not full WinSCP "
+        "parity or an exhaustive upstream behavioral certification.** The "
+        "40 registered upstream script commands are tracked separately in "
+        "[the parity audit](upstream-parity.md); these rows decompose the "
+        "15 feature areas into specific Linux behaviors and named gaps.",
+        "",
+        f"{len(rows)} capabilities: {counts['verified']} verified for the "
+        f"stated behavior, {counts['partial']} partial, {counts['missing']} "
+        "missing. `verified` means the **row's** behavior has an automated "
+        "case on Linux, not that every upstream variant or protocol works. "
+        "`partial` names a working subset and the next gap. `missing` has "
+        "no implementation. Evidence skipped by a missing dependency is not "
+        "a pass; consult each suite's `evidence:` line in CI.",
+        "",
+        "Regenerate after editing the JSON: `python3 "
+        "tools/check_upstream_parity.py --write-report`. The default check "
+        "fails if this view or a cited test case drifts.",
+    ]
+    def cell(text):
+        return " ".join(str(text).split()).replace("|", "\\|")
+    for feature in inventory["features"]:
+        area = feature["name"]
+        lines.extend(["", "## " + area, "",
+                      "| Capability | Linux status | Automated evidence | Scope / remaining gap |",
+                      "| --- | --- | --- | --- |"])
+        for row in rows:
+            if row["area"] != area:
+                continue
+            suites = ", ".join(sorted(row.get("checks", {}))) or "—"
+            note = row["notes"]
+            if row.get("gap"):
+                note += " **Next:** " + row["gap"]
+            lines.append("| `" + row["id"] + "` | " + row["status"] +
+                         " | " + cell(suites) + " | " + cell(note) + " |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--upstream-script", type=pathlib.Path)
     parser.add_argument("--upstream-header", type=pathlib.Path)
     parser.add_argument("--require-full", action="store_true")
+    parser.add_argument("--write-report", action="store_true",
+                        help="regenerate docs/linux-feature-inventory.md")
+    parser.add_argument("--list-gaps", action="store_true",
+                        help="show unverified Linux capabilities")
     args = parser.parse_args()
     inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
     commands = inventory["commands"]
@@ -147,8 +328,10 @@ def main():
             errors.append(f"Untracked upstream command: {command}")
         for command in sorted(commands.keys() - actual):
             errors.append(f"Command no longer registered upstream: {command}")
-    evidence = check_verification(inventory, entries, errors)
+    capabilities = check_capabilities(inventory, errors)
+    evidence = check_verification(inventory, entries + capabilities, errors)
     gaps = sum(entry["status"] != "verified" for entry in entries)
+    capability_gaps = sum(row.get("status") != "verified" for row in capabilities)
     additions = len(inventory.get("linuxscp_additions", []))
     if evidence:
         summary = ", ".join(f"{name}: {count}"
@@ -157,10 +340,23 @@ def main():
               f"{evidence['verified']} of {evidence['entries']} entries verified.")
     print(f"Upstream {inventory['upstream']['commit']}: "
           f"{len(commands)} commands, {additions} LinSCP-specific entries, "
-          f"{len(inventory['features'])} feature areas, {gaps} tracked gaps. "
-          "Inventory validation is not a parity certification.")
-    if args.require_full and gaps:
+          f"{len(inventory['features'])} feature areas, {gaps} broad gaps; "
+          f"{len(capabilities)} granular capabilities, {capability_gaps} "
+          "capability gaps. Inventory validation is not a parity certification.")
+    if args.require_full and (gaps or capability_gaps):
         errors.append("Full parity gate failed: tracked gaps remain")
+    if args.list_gaps:
+        for row in capabilities:
+            if row.get("status") != "verified":
+                print(f"{row.get('id', '?')} ({row.get('status', '?')}): "
+                      f"{row.get('gap', '?')}")
+    if args.write_report and not errors:
+        REPORT.write_text(matrix_report(inventory))
+        print("Updated " + str(REPORT.relative_to(ROOT)))
+    elif not args.write_report and capabilities:
+        if not REPORT.is_file() or REPORT.read_text() != matrix_report(inventory):
+            errors.append("Linux feature report is missing or out of date: "
+                          "run python3 tools/check_upstream_parity.py --write-report")
     for error in errors:
         print(error, file=sys.stderr)
     return 1 if errors else 0

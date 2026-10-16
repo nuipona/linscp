@@ -86,6 +86,7 @@ int main(int argc, char ** argv)
     bool version = false;
     bool scriptSpecified = false;
     bool commandSpecified = false;
+    bool literalCommand = false;
     const char * value = NULL;
 
     for (int i = 1; i < argc; i++)
@@ -116,6 +117,12 @@ int main(int argc, char ** argv)
         {
             commandSpecified = true;
             command = value;
+        }
+        else if (strcmp(arg, "-literal") == 0)
+        {
+            /* A GUI command contains literal file names, not script
+             * parameters or environment/timestamp placeholders. */
+            literalCommand = true;
         }
         else if (StartsWith(arg, "-hostkey=", &value))
         {
@@ -237,6 +244,12 @@ int main(int argc, char ** argv)
         console.Error("Choose either -script or -command, not both.");
         return 1;
     }
+    if (literalCommand && !commandSpecified)
+    {
+        console.Error("-literal requires -command; scripts and interactive "
+            "commands still expand parameters.");
+        return 1;
+    }
     if (scriptSpecified && scriptFile.empty())
     {
         console.Error("-script requires a file name (use -script=- for standard input).");
@@ -308,7 +321,7 @@ int main(int argc, char ** argv)
     }
     else if (commandSpecified)
     {
-        result = script.RunCommand(command);
+        result = script.RunCommand(command, literalCommand);
     }
     else if (!console.IsInteractive() && url.empty())
     {

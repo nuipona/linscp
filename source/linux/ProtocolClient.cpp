@@ -1,5 +1,6 @@
 #include "ProtocolClient.h"
 #include "S3Client.h"
+#include "S3SigV4.h"
 #include "LocalFs.h"
 #include "PathUtil.h"
 #include "Platform.h"
@@ -161,7 +162,14 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
         proto = "https";
     }
 
-    std::string url = proto + "://" + options.hostName;
+    /* The path is a decoded remote file name, not an already encoded URL.
+     * Otherwise a space fails curl's URL parser and '#', '?' or '%' silently
+     * address a different resource. Keep only '/' separators unescaped;
+     * S3 is dispatched before BuildUrl and signs its own encoded path. */
+    const bool ipv6 = options.hostName.find(':') != std::string::npos &&
+        (options.hostName.empty() || options.hostName[0] != '[');
+    std::string url = proto + "://" +
+        (ipv6 ? "[" + options.hostName + "]" : options.hostName);
     if (options.portNumber > 0 &&
         !((proto == "ftp" && options.portNumber == 21) ||
           (proto == "ftps" && options.portNumber == 990) ||
@@ -177,7 +185,7 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
     {
         url += "/";
     }
-    url += path;
+    url += s3sig::UriEncode(path, true);
     return url;
 }
 
@@ -538,16 +546,13 @@ std::string DavPercentDecode(const std::string & input)
     return out;
 }
 
-/* The remote-path form we compare in: leading slash, no query or
- * fragment, no trailing slash (except the root itself). */
+/* The remote-path form we compare in: leading slash and no trailing slash
+ * (except the root itself). A decoded file name may itself contain '?' or
+ * '#'; they are NOT URI delimiters here. Strip those only from an href,
+ * before percent-decoding it. */
 std::string DavNormalizePath(const std::string & raw)
 {
     std::string path = raw;
-    const size_t cut = path.find_first_of("?#");
-    if (cut != std::string::npos)
-    {
-        path = path.substr(0, cut);
-    }
     if (path.empty() || path[0] != '/')
     {
         path = "/" + path;
@@ -571,6 +576,11 @@ std::string DavHrefToPath(const std::string & rawHref)
         const size_t pathStart = href.find('/', scheme + 3);
         href = (pathStart == std::string::npos) ? std::string("/") :
             href.substr(pathStart);
+    }
+    const size_t suffix = href.find_first_of("?#");
+    if (suffix != std::string::npos)
+    {
+        href.resize(suffix);
     }
     return DavNormalizePath(DavPercentDecode(href));
 }

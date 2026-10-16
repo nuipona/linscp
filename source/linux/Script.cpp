@@ -5807,16 +5807,22 @@ bool Script::MakeRemoteDirectory(const std::vector<std::string> & args)
     {
         return false;
     }
-    if (args.size() != 1)
+    /* The ordinary mkdir keeps upstream's single-directory semantics. The
+     * explicit -parents form is useful to Linux desktop drops: each upload
+     * can create its own destination tree, including on a task retry. */
+    const bool parents = args.size() == 2 && args[0] == "-parents";
+    if ((parents && args[1].empty()) ||
+        (!parents && (args.size() != 1 || args[0].empty() || args[0][0] == '-')))
     {
         Console::Instance().Error(Texts::WrongArguments("mkdir",
-            "Syntax: mkdir <directory>"));
+            "Syntax: mkdir [-parents] <directory>"));
         mErrors++;
         return false;
     }
-    std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
+    std::string path = ResolveRemotePath(mRemoteDirectory, args[parents ? 1 : 0]);
     std::string error;
-    if (RemoteMakeDir(path, -1, error) != 0)
+    if (parents ? !CreateRemoteDirectoryRecursive(path, error) :
+                  RemoteMakeDir(path, -1, error) != 0)
     {
         Console::Instance().Error(Texts::RemoteError("create the directory", path,
             error));
@@ -7458,8 +7464,9 @@ const struct ScriptCommandHelpEntry
             "  Lists the remote directory (switches: -l, -a, -1)." },
         { "man", "man [ <command> ]\n"
             "  Same as 'help'." },
-        { "mkdir", "mkdir <directory>\n"
-            "  Creates a remote directory." },
+        { "mkdir", "mkdir [-parents] <directory>\n"
+            "  Creates a remote directory. -parents creates missing parents\n"
+            "  and accepts an existing directory (a LinSCP extension)." },
         { "mv", "mv <source> [ <source>... ] <target>\n"
             "  Moves or renames remote files; with several sources the\n"
             "  target must be an existing directory." },
@@ -7995,7 +8002,7 @@ int Script::RunFile(const std::string & path)
     return mErrors != 0 ? 1 : 0;
 }
 
-int Script::RunCommand(const std::string & line)
+int Script::RunCommand(const std::string & line, bool literal)
 {
     if (!mBatchConfigured)
     {
@@ -8005,19 +8012,22 @@ int Script::RunCommand(const std::string & line)
 
     /* '-command=' may carry several commands separated by ';'. Each is
      * expanded on its own, so a parameter value that holds a ';' cannot
-     * start a command of its own. */
+     * start a command of its own. GUI-generated commands use -literal:
+     * remote file names such as %TIMESTAMP%.txt are data, not templates. */
     std::vector<std::string> commands = SplitCommands(line);
     for (size_t i = 0; i < commands.size(); i++)
     {
-        std::string expanded;
-        if (!commands[i].empty() && ExpandParameters(commands[i], expanded))
+        if (!commands[i].empty())
         {
-            ExecuteLine(expanded);
-        }
-        else if (!commands[i].empty() &&
-            (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On))
-        {
-            mExit = true;
+            std::string expanded;
+            if (literal || ExpandParameters(commands[i], expanded))
+            {
+                ExecuteLine(literal ? commands[i] : expanded);
+            }
+            else if (mBatchMode == BatchMode::Abort || mBatchMode == BatchMode::On)
+            {
+                mExit = true;
+            }
         }
         if (mExit)
         {

@@ -1062,7 +1062,8 @@
     const transfer = event.dataTransfer;
     const externalFiles = transfer &&
       ((transfer.files && transfer.files.length > 0) ||
-       (transfer.types && Array.from(transfer.types).indexOf('Files') >= 0));
+       (transfer.types && Array.from(transfer.types).indexOf('Files') >= 0) ||
+       (transfer.items && Array.from(transfer.items).some(item => item.kind === 'file')));
     if (externalFiles) {
       event.preventDefault();
       if (transfer) transfer.dropEffect = side === 'remote' ? 'copy' : 'none';
@@ -1086,11 +1087,92 @@
     if (pane) pane.classList.remove('drop-target');
   }
 
-  async function queueDesktopFile(file) {
+  const MAX_DROP_ENTRIES = 1000;
+  const MAX_DROP_DEPTH = 32;
+
+  /* A desktop folder is not a File. Chromium exposes its children through
+   * FileSystemEntry or FileSystemHandle; readEntries may return only a batch
+   * at a time, so keep reading until it returns an empty batch. Enumerate
+   * before queuing anything to avoid a partly uploaded, unreadable tree. */
+  async function collectDesktopDrop(transfer) {
+    const entries = [];
+    function add(kind, path, file) {
+      if (entries.length >= MAX_DROP_ENTRIES) {
+        throw new Error('The drop has more than ' + MAX_DROP_ENTRIES + ' entries.');
+      }
+      const names = path.split('/');
+      if (names.length > MAX_DROP_DEPTH || names.some(name =>
+          !name || name === '.' || name === '..' || name.includes('\\') ||
+          /[\x00-\x1f\x7f]/.test(name)) ||
+          (file && file.name !== names[names.length - 1])) {
+        throw new Error('A dropped item has an invalid relative path.');
+      }
+      entries.push({ kind, path, file });
+    }
+    async function walkEntry(entry, prefix, depth) {
+      if (depth > MAX_DROP_DEPTH) throw new Error('The folder is too deeply nested.');
+      const path = prefix ? prefix + '/' + entry.name : entry.name;
+      if (entry.isDirectory) {
+        add('directory', path);
+        const reader = entry.createReader();
+        while (true) {
+          const batch = await new Promise((resolve, reject) =>
+            reader.readEntries(resolve, reject));
+          if (!batch.length) break;
+          for (const child of batch) await walkEntry(child, path, depth + 1);
+        }
+      } else if (entry.isFile) {
+        const file = await new Promise((resolve, reject) => entry.file(resolve, reject));
+        add('file', path, file);
+      }
+    }
+    async function walkHandle(handle, prefix, depth) {
+      if (depth > MAX_DROP_DEPTH) throw new Error('The folder is too deeply nested.');
+      const path = prefix ? prefix + '/' + handle.name : handle.name;
+      if (handle.kind === 'directory') {
+        add('directory', path);
+        for await (const child of handle.values()) {
+          await walkHandle(child, path, depth + 1);
+        }
+      } else if (handle.kind === 'file') {
+        add('file', path, await handle.getFile());
+      }
+    }
+    const items = Array.from(transfer.items || []).filter(item => item.kind === 'file');
+    if (items.length) {
+      /* Snapshot every item during the drop event: browser permissions for
+       * getAsFileSystemHandle/getAsFile may expire after the first await. */
+      const snapshots = items.map(item => {
+        const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+        return { entry,
+          handle: !entry && item.getAsFileSystemHandle ?
+            item.getAsFileSystemHandle() : null,
+          file: !entry && item.getAsFile ? item.getAsFile() : null };
+      });
+      for (const item of snapshots) {
+        if (item.entry) await walkEntry(item.entry, '', 1);
+        else {
+          const handle = item.handle && await item.handle;
+          if (handle) await walkHandle(handle, '', 1);
+          else if (item.file) {
+            add('file', item.file.webkitRelativePath || item.file.name, item.file);
+          }
+        }
+      }
+    } else {
+      for (const file of Array.from(transfer.files || [])) {
+        add('file', file.webkitRelativePath || file.name, file);
+      }
+    }
+    return entries;
+  }
+
+  async function queueDesktopFile(file, relativePath) {
     const query = new URLSearchParams({
       tab: String(tabId()),
       remote_dir: state.remote.path,
-      name: file.name
+      name: file.name,
+      relative_path: relativePath
     });
     return api('/api/transfer/drop?' + query.toString(), {
       method: 'POST',
@@ -1103,24 +1185,42 @@
     if (event) event.preventDefault();
     endDrag();
     if (!event || !event.dataTransfer) return;
-    const droppedFiles = Array.from(event.dataTransfer.files || []);
-    const externalFileDrop = event.dataTransfer.types &&
-      Array.from(event.dataTransfer.types).indexOf('Files') >= 0;
-    if (externalFileDrop && !droppedFiles.length) {
-      toast('Folders from the file manager are not supported yet; drop individual files.', true);
-      return;
-    }
-    if (droppedFiles.length) {
+    const dataTransfer = event.dataTransfer;
+    const externalFileDrop =
+      (dataTransfer.types && Array.from(dataTransfer.types).includes('Files')) ||
+      (dataTransfer.files && dataTransfer.files.length > 0) ||
+      (dataTransfer.items && Array.from(dataTransfer.items).some(item => item.kind === 'file'));
+    if (externalFileDrop) {
       if (side !== 'remote') {
         toast('Drop files onto the remote pane to upload them.', true);
         return;
       }
-      const results = await Promise.all(droppedFiles.map(queueDesktopFile));
-      const queued = results.filter(result => result && result.success).length;
-      const failed = results.length - queued;
-      if (queued) toast('Queued ' + queued + ' desktop file' +
+      let entries;
+      try {
+        entries = await collectDesktopDrop(dataTransfer);
+      } catch (error) {
+        toast('Cannot read the dropped folder: ' + error, true);
+        return;
+      }
+      if (!entries.length) {
+        toast('This browser did not expose the dropped files or folder contents.', true);
+        return;
+      }
+      let queued = 0, failed = 0;
+      /* The queue processes tasks in order. Create directories even when
+       * empty; a file task also creates its parents so retry works alone. */
+      for (const entry of entries) {
+        const result = entry.kind === 'directory' ?
+          await apiPost('/api/transfer/drop-dir', {
+            tab: tabId(), remote_dir: state.remote.path,
+            relative_path: entry.path
+          }) : await queueDesktopFile(entry.file, entry.path);
+        if (result && result.success) queued++;
+        else failed++;
+      }
+      if (queued) toast('Queued ' + queued + ' desktop item' +
         (queued === 1 ? '' : 's') + ' for upload.');
-      if (failed) toast(failed + ' desktop file upload' +
+      if (failed) toast(failed + ' desktop item' +
         (failed === 1 ? ' was' : 's were') + ' refused.', true);
       refreshQueue();
       return;

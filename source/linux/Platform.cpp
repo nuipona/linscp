@@ -446,13 +446,33 @@ std::string ExecutableDirectory()
 bool LaunchGuiApplication(std::string & error)
 {
     error.clear();
-    const char * guiBin = "/usr/bin/linuxscp-gui";
-    if (access(guiBin, X_OK) != 0)
+    /* A CMake install may use any prefix, and a developer can run a build
+     * from its tree. Launch the GUI next to this executable before looking
+     * on PATH; /usr/bin must not win over the version being run. */
+    const std::string directory = ExecutableDirectory();
+    const std::string beside = directory.empty() ? std::string() :
+        directory + "/linuxscp-gui";
+    /* In an uninstalled source tree the Makefile binary is in
+     * source/linux/build and the CMake binary is in build/. Use that tree's
+     * launcher instead of a possibly older package on PATH. */
+    const std::string makeTree = directory + "/../../gui/linuxscp-gui";
+    const std::string cmakeTree = directory + "/../source/gui/linuxscp-gui";
+    std::string guiBin;
+    if (!beside.empty() && access(beside.c_str(), X_OK) == 0)
+        guiBin = beside;
+    else if (!directory.empty() && access(makeTree.c_str(), X_OK) == 0)
+        guiBin = makeTree;
+    else if (!directory.empty() && access(cmakeTree.c_str(), X_OK) == 0)
+        guiBin = cmakeTree;
+    else
+        guiBin = FindExecutableOnPath("linuxscp-gui");
+    if (guiBin.empty())
     {
-        guiBin = "linuxscp-gui";
+        guiBin = "/usr/bin/linuxscp-gui";
     }
-    execlp(guiBin, guiBin, static_cast<char *>(NULL));
-    error = std::string("Failed to launch LinSCP GUI: ") + strerror(errno);
+    execl(guiBin.c_str(), guiBin.c_str(), static_cast<char *>(NULL));
+    error = std::string("Failed to launch LinSCP GUI '") + guiBin +
+        "': " + strerror(errno);
     return false;
 }
 

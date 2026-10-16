@@ -15,6 +15,13 @@
 cmake_minimum_required(VERSION 3.16)
 project(LinSCP VERSION 1.0 LANGUAGES C CXX)
 
+# The platform layer uses Linux-only services (inotify, /proc/self/exe,
+# SO_PEERCRED) and the packaged launcher assumes Linux desktop conventions.
+# Do not let another POSIX host accidentally produce an untested build.
+if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  message(FATAL_ERROR "LinSCP supports Linux only (found ${CMAKE_SYSTEM_NAME})")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
