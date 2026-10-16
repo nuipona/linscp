@@ -142,6 +142,9 @@ terminal, so piping commands in is not supported; use `-script=-` for that.
 `put`, `synchronize`, `keepuptodate`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `cp`,
 `ln`/`symlink`, `chmod`, `stat`, `checksum`, `copyid`, `edit`, `session`,
 `savesession`, `rmsession`, `call` (`!`), `terminal`, `option`, `help`, `exit`.
+`lock`, `unlock` and `property` are the WebDAV extensions: an exclusive write
+lock whose token later uploads, deletes and moves of that path carry, and the
+dead properties of a file.
 `recv`/`mget`, `send`/`mput`, `dir`, `rename`, `del`, `md`, `sync`, `man`, `bye`,
 `quit` and `end` are the aliases upstream has, and `show` is recognised only to
 say that it is not supported.

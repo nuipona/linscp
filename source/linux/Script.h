@@ -336,6 +336,10 @@ private:
     /* 'checksum <algorithm> <file>': server-side when the protocol can,
      * otherwise computed while downloading. */
     bool ChecksumRemote(const std::vector<std::string> & args);
+    /* WebDAV locks and dead properties (LinSCP extensions). */
+    bool LockRemote(const std::vector<std::string> & args);
+    bool UnlockRemote(const std::vector<std::string> & args);
+    bool DavPropertyCommand(const std::vector<std::string> & args);
     /* 'call'/'!': runs one command on the server through a second SSH
      * connection that executes it instead of the SFTP subsystem. */
     bool CallRemote(const std::vector<std::string> & args, const char * name);

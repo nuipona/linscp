@@ -2,7 +2,7 @@
 
 Source: [upstream-parity.json](upstream-parity.json), pinned to winscp/winscp `69edabbe2dc2c62661a7d3fc7e2396b5f42d504d`. **This is not full WinSCP parity or an exhaustive upstream behavioral certification.** The 40 registered upstream script commands are tracked separately in [the parity audit](upstream-parity.md); these rows decompose the 15 feature areas into specific Linux behaviors and named gaps.
 
-87 capabilities: 47 verified for the stated behavior, 23 partial, 17 missing. `verified` means the **row's** behavior has an automated case on Linux, not that every upstream variant or protocol works. `partial` names a working subset and the next gap. `missing` has no implementation. Evidence skipped by a missing dependency is not a pass; consult each suite's `evidence:` line in CI.
+87 capabilities: 49 verified for the stated behavior, 23 partial, 15 missing. `verified` means the **row's** behavior has an automated case on Linux, not that every upstream variant or protocol works. `partial` names a working subset and the next gap. `missing` has no implementation. Evidence skipped by a missing dependency is not a pass; consult each suite's `evidence:` line in CI.
 
 Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --write-report`. The default check fails if this view or a cited test case drifts.
 
@@ -41,8 +41,8 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 | `dav.basic-crud` | verified | live-dav | MKCOL, PUT, GET, DELETE and refusal of nonempty collection removal work against the live server. |
 | `dav.copy-and-move` | verified | live-dav | MOVE and COPY send absolute Destination URIs; a refused COPY falls back to a byte-exact stream. |
 | `dav.escaped-paths` | verified | live-dav | curl URL paths, DAV href comparisons and Destination headers preserve spaces and literal %, ? and # in names. |
-| `dav.locks` | missing | — | No LOCK/UNLOCK requests or lock-token storage. **Next:** Implement LOCK/UNLOCK and test concurrent edits and token lifetime. |
-| `dav.dead-properties-and-preconditions` | missing | — | No dead properties, If headers or collection-level precondition handling. **Next:** Implement PROPPATCH/PROPFIND dead properties and conditional operations against a compliant server. |
+| `dav.locks` | verified | live-dav, unit | 'lock <file> [-timeout=SECONDS]' takes an exclusive write lock and keeps its token in the session; 'unlock <file>' releases it. Every later upload, delete and move of that path carries the token as the If header, so a second writer without it is refused with 423 and the locked file keeps its content. A server that does not implement LOCK answers 405 and the command prints that instead of reporting a protected write. Upstream's WebDAV backend sends no LOCK or UNLOCK at all, so this is a LinSCP extension. |
+| `dav.dead-properties-and-preconditions` | verified | live-dav, unit | 'property <file> -set=NAME=VALUE' stores one dead property through PROPPATCH and 'property <file> -get=NAME' reads it back with a named-property PROPFIND; both use this client's own namespace (urn:linuxscp:properties), a name that would build invalid XML is refused before any request, and a property the server does not have prints 'NAME is not set' rather than failing. The conditional write is the lock token: PUT, DELETE and MOVE of a locked path send If, which is what makes the server refuse a write whose lock is gone (423). |
 
 ## Amazon S3
 

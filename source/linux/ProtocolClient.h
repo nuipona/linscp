@@ -17,6 +17,20 @@ namespace linuxscp {
  */
 bool IsCurlEndpointUnreachable(int code);
 
+/*
+ * The pieces of the WebDAV lock and dead-property extensions that can be
+ * checked without a server: the lock token inside a LOCK response body,
+ * the rules a property name has to follow, and the request bodies and
+ * replies for one property. Exposed so the unit suite can pin them.
+ */
+bool DavLockTokenFromXml(const std::string & xml, std::string & token);
+bool DavValidPropertyName(const std::string & name, std::string & error);
+std::string DavPropertyPropfindBody(const std::string & name);
+std::string DavPropertyUpdateBody(const std::string & name,
+    const std::string & value);
+bool DavPropertyValueFromXml(const std::string & xml, const std::string & name,
+    std::string & value, bool & found);
+
 /* Runs curl with its progress meter enabled and translates the meter into
  * byte callbacks. This is shared by the generic protocol client and S3;
  * the caller supplies all curl arguments, so credentials and URLs remain
@@ -47,6 +61,24 @@ public:
         const std::string & remotePath, int permissions, unsigned long long resumeOffset,
         bool preserveTime, unsigned long long * size, LscpProgressFn progress,
         void * progressCtx, std::string & error, unsigned speedKBytesPerSecond = 0);
+
+    /*
+     * WebDAV locks and dead properties. Upstream's WebDAV backend sends no
+     * LOCK, UNLOCK or PROPPATCH at all, so these are LinSCP extensions; a
+     * server that does not implement one answers 405 and the command says
+     * so rather than pretending the write was protected. DavLock returns
+     * the server's token, DavSetProperty moves a property in the
+     * 'urn:linuxscp:properties' namespace, and DavGetProperty reports
+     * 'found' false when the server answered with a 404 propstat.
+     */
+    static bool DavLock(const SessionOptions & options, const std::string & remotePath,
+        int timeoutSeconds, std::string & token, std::string & error);
+    static bool DavUnlock(const SessionOptions & options, const std::string & remotePath,
+        const std::string & token, std::string & error);
+    static bool DavSetProperty(const SessionOptions & options, const std::string & remotePath,
+        const std::string & name, const std::string & value, std::string & error);
+    static bool DavGetProperty(const SessionOptions & options, const std::string & remotePath,
+        const std::string & name, std::string & value, bool & found, std::string & error);
 
     /*
      * Ask the endpoint whether it is there at all, by listing a directory.

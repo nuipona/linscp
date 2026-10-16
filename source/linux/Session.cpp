@@ -1734,6 +1734,35 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
     return false;
 }
 
+/*
+ * The lock tokens this session holds. They live with the session, not in
+ * a file: a lock belongs to the connection that took it, and a token
+ * remembered after the lock expired is worse than none because the
+ * server would refuse the write the token was supposed to allow.
+ */
+void Session::SetDavLock(const std::string & remotePath, const std::string & token)
+{
+    if (token.empty())
+    {
+        mOptions.davLocks.erase(remotePath);
+        return;
+    }
+    mOptions.davLocks[remotePath] = token;
+}
+
+void Session::ClearDavLock(const std::string & remotePath)
+{
+    mOptions.davLocks.erase(remotePath);
+}
+
+const std::string & Session::DavLockFor(const std::string & remotePath) const
+{
+    static const std::string none;
+    std::map<std::string, std::string>::const_iterator found =
+        mOptions.davLocks.find(remotePath);
+    return found == mOptions.davLocks.end() ? none : found->second;
+}
+
 bool Session::Open(const SessionOptions & options, std::string & error)
 {
     /*

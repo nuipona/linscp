@@ -985,7 +985,8 @@ struct DavResult
 bool DavInvoke(const SessionOptions & options, const std::string & method,
     const std::string & remotePath,
     const std::vector<std::pair<std::string, std::string> > & headers,
-    const std::string & body, DavResult & result, std::string & error)
+    const std::string & body, DavResult & result, std::string & error,
+    const std::string & ifToken = std::string())
 {
     result.curlCode = -1;
     result.httpCode = 0;
@@ -997,6 +998,11 @@ bool DavInvoke(const SessionOptions & options, const std::string & method,
     args.push_back("--anyauth");
     args.push_back("-X");
     args.push_back(method);
+    if (!ifToken.empty())
+    {
+        args.push_back("-H");
+        args.push_back("If: (" + ifToken + ")");
+    }
     for (size_t i = 0; i < headers.size(); i++)
     {
         args.push_back("-H");
@@ -1103,6 +1109,94 @@ bool DavPropfindOnce(const SessionOptions & options, const std::string & path,
     return true; /* the server answered; 'error' says what it said */
 }
 
+/*
+ * WebDAV locks and dead properties: what upstream's WebDAV backend does
+ * not have at all, and therefore a LinSCP extension. A lock is what keeps
+ * two writers from racing over the same path, the If header is what makes
+ * the server enforce it, and a dead property is what a WebDAV server lets
+ * a client store next to a file's content. Everything here reports the
+ * server's answer: a 405 says the server has no LOCK, and the command
+ * prints that rather than reporting a write that was never protected.
+ */
+
+const char * const kDavPropertyNamespace = "urn:linuxscp:properties";
+const char * const kDavPropertyPrefix = "lscp";
+
+/* The lock token this session holds for a path, or an empty string: the
+ * If header that makes the server enforce the lock. */
+std::string DavTokenFor(const SessionOptions & options, const std::string & remotePath)
+{
+    std::map<std::string, std::string>::const_iterator found =
+        options.davLocks.find(remotePath);
+    return found == options.davLocks.end() ? std::string() : found->second;
+}
+
+std::string DavTrimmed(const std::string & text)
+{
+    size_t begin = 0;
+    while (begin < text.size() && isspace(static_cast<unsigned char>(text[begin])))
+    {
+        begin++;
+    }
+    size_t end = text.size();
+    while (end > begin && isspace(static_cast<unsigned char>(text[end - 1])))
+    {
+        end--;
+    }
+    return text.substr(begin, end - begin);
+}
+
+std::string DavXmlEscape(const std::string & text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        switch (text[i])
+        {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        default: out += text[i]; break;
+        }
+    }
+    return out;
+}
+
+
+
+
+
+
+/* The first failing status inside a 207 reply, for PROPPATCH answers: a
+ * multi-status can carry one propstat per property, and a property the
+ * server refused has to be reported rather than counted as stored. */
+std::string DavMultiStatusFailure(const std::string & xml)
+{
+    size_t at = 0;
+    while ((at = xml.find("status", at)) != std::string::npos)
+    {
+        const size_t gt = xml.find('>', at);
+        if (gt == std::string::npos)
+        {
+            break;
+        }
+        const size_t lt = xml.find('<', gt + 1);
+        const std::string text = lt == std::string::npos ?
+            std::string() : DavTrimmed(xml.substr(gt + 1, lt - gt - 1));
+        const size_t space = text.find(' ');
+        const std::string code = space == std::string::npos ?
+            std::string() : text.substr(0, space);
+        if (code.size() == 3 && isdigit(static_cast<unsigned char>(code[0])) &&
+            code[0] >= '4')
+        {
+            return text;
+        }
+        at = lt == std::string::npos ? xml.size() : lt;
+    }
+    return std::string();
+}
+
 /* PROPFIND into listing entries. 'self' (the requested path) is not an
  * entry of its own. */
 bool DavFetchListing(const SessionOptions & options,
@@ -1161,16 +1255,21 @@ bool DavFetchListing(const SessionOptions & options,
     return true;
 }
 
+
+
+
+
 /* DELETE with the statuses that mean something. 'emptyDirectory' shapes
  * the 409 message: for rmdir, a conflict is the server saying the
  * directory still has children. */
 int DavDelete(const SessionOptions & options, const std::string & remotePath,
     bool emptyDirectory, std::string & error)
 {
+    const std::string davLockToken = DavTokenFor(options, remotePath);
     DavResult deleted;
     if (!DavInvoke(options, "DELETE", remotePath,
         std::vector<std::pair<std::string, std::string> >(),
-        std::string(), deleted, error))
+        std::string(), deleted, error, davLockToken))
     {
         return -1;
     }
@@ -1732,6 +1831,16 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
         args.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
+    /* A locked path: the token proves this writer owns the lock, and a
+     * lock that expired or was broken makes the server refuse the
+     * upload (412) instead of writing over somebody else's change. */
+    const std::string davLockToken = DavTokenFor(options, remotePath);
+    if (!davLockToken.empty())
+    {
+        args.push_back("-H");
+        args.push_back("If: (" + davLockToken + ")");
+    }
+
     args.push_back("-T");
     args.push_back(localPath);
     args.push_back(BuildUrl(options, remotePath));
@@ -2052,8 +2161,9 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
             std::string("T")));
         DavResult moved;
         std::string moveError;
+        const std::string davLockToken = DavTokenFor(options, fromPath);
         if (!DavInvoke(options, "MOVE", fromPath, headers, std::string(),
-            moved, moveError))
+            moved, moveError, davLockToken))
         {
             error = moveError;
             return -1;
@@ -2155,6 +2265,282 @@ int ProtocolClient::SetPermissions(const SessionOptions & options,
         return -1;
     }
     return 0;
+}
+
+
+/*
+ * The token of a LOCK reply. Servers answer with a lockdiscovery body
+ * ('...<locktoken><href>opaquelocktoken:...</href></locktoken>...'), and a
+ * few send the token on its own, so both are accepted and anything else
+ * (including a reply with no token at all) is a failure: without a token
+ * the lock cannot be released or used.
+ */
+bool DavLockTokenFromXml(const std::string & xml, std::string & token)
+{
+    token.clear();
+    const std::string key = "locktoken";
+    const size_t at = xml.find(key);
+    if (at == std::string::npos)
+    {
+        const std::string text = DavTrimmed(xml);
+        if (!text.empty() && text.find('<') == std::string::npos)
+        {
+            token = text;
+            return true;
+        }
+        return false;
+    }
+    size_t cursor = xml.find('>', at + key.size());
+    if (cursor == std::string::npos)
+    {
+        return false;
+    }
+    const size_t textStart = xml.find('>', cursor + 1);
+    if (textStart == std::string::npos)
+    {
+        return false;
+    }
+    const size_t end = xml.find('<', textStart + 1);
+    if (end == std::string::npos)
+    {
+        return false;
+    }
+    token = DavTrimmed(xml.substr(textStart + 1, end - textStart - 1));
+    return !token.empty();
+}
+
+/* An XML element name has to start with a letter or '_' and hold no
+ * whitespace or markup; anything else would build a request the server
+ * cannot parse, which would look like a server failure. */
+bool DavValidPropertyName(const std::string & name, std::string & error)
+{
+    if (name.empty())
+    {
+        error = "The property name is empty.";
+        return false;
+    }
+    const char first = name[0];
+    if (!(isalpha(static_cast<unsigned char>(first)) || first == '_'))
+    {
+        error = "The property name '" + name + "' has to start with a letter "
+            "or '_'.";
+        return false;
+    }
+    for (size_t i = 1; i < name.size(); i++)
+    {
+        const char c = name[i];
+        if (!(isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' ||
+            c == '.'))
+        {
+            error = "The property name '" + name + "' may only hold letters, "
+                "digits, '_', '-' and '.'.";
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string DavPropertyPropfindBody(const std::string & name)
+{
+    return std::string("<?xml version=\"1.0\" encoding=\"utf-8\"?>") +
+        "<D:propfind xmlns:D=\"DAV:\" xmlns:" + kDavPropertyPrefix + "=\"" +
+        kDavPropertyNamespace + "\"><D:prop><" + kDavPropertyPrefix + ":" +
+        name + "/></D:prop></D:propfind>";
+}
+
+/*
+ * The value of a dead property in a PROPFIND answer, and whether the
+ * server carried it. A 404 propstat (the property is not set) is 'found'
+ * false, which is an answer and not an error; the element's text is the
+ * value, so an empty element means the property is set to "".
+ */
+bool DavPropertyValueFromXml(const std::string & xml, const std::string & name,
+    std::string & value, bool & found)
+{
+    value.clear();
+    found = false;
+    if (!DavFindText(xml, name, 0, value))
+    {
+        return false;
+    }
+    found = true;
+    return true;
+}
+
+/* LOCK one path with an exclusive write lock and return its token. */
+bool ProtocolClient::DavLock(const SessionOptions & options,
+    const std::string & remotePath, int timeoutSeconds, std::string & token,
+    std::string & error)
+{
+    token.clear();
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Locks are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Depth"), std::string("0")));
+    headers.push_back(std::make_pair(std::string("Timeout"),
+        timeoutSeconds > 0 ? ("Second-" + std::to_string(timeoutSeconds)) :
+            std::string("Infinite")));
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    const std::string body =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<lockinfo xmlns=\"DAV:\"><lockscope><exclusive/></lockscope>"
+        "<locktype><write/></locktype>"
+        "<owner><href>linuxscp</href></owner></lockinfo>";
+    DavResult result;
+    if (!DavInvoke(options, "LOCK", remotePath, headers, body, result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 200 && result.httpCode != 201)
+    {
+        error = result.httpCode == 405 ?
+            "The WebDAV server does not implement LOCK." :
+            DavHttpFailure(result, "Lock");
+        return false;
+    }
+    if (!DavLockTokenFromXml(result.out, token))
+    {
+        error = "The server's LOCK reply carried no lock token.";
+        return false;
+    }
+    return true;
+}
+
+/* UNLOCK the path with the token the LOCK returned. The token is the
+ * proof of ownership, so a lock taken by somebody else cannot be
+ * released and the server answers 409 or 403 instead. */
+bool ProtocolClient::DavUnlock(const SessionOptions & options,
+    const std::string & remotePath, const std::string & token, std::string & error)
+{
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Locks are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    if (token.empty())
+    {
+        error = "There is no lock token to release.";
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Lock-Token"),
+        "<" + token + ">"));
+    DavResult result;
+    if (!DavInvoke(options, "UNLOCK", remotePath, headers, std::string(),
+        result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 204 && result.httpCode != 200)
+    {
+        error = result.httpCode == 405 ?
+            "The WebDAV server does not implement UNLOCK." :
+            DavHttpFailure(result, "Unlock");
+        return false;
+    }
+    return true;
+}
+
+/* PROPPATCH one dead property in this client's own namespace, so that a
+ * protected property (getlastmodified and friends) is never the target
+ * and the value a client stores cannot be confused with the server's. */
+bool ProtocolClient::DavSetProperty(const SessionOptions & options,
+    const std::string & remotePath, const std::string & name,
+    const std::string & value, std::string & error)
+{
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Dead properties are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    std::string nameError;
+    if (!DavValidPropertyName(name, nameError))
+    {
+        error = nameError;
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    DavResult result;
+    if (!DavInvoke(options, "PROPPATCH", remotePath, headers,
+        DavPropertyUpdateBody(name, value), result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 207 && result.httpCode != 200)
+    {
+        error = result.httpCode == 405 ?
+            "The WebDAV server does not implement PROPPATCH." :
+            DavHttpFailure(result, "Set property");
+        return false;
+    }
+    /* A 207 can still hold a refused property: the server answers one
+     * propstat per property it was asked about. */
+    const std::string refusal = DavMultiStatusFailure(result.out);
+    if (!refusal.empty())
+    {
+        error = "The server refused to store '" + name + "': " + refusal;
+        return false;
+    }
+    return true;
+}
+
+/* PROPFIND one dead property of one path. 'found' false means the server
+ * answered a 404 propstat: the property is not set, which is an answer. */
+bool ProtocolClient::DavGetProperty(const SessionOptions & options,
+    const std::string & remotePath, const std::string & name,
+    std::string & value, bool & found, std::string & error)
+{
+    value.clear();
+    found = false;
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Dead properties are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    std::string nameError;
+    if (!DavValidPropertyName(name, nameError))
+    {
+        error = nameError;
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Depth"), std::string("0")));
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    DavResult result;
+    if (!DavInvoke(options, "PROPFIND", remotePath, headers,
+        DavPropertyPropfindBody(name), result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 207 && result.httpCode != 200)
+    {
+        error = DavHttpFailure(result, "Get property");
+        return false;
+    }
+    DavPropertyValueFromXml(result.out, name, value, found);
+    return true;
+}
+
+
+std::string DavPropertyUpdateBody(const std::string & name,
+    const std::string & value)
+{
+    return std::string("<?xml version=\"1.0\" encoding=\"utf-8\"?>") +
+        "<D:propertyupdate xmlns:D=\"DAV:\" xmlns:" + kDavPropertyPrefix +
+        "=\"" + kDavPropertyNamespace + "\"><D:set><D:prop><" +
+        kDavPropertyPrefix + ":" + name + ">" + DavXmlEscape(value) + "</" +
+        kDavPropertyPrefix + ":" + name + "></D:prop></D:set></D:propertyupdate>";
 }
 
 } // namespace linuxscp

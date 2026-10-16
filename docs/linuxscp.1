@@ -503,6 +503,48 @@ does not change it, and an upload is refused when the remote file was modified
 after the download began. Without an argument the current remote directory is
 used.
 .TP
+.BI lock " file [\-timeout=" seconds "]"
+Take an exclusive write lock on one WebDAV resource and remember its token.
+Uploads, deletes and moves of that path then carry the token (the
+.B If
+header), so the server refuses a write the lock was meant to prevent instead
+of accepting it. A server that does not implement
+.B LOCK
+answers 405 and the command says so. Upstream has no such command, so this is
+a LinSCP extension.
+.TP
+.BI unlock " file"
+Release the lock
+.B lock
+took in this session. A lock taken by another client cannot be released, and
+this session cannot release a lock it did not take.
+.TP
+.BI property " file \-get=" name
+Read one WebDAV dead property of
+.IR file .
+The property lives in this client's own namespace
+.RI ( urn:linuxscp:properties ),
+so a protected
+.B DAV:
+property is never the target. A property the server does not have prints
+.RI \(dq name " is not set" .
+.TP
+.BI property " file \-set=" name = value
+Store one dead property on
+.IR file .
+The value is XML-escaped; the name has to start with a letter or
+.B _
+and may hold letters, digits,
+.BR _ ,
+.B \-
+and
+.BR . .
+A server that does not implement
+.B PROPPATCH
+answers 405 and the command says so. Both forms of
+.B property
+are LinSCP extensions.
+.TP
 .B session
 List the open sessions as index and name and print which one is active.
 With a 1-based
@@ -809,8 +851,15 @@ installed curl lacks the protocol, opening such an endpoint fails with that
 statement rather than reporting a session that cannot transfer anything.
 Remote WebDAV paths encode spaces and URL metacharacters in filenames rather
 than treating them as a URL query or fragment. WebDAV provides PROPFIND
-listings, MOVE and single-file COPY, but
-not locking, dead properties or conditional requests. S3 uses Signature
+listings, MOVE and single-file COPY, and its locking and dead properties are
+reachable through
+.BR lock ,
+.B unlock
+and
+.BR property ;
+a conditional request beyond a lock token (an
+.B If-Match
+etag, for instance) is not sent. S3 uses Signature
 Version 4, supports object listing/stat/transfer and CopyObject, and uses
 multipart uploads for files larger than 16 MiB; an interrupted multipart
 upload restarts from the first part. ACLs, versioning, storage classes and

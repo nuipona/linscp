@@ -10,6 +10,7 @@
 #define LINUXSCP_SESSION_H
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -167,6 +168,11 @@ struct SessionOptions
     /* The FTP engine's policy and the TLS policy of the curl protocols. */
     FtpSettings ftp;
     TlsSettings tls;
+    /* WebDAV lock tokens this session holds, by remote path. An upload,
+     * delete or move of a locked path carries its token in the If header,
+     * so the server refuses the write when the lock is gone instead of
+     * accepting one the lock was meant to prevent. */
+    std::map<std::string, std::string> davLocks;
 
     SessionOptions();
 };
@@ -224,6 +230,11 @@ public:
     bool IsAlive() const { return mAlive; }
 
     const SessionOptions & Options() const { return mOptions; }
+    /* The WebDAV lock of a path: set by the 'lock' command, used by the
+     * upload, delete and move paths, and dropped by 'unlock'. */
+    void SetDavLock(const std::string & remotePath, const std::string & token);
+    void ClearDavLock(const std::string & remotePath);
+    const std::string & DavLockFor(const std::string & remotePath) const;
     /* struct Seat *, for get_log_seat(). */
     void * SeatHandle() const { return mSeat; }
     const std::string & ConnectionError() const { return mConnectionError; }

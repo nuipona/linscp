@@ -2797,6 +2797,87 @@ void TestHostKeyPinConversion()
     CHECK_FALSE(HostKeySha256("aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", pin));
 }
 
+/*
+ * The WebDAV lock and dead-property pieces that can be checked without a
+ * server: the token a LOCK reply carries, the rules a property name
+ * follows, and the XML a PROPFIND or PROPPATCH sends. A token that is
+ * read wrongly locks a file nobody can release, and a property name that
+ * builds invalid XML looks like a server failure.
+ */
+void TestDavLockAndPropertyXml()
+{
+    std::string token;
+
+    /* The lockdiscovery body of a LOCK reply, with and without the
+     * namespace prefixes a server is free to choose. */
+    CHECK_TRUE(DavLockTokenFromXml(
+        "<?xml version=\"1.0\"?><D:prop xmlns:D=\"DAV:\"><D:lockdiscovery>"
+        "<D:activelock><D:locktoken><D:href>opaquelocktoken:1-2-3</D:href>"
+        "</D:locktoken></D:activelock></D:lockdiscovery></D:prop>", token));
+    CHECK_EQ(token, std::string("opaquelocktoken:1-2-3"));
+    CHECK_TRUE(DavLockTokenFromXml(
+        "<prop><lockdiscovery><activelock><locktoken><href>urn:uuid:abc"
+        "</href></locktoken></activelock></lockdiscovery></prop>", token));
+    CHECK_EQ(token, std::string("urn:uuid:abc"));
+    /* A bare token body, which some servers send. */
+    CHECK_TRUE(DavLockTokenFromXml("  urn:uuid:bare  ", token));
+    CHECK_EQ(token, std::string("urn:uuid:bare"));
+    /* No token means the caller has to report a failure: a lock nobody
+     * can release is worse than a lock that was not taken. */
+    CHECK_FALSE(DavLockTokenFromXml("<prop><lockdiscovery/></prop>", token));
+    CHECK_FALSE(DavLockTokenFromXml("", token));
+
+    std::string error;
+    CHECK_TRUE(DavValidPropertyName("author", error));
+    CHECK_TRUE(DavValidPropertyName("file_name-2.x", error));
+    CHECK_FALSE(DavValidPropertyName("", error));
+    CHECK_FALSE(DavValidPropertyName("2author", error));
+    CHECK_FALSE(DavValidPropertyName("a b", error));
+    CHECK_FALSE(DavValidPropertyName("a<b", error));
+    CHECK_FALSE(DavValidPropertyName("a/b", error));
+
+    /* The request bodies carry the property in this client's namespace,
+     * so a protected DAV: property is never the target. */
+    CHECK_TRUE(DavPropertyPropfindBody("author").find(
+        "xmlns:lscp=\"urn:linuxscp:properties\"") != std::string::npos);
+    CHECK_TRUE(DavPropertyPropfindBody("author").find(
+        "<lscp:author/>") != std::string::npos);
+    CHECK_TRUE(DavPropertyUpdateBody("author", "Ada").find(
+        "<lscp:author>Ada</lscp:author>") != std::string::npos);
+    /* A value is data: markup has to be escaped, or the request would not
+     * parse and the property would look refused. */
+    CHECK_TRUE(DavPropertyUpdateBody("note", "a & b <c> \"d\"").find(
+        "a &amp; b &lt;c&gt; &quot;d&quot;") != std::string::npos);
+
+    /* A PROPFIND answer: the value is the element's text, and an absent
+     * element is 'found' false rather than an empty string, because the
+     * two mean different things to the user. */
+    std::string value;
+    bool found = true;
+    CHECK_TRUE(DavPropertyValueFromXml(
+        "<d:multistatus xmlns:d=\"DAV:\" xmlns:lscp=\"urn:linuxscp:properties\">"
+        "<d:response><d:propstat><d:prop><lscp:author>Ada</lscp:author>"
+        "</d:prop></d:propstat></d:response></d:multistatus>", "author", value,
+        found));
+    CHECK_TRUE(found);
+    CHECK_EQ(value, std::string("Ada"));
+    found = true;
+    /* The element is absent: the function reports false and the caller
+     * reads 'found' - a property that is not set is an answer about the
+     * file, not a failure of the request. */
+    CHECK_FALSE(DavPropertyValueFromXml("<d:multistatus xmlns:d=\"DAV:\"/>",
+        "author", value, found));
+    CHECK_FALSE(found);
+    CHECK_EQ(value, std::string(""));
+    /* A property set to the empty string is set: the element is there. */
+    found = false;
+    CHECK_TRUE(DavPropertyValueFromXml(
+        "<lscp:author xmlns:lscp=\"urn:linuxscp:properties\"></lscp:author>",
+        "author", value, found));
+    CHECK_TRUE(found);
+    CHECK_EQ(value, std::string(""));
+}
+
 int main()
 {
     TestSplitCommandLine();
@@ -2825,6 +2906,7 @@ int main()
     TestProxySettings();
     TestFtpAndTlsSettings();
     TestHostKeyPinConversion();
+    TestDavLockAndPropertyXml();
     TestSessionStore();
     TestS3SigV4();
     TestEditorHelpers();

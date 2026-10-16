@@ -75,8 +75,12 @@ work.
 
 Protocol URL acceptance is not proof of complete support: WebDAV lists and
 stats through PROPFIND, moves with MOVE, and file copies with COPY (falling
-back to a streamed copy when the server refuses COPY); locking, dead
-properties and conditional requests remain gaps. Amazon S3 signs with
+back to a streamed copy when the server refuses COPY); `lock`/`unlock` take
+an exclusive write lock whose token every later upload, delete and move of
+that path carries (the `If` header), and `property -get`/`-set` reads and
+writes dead properties. Upstream's WebDAV backend has no locking or dead
+properties at all, so those are LinSCP extensions; collection-level
+preconditions beyond the lock token remain gaps. Amazon S3 signs with
 Signature Version 4, lists and stats objects, uses CopyObject for remote
 copies, and switches uploads larger than 16 MiB to multipart requests.
 Interrupted multipart uploads restart from the first part; ACLs, versioning,

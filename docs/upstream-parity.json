@@ -16,12 +16,12 @@
     "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite",
     "date": "2026-10-16",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 1097 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings and the FTP engine and TLS policy settings (defaults, every spelling each value takes, the names refused, and the URL spellings ftps:// and ftpes://), the host-key pin spellings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
+     "unit": "source/linux/tests/UnitTest.cpp - 1125 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings and the FTP engine and TLS policy settings (defaults, every spelling each value takes, the names refused, and the URL spellings ftps:// and ftpes://), the host-key pin spellings, the WebDAV lock-token and dead-property XML, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log. It checks -literal command input (including GUI filenames with percent placeholders), mkdir -parents argument validation and the adjacent -gui launcher plus Makefile/CMake source-tree launchers.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader). Recursive directory copy and multiple source files into an existing destination directory are tested over SFTP; the test server refuses the optional copy-data extension, so these prove the streamed fallback rather than the native extension. A second server mode implements copy-data and verifies the native extension path as well as exact copied bytes. The server can also refuse check-file-name, which proves the download-and-hash fallback for sha-256, sha-1, md5 and crc32, or implement the extension, which proves the native sha-256 digest and that the client does not fall back after a valid reply. It also proves that synchronize remote with a path exclusion ('-filemask=|skip/') leaves an excluded file untouched despite -delete and does not upload files from the excluded subtree. Recursive symbolic chmod is checked over a nested tree, including exact directory and file modes. copyid installs a generated OpenSSH public key into the test SFTP home, verifies the 0700/0600 permissions and proves that repeating the command does not duplicate the key.",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, filename and full-text search controls/results, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored), and browser file/folder drop enumeration with nested paths and explicit empty directories.",
-     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl. It also covers -parents mkdir and literal remote names containing spaces, percent signs, question marks and hashes through DAV PROPFIND/GET/PUT/MOVE/COPY.",
+     "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication, which also implements LOCK/UNLOCK (refusing a write from a session that holds no token with 423), PROPPATCH and dead properties, so the lock and property behavior is asserted against the server's own state rather than against the client alone: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl. It also covers -parents mkdir and literal remote names containing spaces, percent signs, question marks and hashes through DAV PROPFIND/GET/PUT/MOVE/COPY.",
      "live-curl": "source/linux/tests/LiveCurlTest.py - throwaway pyftpdlib FTP, implicit FTPS and explicit-TLS (AUTH TLS) servers verify authenticated downloads/uploads and FTP .filepart completion; a recording handler proves which commands the session sent, so the suite checks that a listing is MLSD with LIST absent, that FtpUseMlsd=0 and a server refusing MLSD both fall back to LIST, that FtpUseMlsd=2 fails instead of listing without facts (and never sends LIST), and that FtpPasvMode=0 opens the data connection with PORT. The explicit-TLS case walks the TLS policy in one session: ftpes:// and Ftps=3 on an ftp:// URL, a refused handshake when the certificate is not accepted, CaCertificateFile, a PinnedPublicKey that matches, one that does not, MaxTlsVersion=1.1 refused against MinTlsVersion=1.2 accepted, and a host-key fingerprint refused with the setting to use instead. A saved site is stored and reopened by name to prove the FTP/TLS policy travels with it. When OpenSSH sshd is available, the SCP case pins the host key by its SHA-256 fingerprint from -hostkey (and refuses a wrong one), verifies authenticated direct upload/download and rejects unsafe upload resume rather than staging a remote .filepart.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server.",
      "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet.",
@@ -423,7 +423,7 @@
   {
    "name": "WebDAV",
    "status": "partial",
-   "notes": "PROPFIND-driven filesystem: Depth 0/1 listings parsed from the 207 multi-status whatever namespace prefix the server chose (resourcetype, getcontentlength, getlastmodified), stat through Depth 0 with real sizes, times and a missing path that reports as missing, MKCOL with named exists/parent-refusal messages, MOVE with an absolute-URI Destination and Overwrite semantics, single-file COPY with absolute Destination/Overwrite for cp, and a streamed fallback when COPY is refused; DELETE with 409 read as 'not empty' - and rmdir checking children first, because a DAV collection DELETE is recursive by specification. 'open' probes with PROPFIND and refuses a 401 after the --anyauth challenge round-trip (which also serves digest-only servers) and a 405 that means the server is not DAV at all. The live server-side COPY path is asserted by the mock's method counter. Missing: LOCK/UNLOCK, dead properties, collection-level precondition handling and If-header preconditions.",
+   "notes": "PROPFIND-driven filesystem: Depth 0/1 listings parsed from the 207 multi-status whatever namespace prefix the server chose (resourcetype, getcontentlength, getlastmodified), stat through Depth 0 with real sizes, times and a missing path that reports as missing, MKCOL with named exists/parent-refusal messages, MOVE with an absolute-URI Destination and Overwrite semantics, single-file COPY with absolute Destination/Overwrite for cp, and a streamed fallback when COPY is refused; DELETE with 409 read as 'not empty' - and rmdir checking children first, because a DAV collection DELETE is recursive by specification. 'open' probes with PROPFIND and refuses a 401 after the --anyauth challenge round-trip (which also serves digest-only servers) and a 405 that means the server is not DAV at all. The live server-side COPY path is asserted by the mock's method counter. LOCK/UNLOCK carry the token as the If header of every later write of that path, so a second writer without it is refused with 423, and dead properties go through PROPPATCH and a named-property PROPFIND in this client's own namespace - both LinSCP extensions, because upstream's WebDAV backend sends no LOCK, UNLOCK or PROPPATCH. Missing: collection-level precondition handling beyond the lock token, and the If-Match/If-None-Match etag form.",
    "verified_on": {
     "linux": [
      "live-dav"
@@ -544,6 +544,30 @@
   }
  ],
  "linuxscp_additions": [
+  {
+   "name": "lock / unlock / property",
+   "status": "verified",
+   "notes": "WebDAV locks and dead properties, covered by LiveDavTest.py against a server that implements LOCK/UNLOCK/PROPPATCH and by the unit suite's XML checks: 'lock <file> [-timeout=SECONDS]' takes an exclusive write lock and remembers its token, every later upload, delete and move of that path carries the token in the If header, 'unlock <file>' releases it, and 'property <file> -get=NAME | -set=NAME=VALUE' reads and writes one dead property in this client's own namespace. Upstream's WebDAV backend has no LOCK, UNLOCK or PROPPATCH at all, so these are LinSCP commands; a server that does not implement one answers 405 and the command says so.",
+   "source": [
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "live-dav": [
+     "test_webdav_lock_makes_the_other_writer_wait",
+     "test_webdav_dead_property_roundtrip"
+    ],
+    "unit": [
+     "TestDavLockAndPropertyXml"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-dav",
+     "unit"
+    ]
+   }
+  },
   {
    "name": "edit",
    "status": "partial",
@@ -927,16 +951,52 @@
   {
    "id": "dav.locks",
    "area": "WebDAV",
-   "status": "missing",
-   "notes": "No LOCK/UNLOCK requests or lock-token storage.",
-   "gap": "Implement LOCK/UNLOCK and test concurrent edits and token lifetime."
+   "status": "verified",
+   "notes": "'lock <file> [-timeout=SECONDS]' takes an exclusive write lock and keeps its token in the session; 'unlock <file>' releases it. Every later upload, delete and move of that path carries the token as the If header, so a second writer without it is refused with 423 and the locked file keeps its content. A server that does not implement LOCK answers 405 and the command prints that instead of reporting a protected write. Upstream's WebDAV backend sends no LOCK or UNLOCK at all, so this is a LinSCP extension.",
+   "source": [
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Session.h",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestDavLockAndPropertyXml"
+    ],
+    "live-dav": [
+     "test_webdav_lock_makes_the_other_writer_wait"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-dav",
+     "unit"
+    ]
+   }
   },
   {
    "id": "dav.dead-properties-and-preconditions",
    "area": "WebDAV",
-   "status": "missing",
-   "notes": "No dead properties, If headers or collection-level precondition handling.",
-   "gap": "Implement PROPPATCH/PROPFIND dead properties and conditional operations against a compliant server."
+   "status": "verified",
+   "notes": "'property <file> -set=NAME=VALUE' stores one dead property through PROPPATCH and 'property <file> -get=NAME' reads it back with a named-property PROPFIND; both use this client's own namespace (urn:linuxscp:properties), a name that would build invalid XML is refused before any request, and a property the server does not have prints 'NAME is not set' rather than failing. The conditional write is the lock token: PUT, DELETE and MOVE of a locked path send If, which is what makes the server refuse a write whose lock is gone (423).",
+   "source": [
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestDavLockAndPropertyXml"
+    ],
+    "live-dav": [
+     "test_webdav_dead_property_roundtrip",
+     "test_webdav_lock_makes_the_other_writer_wait"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-dav",
+     "unit"
+    ]
+   }
   },
   {
    "id": "s3.sigv4-auth",

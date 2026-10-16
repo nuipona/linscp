@@ -537,6 +537,107 @@ class LiveDavTests(unittest.TestCase):
         listing = result.stdout.split("Reading directory /docs...")[1]
         self.assertNotIn("full", listing)
 
+    def test_webdav_lock_makes_the_other_writer_wait(self):
+        """A lock is only worth taking if the server enforces it.
+
+        The lock stays with the server, so a second session - a writer that
+        never took it - is refused with 423 for both an upload and a
+        delete, and the remote file keeps its old content. A session that
+        holds the token uploads with it (the If header) and releases the
+        lock again with 'unlock', after which the unprotected writer goes
+        through.
+        """
+        source = self.root / "dav-lock-source.txt"
+        source.write_text("locked content\n", encoding="utf-8")
+        rival = self.root / "dav-lock-rival.txt"
+        rival.write_text("rival content\n", encoding="utf-8")
+
+        # One session takes the lock and leaves it standing.
+        locked = self.run_script(
+            "option confirm off ; put %s /locked.txt ; lock /locked.txt "
+            "-timeout=600 ; echo LOCKED" % source)
+        self.assertEqual(locked.returncode, 0, locked.stdout + locked.stderr)
+        token = self.server_state()["locks"]["/locked.txt"]
+        self.assertTrue(token.startswith("opaquelocktoken:"))
+        self.assertIn("LOCKED", locked.stdout)
+        self.assertIn("Locked /locked.txt with token " + token, locked.stdout)
+
+        # A second session holds no token, so the server refuses the write
+        # and the file the lock protects is untouched.
+        refused = self.run_script(
+            "option confirm off ; put %s /locked.txt ; echo SHOULD_NOT_RUN" %
+            rival)
+        self.assertEqual(refused.returncode, 1, refused.stdout + refused.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", refused.stdout)
+        self.assertIn("423", refused.stderr)
+
+        # The same refusal protects the delete: a lock that only stopped
+        # uploads would not be a lock.
+        remove = self.run_script(
+            "option confirm off ; rm /locked.txt ; echo SHOULD_NOT_RUN")
+        self.assertEqual(remove.returncode, 1, remove.stdout + remove.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", remove.stdout)
+        self.assertIn("423", remove.stderr)
+
+        # One session takes a lock, writes through it and releases it: the
+        # token travels as the If header of the upload, and 'unlock' ends
+        # the protection.
+        changed = self.root / "dav-lock-changed.txt"
+        changed.write_text("the owner's new content\n", encoding="utf-8")
+        owner = self.run_script(
+            "option confirm off ; put %s /owned.txt ; lock /owned.txt ; "
+            "put %s /owned.txt ; echo OWNER_OK ; unlock /owned.txt ; "
+            "echo UNLOCKED" % (source, changed))
+        self.assertEqual(owner.returncode, 0, owner.stdout + owner.stderr)
+        self.assertIn("OWNER_OK", owner.stdout)
+        self.assertIn("Unlocked /owned.txt.", owner.stdout)
+        self.assertIn("UNLOCKED", owner.stdout)
+        self.assertNotIn("/owned.txt", self.server_state()["locks"])
+
+        # Nothing holds the lock any more, so the unprotected writer is
+        # allowed to replace the file.
+        after = self.run_script(
+            "option confirm off ; put %s /owned.txt ; echo AFTER_OK" % rival)
+        self.assertEqual(after.returncode, 0, after.stdout + after.stderr)
+        self.assertIn("AFTER_OK", after.stdout)
+
+        readback = self.root / "dav-lock-readback.txt"
+        got = self.run_script("get /owned.txt %s" % readback)
+        self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
+        self.assertEqual(readback.read_bytes(), rival.read_bytes())
+
+    def test_webdav_dead_property_roundtrip(self):
+        """A dead property is stored on the server and read back by the
+        named-property PROPFIND, from another session too."""
+        source = self.root / "dav-property.txt"
+        source.write_text("a file with a property\n", encoding="utf-8")
+        written = self.run_script(
+            "option confirm off ; put %s /property.txt ; "
+            "property /property.txt -set=author=Ada ; "
+            "echo STORED" % source)
+        self.assertEqual(written.returncode, 0, written.stdout + written.stderr)
+        self.assertIn("Set author on /property.txt.", written.stdout)
+        self.assertEqual(
+            self.server_state()["properties"]["/property.txt"]["author"],
+            "Ada")
+
+        read = self.run_script("property /property.txt -get=author")
+        self.assertEqual(read.returncode, 0, read.stdout + read.stderr)
+        self.assertIn("author=Ada", read.stdout)
+
+        # A property nobody set is an answer, not a failure.
+        missing = self.run_script("property /property.txt -get=revision")
+        self.assertEqual(missing.returncode, 0,
+                         missing.stdout + missing.stderr)
+        self.assertIn("revision is not set on /property.txt.", missing.stdout)
+
+        # A property name that would build invalid XML is refused before
+        # any request, and the lock/property verbs on a non-WebDAV session
+        # say so instead of asking the server.
+        invalid = self.run_script("property /property.txt -get=no such name")
+        self.assertEqual(invalid.returncode, 1,
+                         invalid.stdout + invalid.stderr)
+
     def test_cp_uses_webdav_copy_and_preserves_the_source(self):
         """COPY is a server-side operation: the destination has to match
         byte-for-byte, the original remains, and the mock's COPY counter
