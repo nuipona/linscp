@@ -238,6 +238,42 @@ class BrowserUploadTests(unittest.TestCase):
                                      io.BytesIO(b"short"), 20)
         self.assertIsNone(self.tasks.args)
 
+    def test_local_pane_drop_and_queue_priority_and_cancel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest_file = gui.save_local_browser_upload(
+                tmp, "note.txt", io.BytesIO(b"local-drop\n"), 11,
+                "nested/dir/note.txt")
+            self.assertEqual(
+                pathlib.Path(dest_file).read_bytes(), b"local-drop\n")
+            dest_dir = gui.save_local_browser_directory(
+                tmp, "nested/empty-folder")
+            self.assertTrue(pathlib.Path(dest_dir).is_dir())
+            with self.assertRaises(ValueError):
+                gui.save_local_browser_upload(
+                    tmp, "bad.txt", io.BytesIO(b"bad"), 3, "../bad.txt")
+
+        # Verify TaskManager queue prioritization and build_sync_command conflict flag.
+        self.assertIn(
+            "-conflict=newer",
+            gui.build_sync_command("both", "/local", "/remote",
+                                   conflict="newer"))
+        real_mgr = self.original_tasks
+        with gui.STATE_LOCK:
+            old_tasks = list(gui.STATE["tasks"])
+            old_paused = gui.STATE["paused"]
+            gui.STATE["paused"] = True
+            gui.STATE["tasks"] = []
+        try:
+            t1 = real_mgr.submit("Upload", "put a", {}, "/a", "/a", 1)
+            t2 = real_mgr.submit("Upload", "put b", {}, "/b", "/b", 1)
+            self.assertEqual(gui.STATE["tasks"][-1].id, t1.id)
+            self.assertTrue(real_mgr.prioritize(t2.id, "top"))
+            self.assertEqual(gui.STATE["tasks"][-1].id, t2.id)
+        finally:
+            with gui.STATE_LOCK:
+                gui.STATE["tasks"] = old_tasks
+                gui.STATE["paused"] = old_paused
+
 
 if __name__ == "__main__":
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(BrowserUploadTests)

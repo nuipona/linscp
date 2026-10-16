@@ -39,10 +39,9 @@ WARN ?= -Wall
 # -DPLATFORM_HAS_SMEMCLR     : the core provides smemclr().
 # -DNO_GSSAPI                : no GSSAPI/Kerberos support in this build.
 # -DHAVE_...                 : C library features available on Linux.
-# -DHAVE_AES_NI=0 etc.       : use the portable crypto implementations; the
-#                              x86 intrinsics versions in source/putty/crypto
-#                              are tuned for the MSVC/BCC toolchains and are
-#                              not built here.
+# -DHAVE_AES_NI=0 etc.       : use the portable crypto implementations in
+#                              source/putty/crypto so the build does not depend
+#                              on architecture-specific intrinsics flags.
 PUTTY_DEFS := \
 	-DFORK_BUILD \
 	-DMPEXT \
@@ -105,7 +104,7 @@ CFLAGS_PUTTY := -std=gnu99 $(OPT) -g $(WARN) -Wno-unused-parameter $(DEPFLAGS) \
 # signatures the core exposes).
 CXXFLAGS_APP := -std=gnu++17 $(OPT) -g $(WARN) -pthread $(DEPFLAGS) \
 	-D_FILE_OFFSET_BITS=64 $(PUTTY_DEFS) \
-	-I. -I../core -I$(TOP)/source/putty -I$(TOP)/libs/putty/unix \
+	-I. -I$(TOP)/source/putty -I$(TOP)/libs/putty/unix \
 	-I$(TOP)/libs/putty -I$(TOP)/libs/putty/charset $(CXXFLAGS)
 
 include putty-core.mk
@@ -176,7 +175,10 @@ TEST_OBJS := $(OBJDIR)/linux/tests/UnitTest.o
 
 PUTTY_LIB := $(BUILD)/libputty.a
 
-.PHONY: all clean check
+PREFIX ?= /usr
+DESTDIR ?=
+
+.PHONY: all clean check check-live install
 
 all: $(BINDIR)/linuxscp
 
@@ -226,19 +228,38 @@ check: $(BINDIR)/unittest
 # extra one test skips without), LiveCurlTest uses optional pyftpdlib/
 # pyOpenSSL and the local sshd when available, and the GUI search test uses a
 # fake session.
+PYTHON ?= python3
+
 check-live: $(BINDIR)/linuxscp
-	python3 tests/ScriptTest.py $(BINDIR)/linuxscp
-	python3 tests/LiveSftpTest.py $(BINDIR)/linuxscp
-	python3 tests/LiveS3Test.py $(BINDIR)/linuxscp
-	python3 tests/LiveDavTest.py $(BINDIR)/linuxscp
-	python3 tests/LiveCurlTest.py $(BINDIR)/linuxscp
-	python3 ../../source/gui/tests/RemoteSearchTest.py
-	python3 ../../source/gui/tests/LocalEditorTest.py
-	python3 ../../source/gui/tests/BrowserUploadTest.py
-	python3 ../../source/gui/tests/DesktopUriTest.py
+	$(PYTHON) tests/ScriptTest.py $(BINDIR)/linuxscp
+	$(PYTHON) tests/LiveSftpTest.py $(BINDIR)/linuxscp
+	$(PYTHON) tests/LiveS3Test.py $(BINDIR)/linuxscp
+	$(PYTHON) tests/LiveDavTest.py $(BINDIR)/linuxscp
+	$(PYTHON) tests/LiveCurlTest.py $(BINDIR)/linuxscp
+	$(PYTHON) ../../source/gui/tests/RemoteSearchTest.py
+	$(PYTHON) ../../source/gui/tests/LocalEditorTest.py
+	$(PYTHON) ../../source/gui/tests/BrowserUploadTest.py
+	$(PYTHON) ../../source/gui/tests/DesktopUriTest.py
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
+
+install: $(BINDIR)/linuxscp
+	install -d $(DESTDIR)$(PREFIX)/bin
+	install -d $(DESTDIR)$(PREFIX)/share/man/man1
+	install -d $(DESTDIR)$(PREFIX)/share/applications
+	install -d $(DESTDIR)$(PREFIX)/share/pixmaps
+	install -d $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
+	install -d $(DESTDIR)$(PREFIX)/share/linuxscp/gui/web
+	install -m 0755 $(BINDIR)/linuxscp $(DESTDIR)$(PREFIX)/bin/linuxscp
+	install -m 0755 $(TOP)/source/gui/linuxscp-gui $(DESTDIR)$(PREFIX)/bin/linuxscp-gui
+	install -m 0644 $(TOP)/source/gui/linuxscp_gui.py $(TOP)/source/gui/linscp_crypto.py \
+		$(DESTDIR)$(PREFIX)/share/linuxscp/gui/
+	install -m 0644 $(TOP)/source/gui/web/* $(DESTDIR)$(PREFIX)/share/linuxscp/gui/web/
+	install -m 0644 $(TOP)/debian/linuxscp.desktop $(DESTDIR)$(PREFIX)/share/applications/linuxscp.desktop
+	install -m 0644 $(TOP)/debian/linuxscp.png $(DESTDIR)$(PREFIX)/share/pixmaps/linuxscp.png
+	install -m 0644 $(TOP)/debian/linuxscp.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/linuxscp.svg
+	install -m 0644 $(TOP)/docs/linuxscp.1 $(DESTDIR)$(PREFIX)/share/man/man1/linuxscp.1
 
 clean:
 	rm -rf $(BUILD)

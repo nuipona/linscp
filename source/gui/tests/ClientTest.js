@@ -689,6 +689,53 @@ function options(id) {
   check('help shows the token of this run', text('helpToken') === TOKEN, text('helpToken'));
   window.closeModal('helpModal');
 
+  // Local-pane browser drop saves directly to the local panel via /api/local/drop.
+  const localDropBefore = calls.filter(c => c.path === '/api/local/drop').length;
+  const localDropDirBefore = calls.filter(c => c.path === '/api/local/drop-dir').length;
+  const localTree = directoryEntry('local-drop-dir', [
+    [fileEntry('dropped-local.txt', 'hello local')],
+    []
+  ]);
+  await window.dropOnPane('local', { dataTransfer: {
+    items: [{ kind: 'file', webkitGetAsEntry() { return localTree; } }],
+    files: [], types: ['Files']
+  }, preventDefault() {} });
+  check('dropping a folder on the local pane calls /api/local/drop-dir and /api/local/drop',
+    calls.filter(c => c.path === '/api/local/drop-dir').length === localDropDirBefore + 1 &&
+      calls.filter(c => c.path === '/api/local/drop').length === localDropBefore + 1);
+
+  // Site manager renders folder hierarchy and supports deleting a folder.
+  check('site manager renders folder header for slash-delimited site',
+    doc.querySelectorAll('#siteList .site-folder').length === 1);
+  await window.deleteSiteFolder('GUI');
+  const folderDel = calls.filter(c => c.path === '/api/sessions/delete').pop();
+  check('deleting a site folder posts folder:true',
+    folderDel && JSON.parse(folderDel.options.body).name === 'GUI' &&
+      JSON.parse(folderDel.options.body).folder === true);
+
+  // Synchronize conflict policy selector and resolution bar.
+  window.openSynchronize();
+  await window.resolveSyncConflictPolicy('newer');
+  const syncPrev = calls.filter(c => c.path === '/api/sync/preview').pop();
+  check('conflict resolution updates sync preview payload',
+    syncPrev && JSON.parse(syncPrev.options.body).conflict === 'newer');
+  window.closeModal('syncModal');
+
+  // Queue priority control and ARIA / keyboard navigation.
+  await window.prioritizeTask(1, 'top');
+  const prioCall = calls.filter(c => c.path === '/api/queue/priority').pop();
+  check('prioritizeTask posts to /api/queue/priority',
+    prioCall && JSON.parse(prioCall.options.body).task_id === 1 &&
+      JSON.parse(prioCall.options.body).position === 'top');
+  check('panes and tables expose ARIA roles',
+    doc.getElementById('localPane').getAttribute('role') === 'region' &&
+      doc.getElementById('remotePane').getAttribute('role') === 'region');
+  doc.getElementById('localPane').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+  check('ArrowDown advances selection in the focused pane',
+    doc.getElementById('localFileList').children[1].getAttribute('aria-selected') === 'true');
+
   check('no script errors', errors.length === 0, errors.join(' | '));
   window.close();
 })();

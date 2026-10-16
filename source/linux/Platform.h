@@ -76,10 +76,9 @@ bool RestrictFileToUser(const std::string & path);
 /* Sleeps for the given number of milliseconds. */
 void SleepMilliseconds(unsigned milliseconds);
 
-/* Installs a handler that records Ctrl-C (SIGINT / console control
- * events) instead of letting it kill the process, so that a long
- * running command such as 'keepuptodate' can stop cleanly. Safe to
- * call more than once. */
+/* Installs a handler that records Ctrl-C (SIGINT / SIGTERM) instead of
+ * letting it kill the process, so that a long-running command such as
+ * 'keepuptodate' can stop cleanly. Safe to call more than once. */
 void InstallInterruptHandler();
 /* True once Ctrl-C has been seen by the installed handler. */
 bool Interrupted();

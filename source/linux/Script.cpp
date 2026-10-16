@@ -353,7 +353,9 @@ std::string CensoredForLog(const std::string & line)
      * '-password=' switch and as the 'ProxyPassword=' session setting of a
      * '-rawsettings' switch (also quoted values).
      */
-    static const char * const secrets[] = { "-password=", "proxypassword=" };
+    static const char * const secrets[] = {
+        "-password=", "-passphrase=", "proxypassword="
+    };
     for (size_t secret = 0;
          secret < sizeof(secrets) / sizeof(secrets[0]); secret++)
     {
@@ -673,6 +675,10 @@ bool ApplyOpenSwitches(const OpenSwitches & switches, SessionOptions & options,
     {
         options.privateKeyFile = switches.privateKeyFile;
     }
+    if (switches.passphraseGiven)
+    {
+        options.keyPassphrase = switches.passphrase;
+    }
     return ApplyRawSettings(switches.rawSettings, options, error);
 }
 
@@ -815,18 +821,18 @@ int Script::RemoteGet(const std::string & remote, const std::string & local,
     std::string & error, bool append)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = append ?
+        res = append ?
             lscp_sftp_get_append(remote.c_str(), local.c_str(), size, progress, ctx) :
             lscp_sftp_get_resume(remote.c_str(), local.c_str(), resumeOffset, size,
                 progress, ctx);
         if (res != 0)
         {
             error = lscp_sftp_error();
-            return res;
         }
-        if (preserveTime)
+        else if (preserveTime)
         {
             LscpAttrs attrs = {};
             if (lscp_sftp_stat(remote.c_str(), &attrs) == LSCP_SFTP_STAT_EXISTS &&
@@ -834,14 +840,25 @@ int Script::RemoteGet(const std::string & remote, const std::string & local,
             {
                 /* Some servers report an atime of zero; keep the
                  * modification time in that case. */
-                SetFileTimes(local, attrs.atime != 0 ? attrs.atime : attrs.mtime,
+                const bool touched = SetFileTimes(local,
+                    attrs.atime != 0 ? attrs.atime : attrs.mtime,
                     attrs.mtime);
+                Console::Instance().LogAction("touch",
+                    "filename=\"" + Console::EscapeActionText(local) +
+                    "\" result=\"" + (touched ? "ok" : "failed") + "\"");
             }
         }
-        return res;
     }
-    return ProtocolClient::Get(mSession.Options(), remote, local, resumeOffset,
-        preserveTime, size, progress, ctx, error, mSpeedLimit);
+    else
+    {
+        res = ProtocolClient::Get(mSession.Options(), remote, local, resumeOffset,
+            preserveTime, size, progress, ctx, error, mSpeedLimit);
+    }
+    Console::Instance().LogAction("download",
+        "filename=\"" + Console::EscapeActionText(remote) +
+        "\" destination=\"" + Console::EscapeActionText(local) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 int Script::RemotePut(const std::string & local, const std::string & remote,
@@ -850,9 +867,10 @@ int Script::RemotePut(const std::string & local, const std::string & remote,
     std::string & error, bool append)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = append ?
+        res = append ?
             lscp_sftp_put_append(local.c_str(), remote.c_str(), permissions, size,
                 progress, ctx) :
             lscp_sftp_put_resume(local.c_str(), remote.c_str(), permissions,
@@ -860,26 +878,37 @@ int Script::RemotePut(const std::string & local, const std::string & remote,
         if (res != 0)
         {
             error = lscp_sftp_error();
-            return res;
         }
-
-        if (preserveTime)
+        else if (preserveTime)
         {
             /* The SFTP protocol has no way to carry the timestamps in the
              * transfer itself, so set them once the file is complete. */
             const LocalFileInfo info = StatLocal(local);
-            if (info.exists && info.mtime != 0 &&
-                lscp_sftp_set_times(remote.c_str(),
-                    info.atime != 0 ? info.atime : info.mtime, info.mtime) != 0)
+            if (info.exists && info.mtime != 0)
             {
-                Console::Instance().Status("Could not set the timestamps of '" +
-                    remote + "': " + lscp_sftp_error());
+                const int touchRes = lscp_sftp_set_times(remote.c_str(),
+                    info.atime != 0 ? info.atime : info.mtime, info.mtime);
+                Console::Instance().LogAction("touch",
+                    "filename=\"" + Console::EscapeActionText(remote) +
+                    "\" result=\"" + (touchRes == 0 ? "ok" : "failed") + "\"");
+                if (touchRes != 0)
+                {
+                    Console::Instance().Status("Could not set the timestamps of '" +
+                        remote + "': " + lscp_sftp_error());
+                }
             }
         }
-        return res;
     }
-    return ProtocolClient::Put(mSession.Options(), local, remote, permissions,
-        resumeOffset, preserveTime, size, progress, ctx, error, mSpeedLimit);
+    else
+    {
+        res = ProtocolClient::Put(mSession.Options(), local, remote, permissions,
+            resumeOffset, preserveTime, size, progress, ctx, error, mSpeedLimit);
+    }
+    Console::Instance().LogAction("upload",
+        "filename=\"" + Console::EscapeActionText(local) +
+        "\" destination=\"" + Console::EscapeActionText(remote) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 /* The timestamps of a local file onto a remote path, used when a transfer
@@ -892,6 +921,9 @@ int Script::RemoteSetTimes(const std::string & path, unsigned long atime,
     {
         error = "Setting the timestamps of a directory needs the native "
             "SFTP transport.";
+        Console::Instance().LogAction("touch",
+            "filename=\"" + Console::EscapeActionText(path) +
+            "\" result=\"failed\"");
         return -1;
     }
     const int res = lscp_sftp_set_times(path.c_str(), atime, mtime);
@@ -899,6 +931,9 @@ int Script::RemoteSetTimes(const std::string & path, unsigned long atime,
     {
         error = lscp_sftp_error();
     }
+    Console::Instance().LogAction("touch",
+        "filename=\"" + Console::EscapeActionText(path) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
     return res;
 }
 
@@ -1008,61 +1043,90 @@ int Script::RemotePutMode(const std::string & local, const std::string & remote,
 int Script::RemoteRemove(const std::string & path, std::string & error)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_remove(path.c_str());
+        res = lscp_sftp_remove(path.c_str());
         if (res != 0)
         {
             error = lscp_sftp_error();
         }
-        return res;
     }
-    return ProtocolClient::Remove(mSession.Options(), path, error);
+    else
+    {
+        res = ProtocolClient::Remove(mSession.Options(), path, error);
+    }
+    Console::Instance().LogAction("rm",
+        "filename=\"" + Console::EscapeActionText(path) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 int Script::RemoteRemoveDir(const std::string & path, std::string & error)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_rmdir(path.c_str());
+        res = lscp_sftp_rmdir(path.c_str());
         if (res != 0)
         {
             error = lscp_sftp_error();
         }
-        return res;
     }
-    return ProtocolClient::RemoveDir(mSession.Options(), path, error);
+    else
+    {
+        res = ProtocolClient::RemoveDir(mSession.Options(), path, error);
+    }
+    Console::Instance().LogAction("rm",
+        "filename=\"" + Console::EscapeActionText(path) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 int Script::RemoteMakeDir(const std::string & path, int permissions, std::string & error)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_mkdir(path.c_str(), permissions);
+        res = lscp_sftp_mkdir(path.c_str(), permissions);
         if (res != 0)
         {
             error = lscp_sftp_error();
         }
-        return res;
     }
-    return ProtocolClient::MakeDir(mSession.Options(), path, error);
+    else
+    {
+        res = ProtocolClient::MakeDir(mSession.Options(), path, error);
+    }
+    Console::Instance().LogAction("mkdir",
+        "filename=\"" + Console::EscapeActionText(path) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 int Script::RemoteRename(const std::string & from, const std::string & to, std::string & error)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_rename(from.c_str(), to.c_str());
+        res = lscp_sftp_rename(from.c_str(), to.c_str());
         if (res != 0)
         {
             error = lscp_sftp_error();
         }
-        return res;
     }
-    return ProtocolClient::Move(mSession.Options(), from, to, error);
+    else
+    {
+        res = ProtocolClient::Move(mSession.Options(), from, to, error);
+    }
+    Console::Instance().LogAction("mv",
+        "filename=\"" + Console::EscapeActionText(from) +
+        "\" destination=\"" + Console::EscapeActionText(to) +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 /* The three remote operations the editor needs. They are thin wrappers
@@ -1089,17 +1153,27 @@ int Script::RemoteSetPermissions(const std::string & path, int permissions,
     std::string & error)
 {
     error.clear();
+    int res = 0;
     if (UseNativeSftp(mSession.Options().protocol))
     {
-        int res = lscp_sftp_set_permissions(path.c_str(), permissions);
+        res = lscp_sftp_set_permissions(path.c_str(), permissions);
         if (res != 0)
         {
             error = lscp_sftp_error();
         }
-        return res;
     }
-    return ProtocolClient::SetPermissions(mSession.Options(), path, permissions,
-        error);
+    else
+    {
+        res = ProtocolClient::SetPermissions(mSession.Options(), path,
+            permissions, error);
+    }
+    char octal[16];
+    snprintf(octal, sizeof(octal), "%04o", permissions & 07777);
+    Console::Instance().LogAction("chmod",
+        "filename=\"" + Console::EscapeActionText(path) +
+        "\" permissions=\"" + octal +
+        "\" result=\"" + (res == 0 ? "ok" : "failed") + "\"");
+    return res;
 }
 
 bool Script::OpenSite(const std::vector<std::string> & args)
@@ -1141,6 +1215,11 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         {
             switches.privateKeyFile = args[i].substr(strlen("-privatekey="));
             switches.privateKeyGiven = true;
+        }
+        else if (StartsWith(args[i], "-passphrase="))
+        {
+            switches.passphrase = args[i].substr(strlen("-passphrase="));
+            switches.passphraseGiven = true;
         }
         else if (args[i] == "-rawsettings" ||
             StartsWith(args[i], "-rawsettings="))
@@ -2441,8 +2520,7 @@ bool Script::ResolveStage(bool eligible, bool upload,
     const std::string baseName = upload ?
         RemoteFileName(finalPath) : LocalFileName(finalPath);
     if (baseName.size() + strlen(kPartialExt) > 255 ||
-        (!finalPath.empty() && (finalPath[finalPath.size() - 1] == '/' ||
-                                finalPath[finalPath.size() - 1] == '\\')))
+        (!finalPath.empty() && finalPath[finalPath.size() - 1] == '/'))
     {
         eligible = false;
     }
@@ -4039,16 +4117,11 @@ std::string DescribeTime(unsigned long value)
 bool IsFileSystemRoot(const std::string & path)
 {
     std::string trimmed = path;
-    while (trimmed.size() > 1 &&
-        (trimmed[trimmed.size() - 1] == '/' || trimmed[trimmed.size() - 1] == '\\'))
+    while (trimmed.size() > 1 && trimmed[trimmed.size() - 1] == '/')
     {
         trimmed.erase(trimmed.size() - 1);
     }
-    if (trimmed.empty())
-    {
-        return true;
-    }
-    return false;
+    return trimmed.empty() || trimmed == "/";
 }
 
 } // namespace
@@ -4189,6 +4262,14 @@ bool Script::ParseSyncArguments(const std::vector<std::string> & args,
         else if (lower == "-nonrecursive" || lower == "-nor")
         {
             options.recursive = false;
+        }
+        else if (StartsWith(lower, "-conflict="))
+        {
+            const std::string value = a.substr(strlen("-conflict="));
+            if (!ParseSyncConflictPolicy(value, options.conflictPolicy, error))
+            {
+                return false;
+            }
         }
         else if (StartsWith(lower, "-criteria="))
         {
@@ -4897,6 +4978,38 @@ bool Script::EditRemoteFile(const std::vector<std::string> & args)
         {
             options.editor = a.substr(strlen("-editor="));
         }
+        else if (StartsWith(lower, "-eol="))
+        {
+            const std::string eol = lower.substr(strlen("-eol="));
+            if (eol != "preserve" && eol != "lf" && eol != "crlf")
+            {
+                console.Error(Texts::WrongArguments("edit",
+                    "The value of '-eol' must be preserve, lf or crlf."));
+                mErrors++;
+                return false;
+            }
+            options.eol = eol;
+        }
+        else if (lower == "-monitor")
+        {
+            options.monitor = true;
+            options.monitorPasses = 1;
+        }
+        else if (StartsWith(lower, "-monitor="))
+        {
+            const std::string val = a.substr(strlen("-monitor="));
+            const int passes = atoi(val.c_str());
+            if (passes <= 0)
+            {
+                console.Error(Texts::WrongArguments("edit",
+                    "The value of '-monitor' must be a positive number of "
+                    "passes."));
+                mErrors++;
+                return false;
+            }
+            options.monitor = true;
+            options.monitorPasses = static_cast<unsigned>(passes);
+        }
         else if (!a.empty() && a[0] == '-')
         {
             console.Error(Texts::WrongArguments("edit",
@@ -5200,6 +5313,43 @@ bool Script::StoredSessionsCommand(const std::vector<std::string> & args)
     if (args.size() == 1 && ToLower(args[0]) == "list")
     {
         return StoredSessionsCommand(std::vector<std::string>());
+    }
+
+    if (args.size() == 1 && ToLower(args[0]) == "folders")
+    {
+        const std::vector<std::string> folders = mSessions.Folders();
+        if (folders.empty())
+        {
+            console.WriteLine("There are no session folders.");
+            return true;
+        }
+        for (size_t i = 0; i < folders.size(); i++)
+        {
+            console.WriteLine("  " + folders[i] + "/");
+        }
+        return true;
+    }
+
+    if (args.size() == 1 &&
+        (StartsWith(ToLower(args[0]), "-folder=") ||
+         (args[0].size() > 1 && args[0][args[0].size() - 1] == '/')))
+    {
+        const std::string folder = StartsWith(ToLower(args[0]), "-folder=") ?
+            args[0].substr(strlen("-folder=")) : args[0];
+        const std::vector<StoredSession> inFolder =
+            mSessions.SessionsInFolder(folder);
+        if (inFolder.empty())
+        {
+            console.Error("There are no stored sessions in folder '" +
+                folder + "'.");
+            mErrors++;
+            return false;
+        }
+        for (size_t i = 0; i < inFolder.size(); i++)
+        {
+            console.WriteLine("  " + inFolder[i].name);
+        }
+        return true;
     }
 
     if (args.size() == 1)
@@ -5665,12 +5815,52 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
 bool Script::RemoveStoredSessionEntry(const std::vector<std::string> & args)
 {
     Console & console = Console::Instance();
+    if (args.size() == 2 && ToLower(args[0]) == "-folder")
+    {
+        std::string error;
+        const int removed = mSessions.RemoveFolder(args[1], error);
+        if (removed == 0)
+        {
+            console.Error(error);
+            mErrors++;
+            return false;
+        }
+        if (!mSessions.Save(error))
+        {
+            console.Error(error);
+            mErrors++;
+            return false;
+        }
+        console.Status("Removed " + std::to_string(removed) +
+            " stored session(s) in folder '" + args[1] + "'.");
+        return true;
+    }
     if (args.size() != 1)
     {
         console.Error(Texts::WrongArguments("rmsession",
-            "Syntax: rmsession <name>."));
+            "Syntax: rmsession [-folder] <name>."));
         mErrors++;
         return false;
+    }
+    if (args[0].size() > 1 && args[0][args[0].size() - 1] == '/')
+    {
+        std::string error;
+        const int removed = mSessions.RemoveFolder(args[0], error);
+        if (removed == 0)
+        {
+            console.Error(error);
+            mErrors++;
+            return false;
+        }
+        if (!mSessions.Save(error))
+        {
+            console.Error(error);
+            mErrors++;
+            return false;
+        }
+        console.Status("Removed " + std::to_string(removed) +
+            " stored session(s) in folder '" + args[0] + "'.");
+        return true;
     }
     std::string error;
     if (!mSessions.Remove(args[0], error))
@@ -6668,17 +6858,22 @@ bool Script::CallRemote(const std::vector<std::string> & args, const char * name
         return false;
     }
     const SessionOptions & options = mSession.Options();
-    if (!UseNativeSftp(options.protocol))
+    if (!UseNativeSftp(options.protocol) && options.protocol != "scp")
     {
         Console::Instance().Error(Texts::WrongArguments(name,
-            "Executing a command on the server needs an SSH (sftp://) "
+            "Executing a command on the server needs an SSH (sftp:// or scp://) "
             "session, not '" + options.protocol + "'."));
         mErrors++;
         return false;
     }
     const std::string command = JoinCommandWords(args);
     std::string error;
-    if (!Session::ExecRemote(options, command, error))
+    const bool ok = Session::ExecRemote(options, command, error);
+    Console::Instance().LogAction("call",
+        "command=\"" + Console::EscapeActionText(command) +
+        "\" destination=\"" + Console::EscapeActionText(mRemoteDirectory) +
+        "\" result=\"" + (ok ? "ok" : "failed") + "\"");
+    if (!ok)
     {
         Console::Instance().Error(Texts::RemoteError("run the command on",
             options.hostName, error.empty() ? "the connection failed" : error));
@@ -6723,10 +6918,33 @@ std::string KeyIdentity(const std::string & line)
  */
 bool Script::CopyPublicKey(const std::vector<std::string> & args)
 {
-    if (args.size() > 1)
+    std::string keyFile;
+    std::string passphrase;
+    bool haveKeyArg = false;
+    for (size_t i = 0; i < args.size(); i++)
     {
-        return SwitchError("copyid", "Syntax: copyid [<keyfile>]; without a "
-            "file the private key of the session is used.");
+        const std::string lower = ToLower(args[i]);
+        if (StartsWith(lower, "-passphrase="))
+        {
+            passphrase = args[i].substr(strlen("-passphrase="));
+        }
+        else if (!args[i].empty() && args[i][0] == '-')
+        {
+            return SwitchError("copyid", "Syntax: copyid [<keyfile>] "
+                "[-passphrase=<passphrase>]; without a file the private key "
+                "of the session is used.");
+        }
+        else if (!haveKeyArg)
+        {
+            keyFile = args[i];
+            haveKeyArg = true;
+        }
+        else
+        {
+            return SwitchError("copyid", "Syntax: copyid [<keyfile>] "
+                "[-passphrase=<passphrase>]; without a file the private key "
+                "of the session is used.");
+        }
     }
     if (!RequireConnection())
     {
@@ -6738,7 +6956,14 @@ bool Script::CopyPublicKey(const std::vector<std::string> & args)
         return SwitchError("copyid", "Installing a public key needs an SSH "
             "(sftp:// or scp://) session, not '" + options.protocol + "'.");
     }
-    std::string keyFile = args.empty() ? options.privateKeyFile : args[0];
+    if (!haveKeyArg)
+    {
+        keyFile = options.privateKeyFile;
+    }
+    if (passphrase.empty())
+    {
+        passphrase = options.keyPassphrase;
+    }
     if (keyFile.empty())
     {
         return SwitchError("copyid", "There is no private key: connect with "
@@ -6746,7 +6971,8 @@ bool Script::CopyPublicKey(const std::vector<std::string> & args)
     }
     std::string keyLine;
     std::string error;
-    if (!PublicKeyAuthorizedLine(ExpandTilde(keyFile), keyLine, error))
+    if (!PublicKeyAuthorizedLine(ExpandTilde(keyFile), keyLine, error,
+            passphrase))
     {
         return SwitchError("copyid", error);
     }

@@ -198,7 +198,9 @@ class Store:
     def __init__(self):
         self.buckets = {}  # name -> creation epoch
         self.objects = {}  # (bucket, key) -> (bytes, mtime)
-        self.uploads = {}  # UploadId -> {bucket, key, parts}
+        self.object_headers = {}  # "bucket/key" -> dict of x-amz-* headers
+        self.request_payers = []
+        self.uploads = {}  # UploadId -> {bucket, key, parts, headers}
         self.next_upload_id = 1
         self.multipart_history = []
         self.copy_count = 0
@@ -302,6 +304,9 @@ class S3Handler(BaseHTTPRequestHandler):
             self.send_error_xml(403, failure.code, failure.message)
             return
 
+        if "x-amz-request-payer" in headers:
+            STORE.request_payers.append(headers["x-amz-request-payer"])
+
         bucket, key, query = self.split_path()
         params = urllib.parse.parse_qs(query, keep_blank_values=True)
         try:
@@ -318,11 +323,11 @@ class S3Handler(BaseHTTPRequestHandler):
             elif method == "HEAD":
                 self.head_object(bucket, key)
             elif method == "PUT" and "uploadId" in params:
-                self.put_multipart_part(params, body)
+                self.put_multipart_part(params, headers, body)
             elif method == "PUT":
                 self.put_object(bucket, key, headers, body)
             elif method == "POST" and "uploads" in params:
-                self.initiate_multipart(bucket, key)
+                self.initiate_multipart(bucket, key, headers)
             elif method == "POST" and "uploadId" in params:
                 self.complete_multipart(params, body)
             elif method == "DELETE" and "uploadId" in params:
@@ -341,7 +346,7 @@ class S3Handler(BaseHTTPRequestHandler):
         if parsed.path == "/__test__/inject-error":
             operation = urllib.parse.parse_qs(parsed.query).get(
                 "operation", [""])[0]
-            if operation not in ("copy", "complete"):
+            if operation not in ("copy", "complete", "part2"):
                 self.send_bytes(400, b"Unknown test error operation.")
                 return
             STORE.embedded_errors.add(operation)
@@ -353,6 +358,8 @@ class S3Handler(BaseHTTPRequestHandler):
                 "active_uploads": len(STORE.uploads),
                 "multipart_history": STORE.multipart_history,
                 "copy_count": STORE.copy_count,
+                "object_headers": STORE.object_headers,
+                "request_payers": STORE.request_payers,
             }).encode("utf-8")
             self.send_bytes(200, body, extra=(("Content-Type",
                 "application/json"),))
@@ -516,6 +523,9 @@ class S3Handler(BaseHTTPRequestHandler):
             self.send_error_xml(400, "InvalidBucketName",
                                 "The bucket name is invalid.")
             return
+        amz_headers = {
+            k: v for k, v in headers.items() if k.startswith("x-amz-")
+        }
         copy_source = headers.get("x-amz-copy-source")
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         if copy_source:
@@ -534,6 +544,7 @@ class S3Handler(BaseHTTPRequestHandler):
                     "<Message>Embedded copy failure.</Message></Error>")
                 return
             STORE.put(bucket, key, record[0], now)
+            STORE.object_headers["%s/%s" % (bucket, key)] = amz_headers
             STORE.copy_count += 1
             self.send_xml(200,
                           "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
@@ -546,18 +557,22 @@ class S3Handler(BaseHTTPRequestHandler):
             # mkdir creates both the bucket and its marker.
             STORE.ensure_bucket(bucket, now)
         STORE.put(bucket, key, body, now)
+        STORE.object_headers["%s/%s" % (bucket, key)] = amz_headers
         self.send_bytes(200, b"", extra=(
             ("ETag", '"%s"' % hashlib.sha256(body).hexdigest()[:32]),))
 
-    def initiate_multipart(self, bucket, key):
+    def initiate_multipart(self, bucket, key, headers=None):
         if bucket not in STORE.buckets or not key:
             self.send_error_xml(404, "NoSuchBucket",
                                 "The multipart target bucket does not exist.")
             return
         upload_id = "test-upload-%d" % STORE.next_upload_id
         STORE.next_upload_id += 1
+        amz_headers = {
+            k: v for k, v in (headers or {}).items() if k.startswith("x-amz-")
+        }
         STORE.uploads[upload_id] = {
-            "bucket": bucket, "key": key, "parts": {},
+            "bucket": bucket, "key": key, "parts": {}, "headers": amz_headers,
         }
         STORE.multipart_history.append({
             "action": "initiate", "bucket": bucket, "key": key,
@@ -570,7 +585,7 @@ class S3Handler(BaseHTTPRequestHandler):
                       "</InitiateMultipartUploadResult>" %
                       (xml_escape(bucket), xml_escape(key), xml_escape(upload_id)))
 
-    def put_multipart_part(self, params, body):
+    def put_multipart_part(self, params, headers, body):
         upload_id = params.get("uploadId", [""])[0]
         try:
             number = int(params.get("partNumber", ["0"])[0])
@@ -580,6 +595,52 @@ class S3Handler(BaseHTTPRequestHandler):
         if upload is None or number < 1 or number > 10000:
             self.send_error_xml(404, "NoSuchUpload",
                                 "The multipart upload or part number is invalid.")
+            return
+        if number == 2 and "part2" in STORE.embedded_errors:
+            STORE.embedded_errors.remove("part2")
+            self.send_error_xml(500, "InternalError",
+                                "Injected multipart part 2 failure.")
+            return
+        copy_source = (headers or {}).get("x-amz-copy-source")
+        if copy_source:
+            decoded = urllib.parse.unquote(copy_source)
+            parts = decoded.lstrip("/").split("/", 1)
+            source_bucket = parts[0]
+            source_key = parts[1] if len(parts) > 1 else ""
+            record = STORE.get(source_bucket, source_key)
+            if record is None:
+                self.send_error_xml(404, "NoSuchKey",
+                                    "The specified key does not exist.")
+                return
+            source_bytes = record[0]
+            range_header = (headers or {}).get("x-amz-copy-source-range", "")
+            if range_header:
+                match = re.match(r"bytes=(\d+)-(\d+)$", range_header.strip())
+                if not match:
+                    self.send_error_xml(400, "InvalidArgument",
+                                        "Invalid x-amz-copy-source-range.")
+                    return
+                start = int(match.group(1))
+                end = int(match.group(2))
+                if start > end or end >= len(source_bytes):
+                    self.send_error_xml(416, "InvalidRange",
+                                        "Copy source range out of bounds.")
+                    return
+                source_bytes = source_bytes[start:end + 1]
+            etag_hex = hashlib.sha256(source_bytes).hexdigest()[:32]
+            etag = '"%s"' % etag_hex
+            upload["parts"][number] = (source_bytes, etag)
+            STORE.copy_count += 1
+            STORE.multipart_history.append({
+                "action": "copy_part", "part": number,
+                "size": len(source_bytes), "upload_id": upload_id,
+            })
+            now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+            self.send_xml(200,
+                          '<?xml version="1.0" encoding="UTF-8"?>\n'
+                          "<CopyPartResult><ETag>%s</ETag>"
+                          "<LastModified>%s</LastModified></CopyPartResult>"
+                          % (etag, iso8601(now)))
             return
         etag = '"%s"' % hashlib.sha256(body).hexdigest()[:32]
         upload["parts"][number] = (body, etag)
@@ -632,6 +693,9 @@ class S3Handler(BaseHTTPRequestHandler):
             return
         now = datetime.datetime.now(datetime.timezone.utc).timestamp()
         STORE.put(upload["bucket"], upload["key"], data, now)
+        STORE.object_headers["%s/%s" % (upload["bucket"], upload["key"])] = (
+            upload.get("headers", {})
+        )
         del STORE.uploads[upload_id]
         STORE.multipart_history.append({
             "action": "complete", "key": upload["key"],

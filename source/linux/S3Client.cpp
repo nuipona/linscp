@@ -622,6 +622,40 @@ std::string TrailingSlashRemoved(const std::string & path)
  * could not be reached or answered at the transport level; every HTTP
  * answer, error pages included, comes back in 'response'.
  */
+void AppendS3ObjectWriteHeaders(const SessionOptions & options,
+    std::vector<std::pair<std::string, std::string> > & headers)
+{
+    if (!options.s3.storageClass.empty())
+    {
+        headers.push_back(std::make_pair(std::string("x-amz-storage-class"),
+            options.s3.storageClass));
+    }
+    if (!options.s3.acl.empty())
+    {
+        headers.push_back(std::make_pair(std::string("x-amz-acl"),
+            options.s3.acl));
+    }
+    if (!options.s3.serverSideEncryption.empty())
+    {
+        headers.push_back(std::make_pair(
+            std::string("x-amz-server-side-encryption"),
+            options.s3.serverSideEncryption));
+    }
+    if (!options.s3.kmsKeyId.empty())
+    {
+        headers.push_back(std::make_pair(
+            std::string("x-amz-server-side-encryption-aws-kms-key-id"),
+            options.s3.kmsKeyId));
+    }
+    for (std::map<std::string, std::string>::const_iterator it =
+            options.s3.metadata.begin();
+         it != options.s3.metadata.end(); ++it)
+    {
+        headers.push_back(std::make_pair(
+            std::string("x-amz-meta-") + it->first, it->second));
+    }
+}
+
 bool InvokeCurl(const S3Site & site, const SessionOptions & options,
     const std::string & method, const std::string & encodedPath,
     const std::string & query,
@@ -632,9 +666,16 @@ bool InvokeCurl(const S3Site & site, const SessionOptions & options,
     std::string & transportError, LscpProgressFn progress = NULL,
     void * progressCtx = NULL, bool upload = false)
 {
+    std::vector<std::pair<std::string, std::string> > effectiveExtras =
+        signedExtras;
+    if (options.s3.requestPayer)
+    {
+        effectiveExtras.push_back(std::make_pair(
+            std::string("x-amz-request-payer"), std::string("requester")));
+    }
     const unsigned long long now = static_cast<unsigned long long>(time(NULL));
     const s3sig::SignedRequest signed1 = s3sig::Sign(method, encodedPath,
-        query, site.authority, signedExtras, payloadHash, now, site.region,
+        query, site.authority, effectiveExtras, payloadHash, now, site.region,
         site.accessKey, site.secretKey);
 
     std::vector<std::string> args;
@@ -795,6 +836,119 @@ bool WriteCompletionDocument(const std::string & path,
     return true;
 }
 
+std::string MultipartResumeStatePath(const S3Site & site,
+    const std::string & localPath, const std::string & remotePath)
+{
+    std::string root = ConfigDirectory();
+    if (root.empty())
+    {
+        root = TempDirectory();
+    }
+    if (root.empty())
+    {
+        return std::string();
+    }
+    std::string dirError;
+    const std::string dir = JoinLocalPath(root, "s3-multipart");
+    if (!CreatePrivateDirectory(dir, dirError))
+    {
+        return std::string();
+    }
+    const std::string key = site.authority + "\n" + remotePath + "\n" + localPath;
+    return JoinLocalPath(dir, s3sig::Sha256Hex(key) + ".state");
+}
+
+bool LoadMultipartResumeState(const std::string & statePath,
+    std::string & uploadId, unsigned long long & fileSize,
+    unsigned long & fileMtime, unsigned long long & partSize,
+    std::vector<UploadedPart> & parts)
+{
+    uploadId.clear();
+    fileSize = 0;
+    fileMtime = 0;
+    partSize = 0;
+    parts.clear();
+    if (statePath.empty())
+    {
+        return false;
+    }
+    FILE * file = fopen(statePath.c_str(), "rb");
+    if (file == NULL)
+    {
+        return false;
+    }
+    char line[2048];
+    while (fgets(line, sizeof(line), file) != NULL)
+    {
+        std::string text = line;
+        while (!text.empty() &&
+               (text[text.size() - 1] == '\n' || text[text.size() - 1] == '\r'))
+        {
+            text.erase(text.size() - 1);
+        }
+        if (text.compare(0, 10, "upload_id=") == 0)
+        {
+            uploadId = text.substr(10);
+        }
+        else if (text.compare(0, 10, "file_size=") == 0)
+        {
+            fileSize = strtoull(text.substr(10).c_str(), NULL, 10);
+        }
+        else if (text.compare(0, 11, "file_mtime=") == 0)
+        {
+            fileMtime = strtoul(text.substr(11).c_str(), NULL, 10);
+        }
+        else if (text.compare(0, 10, "part_size=") == 0)
+        {
+            partSize = strtoull(text.substr(10).c_str(), NULL, 10);
+        }
+        else if (text.compare(0, 5, "part=") == 0)
+        {
+            const std::string rest = text.substr(5);
+            const size_t space = rest.find(' ');
+            if (space != std::string::npos)
+            {
+                UploadedPart part;
+                part.number = static_cast<unsigned int>(
+                    strtoul(rest.substr(0, space).c_str(), NULL, 10));
+                part.etag = rest.substr(space + 1);
+                if (part.number > 0 && !part.etag.empty())
+                {
+                    parts.push_back(part);
+                }
+            }
+        }
+    }
+    fclose(file);
+    return !uploadId.empty();
+}
+
+void SaveMultipartResumeState(const std::string & statePath,
+    const std::string & uploadId, unsigned long long fileSize,
+    unsigned long fileMtime, unsigned long long partSize,
+    const std::vector<UploadedPart> & parts)
+{
+    if (statePath.empty() || uploadId.empty())
+    {
+        return;
+    }
+    FILE * file = fopen(statePath.c_str(), "wb");
+    if (file == NULL)
+    {
+        return;
+    }
+    fprintf(file, "upload_id=%s\n", uploadId.c_str());
+    fprintf(file, "file_size=%llu\n", fileSize);
+    fprintf(file, "file_mtime=%lu\n", fileMtime);
+    fprintf(file, "part_size=%llu\n", partSize);
+    for (size_t i = 0; i < parts.size(); i++)
+    {
+        fprintf(file, "part=%u %s\n", parts[i].number, parts[i].etag.c_str());
+    }
+    fclose(file);
+    RestrictFileToUser(statePath);
+}
+
 int UploadMultipart(const S3Site & site, const SessionOptions & options,
     const std::string & localPath, const std::string & remotePath,
     unsigned long long fileSize, unsigned long initialMtime,
@@ -845,45 +999,92 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
     const std::string partPath = JoinLocalPath(tempDirectory, "part.data");
     const std::string headersPath = JoinLocalPath(tempDirectory, "part.headers");
     const std::string completionPath = JoinLocalPath(tempDirectory, "complete.xml");
+    const std::string statePath = MultipartResumeStatePath(site, localPath, remotePath);
     std::string uploadId;
     std::vector<UploadedPart> parts;
     parts.reserve(static_cast<size_t>(partCount));
     bool initiated = false;
     bool completed = false;
+    bool abortOnFailure = true;
 
-    S3Response response;
-    if (!InvokeCurl(site, options, "POST", encodedPath, "uploads",
-            std::vector<std::pair<std::string, std::string> >(),
-            kEmptySha256, std::vector<std::string>(), std::string(), response,
-            error))
+    std::string savedUploadId;
+    unsigned long long savedFileSize = 0;
+    unsigned long savedMtime = 0;
+    unsigned long long savedPartSize = 0;
+    std::vector<UploadedPart> savedParts;
+    if (LoadMultipartResumeState(statePath, savedUploadId, savedFileSize,
+            savedMtime, savedPartSize, savedParts))
     {
-        RemoveMultipartTempDirectory(tempDirectory);
-        return -1;
+        if (savedFileSize == fileSize && savedMtime == initialMtime &&
+            savedPartSize == partSize && !savedParts.empty())
+        {
+            uploadId = savedUploadId;
+            parts = savedParts;
+            initiated = true;
+        }
+        else
+        {
+            AbortMultipartUpload(site, options, encodedPath, savedUploadId);
+            remove(statePath.c_str());
+        }
     }
-    if (response.httpCode < 200 || response.httpCode >= 300 ||
-        response.curlCode != 0)
+
+    if (!initiated)
     {
-        error = HttpFailure(response, "Start multipart upload");
-        RemoveMultipartTempDirectory(tempDirectory);
-        return -1;
+        std::vector<std::pair<std::string, std::string> > initHeaders;
+        AppendS3ObjectWriteHeaders(options, initHeaders);
+        S3Response response;
+        if (!InvokeCurl(site, options, "POST", encodedPath, "uploads",
+                initHeaders, kEmptySha256, std::vector<std::string>(),
+                std::string(), response, error))
+        {
+            RemoveMultipartTempDirectory(tempDirectory);
+            return -1;
+        }
+        if (response.httpCode < 200 || response.httpCode >= 300 ||
+            response.curlCode != 0)
+        {
+            error = HttpFailure(response, "Start multipart upload");
+            RemoveMultipartTempDirectory(tempDirectory);
+            return -1;
+        }
+        if (!XmlFind(response.out, "UploadId", uploadId) || uploadId.empty())
+        {
+            error = "The S3 server accepted a multipart upload but returned no "
+                "UploadId.";
+            RemoveMultipartTempDirectory(tempDirectory);
+            return -1;
+        }
+        initiated = true;
     }
-    if (!XmlFind(response.out, "UploadId", uploadId) || uploadId.empty())
-    {
-        error = "The S3 server accepted a multipart upload but returned no "
-            "UploadId.";
-        RemoveMultipartTempDirectory(tempDirectory);
-        return -1;
-    }
-    initiated = true;
 
     unsigned long long offset = 0;
     bool ok = true;
     for (unsigned int number = 1; offset < fileSize; number++)
     {
         const unsigned long long length = std::min(partSize, fileSize - offset);
+        bool alreadyDone = false;
+        for (size_t k = 0; k < parts.size(); k++)
+        {
+            if (parts[k].number == number)
+            {
+                alreadyDone = true;
+                break;
+            }
+        }
+        if (alreadyDone)
+        {
+            offset += length;
+            if (progress != NULL)
+            {
+                progress(offset, fileSize, progressCtx);
+            }
+            continue;
+        }
         if (!WriteFileRange(localPath, partPath, offset, length, error))
         {
             ok = false;
+            abortOnFailure = parts.empty();
             break;
         }
         remove(headersPath.c_str());
@@ -906,6 +1107,7 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
                 kUnsignedPayload, args, std::string(), partResponse, error))
         {
             ok = false;
+            abortOnFailure = parts.empty();
             break;
         }
         if (partResponse.httpCode < 200 || partResponse.httpCode >= 300 ||
@@ -914,6 +1116,7 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
             error = HttpFailure(partResponse, "Upload S3 part " +
                 std::to_string(number));
             ok = false;
+            abortOnFailure = parts.empty();
             break;
         }
 
@@ -925,9 +1128,12 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
             error = "The S3 server did not return an ETag for multipart part " +
                 std::to_string(number) + ".";
             ok = false;
+            abortOnFailure = parts.empty();
             break;
         }
         parts.push_back(part);
+        SaveMultipartResumeState(statePath, uploadId, fileSize, initialMtime,
+            partSize, parts);
         offset += length;
         if (progress != NULL)
         {
@@ -938,6 +1144,7 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
     if (ok && !WriteCompletionDocument(completionPath, parts, error))
     {
         ok = false;
+        abortOnFailure = true;
     }
     if (ok)
     {
@@ -950,10 +1157,12 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
             error = "The local file changed while it was being uploaded "
                 "to S3; the multipart upload was cancelled.";
             ok = false;
+            abortOnFailure = true;
         }
     }
     if (ok)
     {
+        abortOnFailure = true;
         std::vector<std::string> args;
         args.push_back("-H");
         args.push_back("Content-Type: application/xml");
@@ -992,9 +1201,176 @@ int UploadMultipart(const S3Site & site, const SessionOptions & options,
         }
     }
 
-    if (initiated && !completed)
+    if (completed)
+    {
+        if (!statePath.empty())
+        {
+            remove(statePath.c_str());
+        }
+    }
+    else if (initiated && abortOnFailure)
     {
         AbortMultipartUpload(site, options, encodedPath, uploadId);
+        if (!statePath.empty())
+        {
+            remove(statePath.c_str());
+        }
+    }
+    RemoveMultipartTempDirectory(tempDirectory);
+    return completed ? 0 : -1;
+}
+
+int CopyMultipart(const S3Site & site, const SessionOptions & options,
+    const std::string & fromPath, const std::string & toPath,
+    unsigned long long objectSize, std::string & error)
+{
+    unsigned long long partSize = kS3MinimumPartSize;
+    const unsigned long long requiredPartSize =
+        (objectSize + kS3MaximumParts - 1) / kS3MaximumParts;
+    if (requiredPartSize > partSize)
+    {
+        partSize = requiredPartSize;
+    }
+    const unsigned long long partCount = (objectSize + partSize - 1) / partSize;
+    if (partCount == 0 || partCount > kS3MaximumParts)
+    {
+        error = "The object cannot be represented as a valid S3 multipart copy.";
+        return -1;
+    }
+
+    const std::string encodedTo = EncodePath(toPath);
+    const std::string encodedSource = s3sig::UriEncode(fromPath, true);
+    std::string tempDirectory = MakeMultipartTempDirectory(error);
+    if (tempDirectory.empty())
+    {
+        return -1;
+    }
+    const std::string completionPath = JoinLocalPath(tempDirectory, "complete.xml");
+
+    std::vector<std::pair<std::string, std::string> > initHeaders;
+    AppendS3ObjectWriteHeaders(options, initHeaders);
+    S3Response initResponse;
+    if (!InvokeCurl(site, options, "POST", encodedTo, "uploads",
+            initHeaders, kEmptySha256, std::vector<std::string>(),
+            std::string(), initResponse, error))
+    {
+        RemoveMultipartTempDirectory(tempDirectory);
+        return -1;
+    }
+    if (initResponse.httpCode < 200 || initResponse.httpCode >= 300 ||
+        initResponse.curlCode != 0)
+    {
+        error = HttpFailure(initResponse, "Start multipart copy");
+        RemoveMultipartTempDirectory(tempDirectory);
+        return -1;
+    }
+    std::string uploadId;
+    if (!XmlFind(initResponse.out, "UploadId", uploadId) || uploadId.empty())
+    {
+        error = "The S3 server accepted a multipart copy but returned no UploadId.";
+        RemoveMultipartTempDirectory(tempDirectory);
+        return -1;
+    }
+
+    std::vector<UploadedPart> parts;
+    parts.reserve(static_cast<size_t>(partCount));
+    unsigned long long offset = 0;
+    bool ok = true;
+    for (unsigned int number = 1; offset < objectSize; number++)
+    {
+        const unsigned long long length = std::min(partSize, objectSize - offset);
+        const unsigned long long endByte = offset + length - 1;
+        std::vector<std::pair<std::string, std::string> > copyHeaders;
+        copyHeaders.push_back(std::make_pair(
+            std::string("x-amz-copy-source"), encodedSource));
+        copyHeaders.push_back(std::make_pair(
+            std::string("x-amz-copy-source-range"),
+            "bytes=" + std::to_string(offset) + "-" + std::to_string(endByte)));
+        const std::string query = "partNumber=" + std::to_string(number) +
+            "&uploadId=" + s3sig::UriEncode(uploadId, false);
+        S3Response partResponse;
+        if (!InvokeCurl(site, options, "PUT", encodedTo, query,
+                copyHeaders, kEmptySha256, std::vector<std::string>(),
+                std::string(), partResponse, error))
+        {
+            ok = false;
+            break;
+        }
+        if (partResponse.httpCode < 200 || partResponse.httpCode >= 300 ||
+            partResponse.curlCode != 0)
+        {
+            error = HttpFailure(partResponse, "Copy S3 part " +
+                std::to_string(number));
+            ok = false;
+            break;
+        }
+        std::string embeddedError;
+        if (XmlFind(partResponse.out, "Error", embeddedError))
+        {
+            error = ErrorFromXml(embeddedError, partResponse.httpCode);
+            ok = false;
+            break;
+        }
+        std::string etag;
+        if (!XmlFind(partResponse.out, "ETag", etag) || etag.empty())
+        {
+            error = "The S3 server did not return an ETag for copied part " +
+                std::to_string(number) + ".";
+            ok = false;
+            break;
+        }
+        UploadedPart part;
+        part.number = number;
+        part.etag = etag;
+        parts.push_back(part);
+        offset += length;
+    }
+
+    bool completed = false;
+    if (ok && !WriteCompletionDocument(completionPath, parts, error))
+    {
+        ok = false;
+    }
+    if (ok)
+    {
+        std::vector<std::string> args;
+        args.push_back("-H");
+        args.push_back("Content-Type: application/xml");
+        args.push_back("--data-binary");
+        args.push_back("@" + completionPath);
+        const std::string query = "uploadId=" +
+            s3sig::UriEncode(uploadId, false);
+        S3Response completeResponse;
+        if (!InvokeCurl(site, options, "POST", encodedTo, query,
+                std::vector<std::pair<std::string, std::string> >(),
+                kUnsignedPayload, args, std::string(), completeResponse,
+                error))
+        {
+            ok = false;
+        }
+        else if (completeResponse.httpCode < 200 ||
+            completeResponse.httpCode >= 300 || completeResponse.curlCode != 0)
+        {
+            error = HttpFailure(completeResponse, "Complete multipart copy");
+            ok = false;
+        }
+        else
+        {
+            std::string embeddedError;
+            if (XmlFind(completeResponse.out, "Error", embeddedError))
+            {
+                error = ErrorFromXml(embeddedError, completeResponse.httpCode);
+                ok = false;
+            }
+            else
+            {
+                completed = true;
+            }
+        }
+    }
+    if (!completed)
+    {
+        AbortMultipartUpload(site, options, encodedTo, uploadId);
     }
     RemoveMultipartTempDirectory(tempDirectory);
     return completed ? 0 : -1;
@@ -1623,10 +1999,11 @@ int S3Client::Put(const SessionOptions & options,
         extraArgs.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
+    std::vector<std::pair<std::string, std::string> > putHeaders;
+    AppendS3ObjectWriteHeaders(options, putHeaders);
     S3Response response;
     if (!InvokeCurl(site, options, "PUT", EncodePath(remotePath),
-            std::string(),
-            std::vector<std::pair<std::string, std::string> >(),
+            std::string(), putHeaders,
             kUnsignedPayload, extraArgs, std::string(), response, error,
             progress, progressCtx, true))
     {
@@ -1872,11 +2249,23 @@ int S3Client::Copy(const SessionOptions & options,
         return -1;
     }
 
+    LscpAttrs sourceAttrs = {};
+    std::string statError;
+    if (!EndsWith(fromPath, ".filepart") &&
+        Stat(options, fromPath, &sourceAttrs, statError) == LSCP_SFTP_STAT_EXISTS &&
+        (sourceAttrs.flags & LSCP_ATTR_SIZE) != 0 &&
+        sourceAttrs.size > kS3MultipartThreshold)
+    {
+        return CopyMultipart(site, options, fromPath, toPath,
+            sourceAttrs.size, error);
+    }
+
     /* CopyObject is a PUT to the destination with the source in
      * x-amz-copy-source (which is signed like every x-amz-* header). */
     std::vector<std::pair<std::string, std::string> > signed1;
     signed1.push_back(std::make_pair("x-amz-copy-source",
         s3sig::UriEncode(fromPath, true)));
+    AppendS3ObjectWriteHeaders(options, signed1);
     S3Response response;
     if (!InvokeCurl(site, options, "PUT", EncodePath(toPath), std::string(),
             signed1, kUnsignedPayload, std::vector<std::string>(),

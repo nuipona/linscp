@@ -51,14 +51,17 @@ struct OpenSwitches
     bool passwordGiven;
     bool userNameGiven;
     bool privateKeyGiven;
+    bool passphraseGiven;
     std::string hostKey;
     std::string password;
     std::string userName;
     std::string privateKeyFile;
+    std::string passphrase;
     std::vector<RawSetting> rawSettings;
 
     OpenSwitches() : hostKeyGiven(false), passwordGiven(false),
-        userNameGiven(false), privateKeyGiven(false) {}
+        userNameGiven(false), privateKeyGiven(false),
+        passphraseGiven(false) {}
 };
 
 struct TransferFlags

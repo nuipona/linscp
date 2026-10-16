@@ -81,6 +81,9 @@ std::string DateStamp(unsigned long long epochSeconds);
 /* Lowercase hex of 32 raw bytes. */
 std::string HexEncode(const std::string & raw);
 
+/* Lowercase hex SHA-256 digest of 'data'. */
+std::string Sha256Hex(const std::string & data);
+
 /*
  * Convenience for the client: from method/path/query to the headers
  * curl must send. 'extras' are additional headers to sign (S3 requires

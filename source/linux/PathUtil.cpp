@@ -406,8 +406,8 @@ std::string FormatPermissions(unsigned long permissions)
 
 std::string FormatFileTime(unsigned long time)
 {
-    /* No "%e" here: MSVC strftime does not support it. The month name
-     * and padding are produced manually so both platforms agree. */
+    /* The month name and day padding are formatted explicitly so listing
+     * output is locale-independent. */
     static const char * months[] = {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun",
         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"

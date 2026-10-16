@@ -55,9 +55,18 @@ struct EditOptions
     bool allowBinary;
     /* Ignore the size limit and the binary check. */
     bool force;
+    /* Line-ending / BOM policy on upload: "preserve" (default), "lf",
+     * or "crlf". */
+    std::string eol;
+    /* Monitor the local working copy for subsequent saves after the
+     * editor command returns. */
+    bool monitor;
+    unsigned monitorPasses;
+    unsigned monitorIntervalMs;
 
     EditOptions() : keepTempFile(false), maxSize(kDefaultMaxSize),
-        allowBinary(false), force(false) {}
+        allowBinary(false), force(false), eol("preserve"),
+        monitor(false), monitorPasses(1), monitorIntervalMs(100) {}
 
     static const unsigned long long kDefaultMaxSize = 64ULL * 1024 * 1024;
 };
@@ -65,6 +74,11 @@ struct EditOptions
 /* True when 'data' looks like text rather than binary: no NUL byte in
  * the first 'length' bytes. */
 bool LooksLikeText(const char * data, size_t length);
+
+/* Normalizes line endings ("preserve", "lf", "crlf") and preserves a
+ * leading UTF-8 BOM from 'originalBytes' when 'preserve' is active. */
+std::string NormalizeEditedText(const std::string & originalBytes,
+    const std::string & editedBytes, const std::string & eolPolicy);
 
 /* The command line of the editor to run: the configured one, or the
  * first of the environment variables and installed editors. Empty with

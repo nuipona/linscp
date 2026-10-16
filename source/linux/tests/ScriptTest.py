@@ -1067,6 +1067,82 @@ class ScriptTests(unittest.TestCase):
             recorded = actions.read_text(encoding="utf-8", errors="replace")
             self.assertIn("ProxyPassword=***", recorded)
 
+    def test_session_folder_hierarchy_and_rmsession_folder(self):
+        """Stored sessions can be organized into slash-delimited folders,
+        listed by folder prefix, and removed by folder."""
+        self.assertEqual(self.run_commands(
+            "savesession Prod/Web/app1 -host=app1.example.com ; "
+            "savesession Prod/DB/db1 -host=db1.example.com ; "
+            "savesession Stage/app -host=stage.example.com").returncode, 0)
+
+        folders = self.run_commands("sessions folders")
+        self.assertEqual(folders.returncode, 0, folders.stderr)
+        self.assertIn("Prod/", folders.stdout)
+        self.assertIn("Prod/Web/", folders.stdout)
+        self.assertIn("Prod/DB/", folders.stdout)
+        self.assertIn("Stage/", folders.stdout)
+
+        filtered = self.run_commands("sessions -folder=Prod")
+        self.assertEqual(filtered.returncode, 0, filtered.stderr)
+        self.assertIn("Prod/Web/app1", filtered.stdout)
+        self.assertIn("Prod/DB/db1", filtered.stdout)
+        self.assertNotIn("Stage/app", filtered.stdout)
+
+        removed = self.run_commands("rmsession -folder Prod")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        self.assertIn("Removed 2 stored session(s)", removed.stdout)
+
+        remaining = self.run_commands("sessions")
+        self.assertEqual(remaining.returncode, 0, remaining.stderr)
+        self.assertNotIn("Prod/", remaining.stdout)
+        self.assertIn("Stage/app", remaining.stdout)
+
+    def test_passphrase_redaction_and_build_packaging_smoke(self):
+        """Key passphrases are redacted across logs, and the Linux Make,
+        CMake, and Debian packaging files stay consistent."""
+        with tempfile.TemporaryDirectory() as tmp:
+            log = pathlib.Path(tmp) / "session.log"
+            actions = pathlib.Path(tmp) / "actions.xml"
+            result = subprocess.run(
+                [BINARY, "-batch", "-log=" + str(log),
+                 "-xmllog=" + str(actions),
+                 "-command=option echo on ; open sftp://alice@127.0.0.1:1/ "
+                           "-privatekey=/tmp/no-such-key "
+                           "-passphrase=my-key-secret ; exit"],
+                capture_output=True, text=True, timeout=30,
+                env=self.environment())
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("-passphrase=***", result.stdout)
+            for path in (log, actions):
+                text = path.read_text(encoding="utf-8", errors="replace")
+                self.assertNotIn("my-key-secret", text)
+            self.assertIn("-passphrase=***",
+                          actions.read_text(encoding="utf-8", errors="replace"))
+
+            # Verify 'make install' staging into a temporary DESTDIR.
+            linux_dir = pathlib.Path(__file__).resolve().parent.parent
+            repo_root = linux_dir.parent.parent
+            destdir = pathlib.Path(tmp) / "stage"
+            install = subprocess.run(
+                ["make", "-C", str(linux_dir), "install",
+                 "DESTDIR=" + str(destdir), "PREFIX=/usr"],
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(install.returncode, 0, install.stderr)
+            self.assertTrue((destdir / "usr/bin/linuxscp").is_file())
+            self.assertTrue((destdir / "usr/bin/linuxscp-gui").is_file())
+            self.assertTrue(
+                (destdir / "usr/share/applications/linuxscp.desktop").is_file())
+
+            # Verify CMakeLists.txt and Debian packaging metadata remain aligned.
+            cmake_text = (repo_root / "CMakeLists.txt").read_text(encoding="utf-8")
+            self.assertIn("add_executable(linuxscp", cmake_text)
+            self.assertIn("add_executable(linuxscp-unittest", cmake_text)
+            self.assertIn("linuxscp-gui", cmake_text)
+            control_text = (repo_root / "debian/control").read_text(encoding="utf-8")
+            self.assertIn("Package: linuxscp", control_text)
+            rules_text = (repo_root / "debian/rules").read_text(encoding="utf-8")
+            self.assertIn("source/linux", rules_text)
+
 
 def run_and_report():
     """Run the suite, then print one line that says what was actually run.

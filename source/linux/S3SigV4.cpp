@@ -39,21 +39,6 @@ void Hmac(const std::string & key, const std::string & data,
     out32.assign(reinterpret_cast<const char *>(raw), sizeof(raw));
 }
 
-std::string Sha256Hex(const std::string & data)
-{
-    unsigned char raw[32];
-    lscp_sha256(data.data(), data.size(), raw, sizeof(raw));
-    static const char * digits = "0123456789abcdef";
-    std::string hex;
-    hex.resize(64);
-    for (size_t i = 0; i < 32; i++)
-    {
-        hex[i * 2] = digits[raw[i] >> 4];
-        hex[i * 2 + 1] = digits[raw[i] & 15];
-    }
-    return hex;
-}
-
 /* Trim and collapse the runs of whitespace a header value may hold,
  * the way the canonical form requires. */
 std::string NormalizeHeaderValue(std::string value)
@@ -288,6 +273,13 @@ std::string HexEncode(const std::string & raw)
         hex[i * 2 + 1] = digits[c & 15];
     }
     return hex;
+}
+
+std::string Sha256Hex(const std::string & data)
+{
+    unsigned char raw[32];
+    lscp_sha256(data.data(), data.size(), raw, sizeof(raw));
+    return HexEncode(std::string(reinterpret_cast<const char *>(raw), 32));
 }
 
 SignedRequest Sign(const std::string & method, const std::string & uri,

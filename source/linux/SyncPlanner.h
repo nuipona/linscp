@@ -200,6 +200,18 @@ enum class SyncAction
 
 const char * SyncActionName(SyncAction action);
 
+enum class SyncConflictPolicy
+{
+    Skip,          /* report as Conflict and leave untouched (default) */
+    Local,         /* resolve file conflicts by uploading the local file */
+    Remote,        /* resolve file conflicts by downloading the remote file */
+    Newer          /* resolve file conflicts in favour of the newer side */
+};
+
+bool ParseSyncConflictPolicy(const std::string & text,
+    SyncConflictPolicy & policy, std::string & error);
+const char * SyncConflictPolicyName(SyncConflictPolicy policy);
+
 /* One line of a plan: what to do with one path.
  *
  * 'path' is relative to the two synchronized roots and always uses '/',
@@ -261,10 +273,13 @@ struct SyncOptions
      * deletes when the state proves an entry was removed on the other
      * side. */
     class SyncState * state;
+    /* Policy for resolving file conflicts in 'both' mode. */
+    SyncConflictPolicy conflictPolicy;
 
     SyncOptions() : mode(SyncMode::Local), deleteObsolete(false),
         recursive(true), mirror(false),
-        transferMode(TransferMode::Binary), state(NULL) {}
+        transferMode(TransferMode::Binary), state(NULL),
+        conflictPolicy(SyncConflictPolicy::Skip) {}
 };
 
 bool PlanSynchronization(SyncFileSystem & localFs, SyncFileSystem & remoteFs,

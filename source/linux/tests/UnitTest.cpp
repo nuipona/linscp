@@ -16,8 +16,8 @@
 #include <string>
 #include <vector>
 #include <filesystem>
-
 #include <map>
+#include <sys/stat.h>
 
 #include "PathUtil.h"
 #include "ScriptParams.h"
@@ -1379,6 +1379,32 @@ void TestSyncPlannerConflictsAndState()
     /* A plan with conflicts never deletes anything. */
     CHECK_FALSE(conflictPlan.DeletesAnything());
 
+    /* Explicit conflict policies resolve the conflict deterministically. */
+    SyncOptions resolvedOptions = options;
+    CHECK_TRUE(ParseSyncConflictPolicy("local",
+        resolvedOptions.conflictPolicy, error));
+    SyncPlan resolvedLocal;
+    CHECK_TRUE(PlanSynchronization(local2, remote2, "/local", "/remote",
+        resolvedOptions, resolvedLocal, error));
+    CHECK_TRUE(ActionOf(resolvedLocal, "recorded.txt") == SyncAction::Upload);
+    CHECK_FALSE(resolvedLocal.HasConflicts());
+
+    CHECK_TRUE(ParseSyncConflictPolicy("remote",
+        resolvedOptions.conflictPolicy, error));
+    SyncPlan resolvedRemote;
+    CHECK_TRUE(PlanSynchronization(local2, remote2, "/local", "/remote",
+        resolvedOptions, resolvedRemote, error));
+    CHECK_TRUE(ActionOf(resolvedRemote, "recorded.txt") == SyncAction::Download);
+
+    CHECK_TRUE(ParseSyncConflictPolicy("newer",
+        resolvedOptions.conflictPolicy, error));
+    SyncPlan resolvedNewer;
+    CHECK_TRUE(PlanSynchronization(local2, remote2, "/local", "/remote",
+        resolvedOptions, resolvedNewer, error));
+    CHECK_TRUE(ActionOf(resolvedNewer, "recorded.txt") == SyncAction::Download);
+    CHECK_FALSE(ParseSyncConflictPolicy("unknown-policy",
+        resolvedOptions.conflictPolicy, error));
+
     /* One side changed: that side wins. */
     MemoryFileSystem local3("local", "/local");
     MemoryFileSystem remote3("remote", "/remote");
@@ -2182,7 +2208,35 @@ void TestSessionStore()
     CHECK_FALSE(SessionStore::IsValidName(""));
     CHECK_FALSE(SessionStore::IsValidName(" leading"));
     CHECK_FALSE(SessionStore::IsValidName("]"));
+    CHECK_FALSE(SessionStore::IsValidName("/leading-slash"));
+    CHECK_FALSE(SessionStore::IsValidName("trailing-slash/"));
+    CHECK_FALSE(SessionStore::IsValidName("Empty//Segment"));
     CHECK_TRUE(SessionStore::IsValidName("Servers/web1"));
+    CHECK_TRUE(SessionStore::IsValidName("Prod/EU/web1"));
+
+    /* Folder hierarchy listing and removal. */
+    {
+        const std::string folderIni = JoinLocalPath(temporary, "folders.ini");
+        SessionStore folderStore(folderIni);
+        std::string error;
+        StoredSession s1;
+        s1.name = "Prod/Web/app1";
+        s1.hostName = "app1.example.com";
+        StoredSession s2;
+        s2.name = "Prod/DB/db1";
+        s2.hostName = "db1.example.com";
+        StoredSession s3;
+        s3.name = "Stage/app";
+        s3.hostName = "stage.example.com";
+        CHECK_TRUE(folderStore.AddOrUpdate(s1, error));
+        CHECK_TRUE(folderStore.AddOrUpdate(s2, error));
+        CHECK_TRUE(folderStore.AddOrUpdate(s3, error));
+        CHECK_TRUE(folderStore.Folders().size() == 4);
+        CHECK_TRUE(folderStore.SessionsInFolder("Prod").size() == 2);
+        CHECK_TRUE(folderStore.SessionsInFolder("Prod/Web").size() == 1);
+        CHECK_TRUE(folderStore.RemoveFolder("Prod", error) == 2);
+        CHECK_TRUE(folderStore.Sessions().size() == 1);
+    }
 
     RemoveTreeQuiet(temporary);
 }
@@ -2243,6 +2297,193 @@ void TestEditorHelpers()
     CHECK_TRUE(StatLocal(directory).isDir);
     RemoveLocalFile(temporary, error);
     RemoveLocalDirectory(directory, error);
+}
+
+class FakeRemoteEditAccess : public RemoteFileAccess
+{
+public:
+    std::string content;
+    unsigned long mtime;
+    unsigned uploads;
+    bool mutateOnEditorRun;
+
+    FakeRemoteEditAccess(const std::string & initial, unsigned long initialMtime)
+        : content(initial), mtime(initialMtime), uploads(0),
+          mutateOnEditorRun(false) {}
+
+    virtual int Stat(const std::string & path, LscpAttrs & attrs,
+        std::string & error)
+    {
+        (void)path;
+        error.clear();
+        attrs = {};
+        attrs.flags = LSCP_ATTR_SIZE | LSCP_ATTR_PERMISSIONS | LSCP_ATTR_ACMODTIME;
+        attrs.size = content.size();
+        attrs.permissions = 0100644;
+        attrs.mtime = mtime;
+        attrs.atime = mtime;
+        return LSCP_SFTP_STAT_EXISTS;
+    }
+
+    virtual int Download(const std::string & remote, const std::string & local,
+        bool preserveTime, std::string & error)
+    {
+        (void)remote;
+        (void)preserveTime;
+        error.clear();
+        FILE * f = fopen(local.c_str(), "wb");
+        if (f == NULL)
+        {
+            error = "cannot write local copy";
+            return -1;
+        }
+        if (!content.empty())
+        {
+            fwrite(content.data(), 1, content.size(), f);
+        }
+        fclose(f);
+        return 0;
+    }
+
+    virtual int Upload(const std::string & local, const std::string & remote,
+        bool preserveTime, std::string & error)
+    {
+        (void)remote;
+        (void)preserveTime;
+        error.clear();
+        FILE * f = fopen(local.c_str(), "rb");
+        if (f == NULL)
+        {
+            error = "cannot read local copy";
+            return -1;
+        }
+        content.clear();
+        char buf[4096];
+        size_t got = 0;
+        while ((got = fread(buf, 1, sizeof(buf), f)) > 0)
+        {
+            content.append(buf, got);
+        }
+        fclose(f);
+        mtime++;
+        uploads++;
+        return 0;
+    }
+};
+
+void TestRemoteEditor()
+{
+    /* UTF-8 BOM and CRLF/LF normalization across remote edit roundtrips. */
+    const std::string bomCrlf = "\xEF\xBB\xBFline1\r\nline2\r\n";
+    const std::string editedLf = "line1-mod\nline2\n";
+    CHECK_EQ(NormalizeEditedText(bomCrlf, editedLf, "preserve"),
+        std::string("\xEF\xBB\xBFline1-mod\r\nline2\r\n"));
+    CHECK_EQ(NormalizeEditedText(bomCrlf, editedLf, "lf"),
+        std::string("\xEF\xBB\xBFline1-mod\nline2\n"));
+    CHECK_EQ(NormalizeEditedText("a\nb\n", "a\nb\n", "crlf"),
+        std::string("a\r\nb\r\n"));
+
+    const std::string tempDir = MakeTempDirectory();
+    if (tempDir.empty())
+    {
+        return;
+    }
+    const std::string editorScript = JoinLocalPath(tempDir, "editor.sh");
+    {
+        FILE * f = fopen(editorScript.c_str(), "wb");
+        CHECK_TRUE(f != NULL);
+        if (f != NULL)
+        {
+            fputs("#!/bin/sh\nprintf 'updated line 1\\nupdated line 2\\n' > \"$1\"\n", f);
+            fclose(f);
+            chmod(editorScript.c_str(), 0700);
+        }
+    }
+
+    /* Round-trip edit with UTF-8 BOM + CRLF preserved. */
+    FakeRemoteEditAccess access(bomCrlf, 1700000000UL);
+    RemoteEditor editor(access, NULL);
+    EditOptions options;
+    options.editor = editorScript;
+    std::string error;
+    CHECK_TRUE(editor.Edit("/etc/app.conf", options, false, error));
+    CHECK_TRUE(access.uploads == 1u);
+    CHECK_EQ(access.content,
+        std::string("\xEF\xBB\xBFupdated line 1\r\nupdated line 2\r\n"));
+
+    /* Binary file is refused unless -force or -binary is set. */
+    FakeRemoteEditAccess binAccess(std::string("abc\0def", 7), 1700000000UL);
+    RemoteEditor binEditor(binAccess, NULL);
+    CHECK_FALSE(binEditor.Edit("/bin/blob", options, false, error));
+    CHECK_TRUE(error.find("text file") != std::string::npos);
+
+    /* Monitoring mode (-monitor) detects a background save after the
+     * editor exits and uploads it safely. */
+    const std::string monitorScript = JoinLocalPath(tempDir, "monitor-editor.sh");
+    {
+        FILE * f = fopen(monitorScript.c_str(), "wb");
+        CHECK_TRUE(f != NULL);
+        if (f != NULL)
+        {
+            fputs("#!/bin/sh\n"
+                  "(sleep 0.08; printf 'monitored-save\\n' > \"$1\") &\n"
+                  "exit 0\n", f);
+            fclose(f);
+            chmod(monitorScript.c_str(), 0700);
+        }
+    }
+    FakeRemoteEditAccess monAccess("initial\n", 1700000000UL);
+    RemoteEditor monEditor(monAccess, NULL);
+    EditOptions monOptions;
+    monOptions.editor = monitorScript;
+    monOptions.monitor = true;
+    monOptions.monitorPasses = 1;
+    monOptions.monitorIntervalMs = 30;
+    CHECK_TRUE(monEditor.Edit("/etc/monitored.conf", monOptions, false, error));
+    CHECK_TRUE(monAccess.uploads == 1u);
+    CHECK_EQ(monAccess.content, std::string("monitored-save\n"));
+
+    RemoveTreeQuiet(tempDir);
+}
+
+void TestS3ObjectSettings()
+{
+    SessionOptions options;
+    options.protocol = "s3";
+    std::string error;
+
+    CHECK_TRUE(ApplySessionRawSetting("S3StorageClass", "standard_ia",
+        options, error));
+    CHECK_EQ(options.s3.storageClass, std::string("STANDARD_IA"));
+    CHECK_FALSE(ApplySessionRawSetting("S3StorageClass", "NOT_A_CLASS",
+        options, error));
+
+    CHECK_TRUE(ApplySessionRawSetting("S3Acl", "bucket-owner-full-control",
+        options, error));
+    CHECK_EQ(options.s3.acl, std::string("bucket-owner-full-control"));
+    CHECK_FALSE(ApplySessionRawSetting("S3Acl", "world-writable",
+        options, error));
+
+    CHECK_TRUE(ApplySessionRawSetting("S3ServerSideEncryption", "AES256",
+        options, error));
+    CHECK_EQ(options.s3.serverSideEncryption, std::string("AES256"));
+    options.s3.kmsKeyId = "alias/my-key";
+    CHECK_FALSE(ValidateSessionSettings(options, error));
+    CHECK_TRUE(ApplySessionRawSetting("S3ServerSideEncryption", "aws:kms",
+        options, error));
+    CHECK_TRUE(ValidateSessionSettings(options, error));
+
+    CHECK_TRUE(ApplySessionRawSetting("S3RequestPayer", "requester",
+        options, error));
+    CHECK_TRUE(options.s3.requestPayer);
+    CHECK_TRUE(ApplySessionRawSetting("S3Metadata",
+        "Author=Ada,Project=linscp", options, error));
+    CHECK_EQ(options.s3.metadata["author"], std::string("Ada"));
+    CHECK_EQ(options.s3.metadata["project"], std::string("linscp"));
+
+    SessionOptions nonS3 = options;
+    nonS3.protocol = "sftp";
+    CHECK_FALSE(ValidateSessionSettings(nonS3, error));
 }
 
 void TestNewScriptCommands()
@@ -2910,6 +3151,8 @@ int main()
     TestSessionStore();
     TestS3SigV4();
     TestEditorHelpers();
+    TestRemoteEditor();
+    TestS3ObjectSettings();
     TestNewScriptCommands();
     TestPermissionModes();
     TestNameAbbreviations();

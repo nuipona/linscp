@@ -156,7 +156,7 @@
   <div class="commander-main">
 
     <!-- LEFT PANE: LOCAL -->
-    <div class="pane" id="localPane" onclick="focusPane('local')"
+    <div class="pane" id="localPane" role="region" aria-label="Local panel" tabindex="0" onclick="focusPane('local')"
          ondragover="dragOverPane('local', event)"
          ondragleave="dragLeavePane('local', event)"
          ondrop="dropOnPane('local', event)">
@@ -166,7 +166,7 @@
           Local
         </div>
         <div class="path-input-group">
-          <input type="text" id="localPathInput" class="path-input"
+          <input type="text" id="localPathInput" class="path-input" aria-label="Local directory path"
                  onkeydown="if(event.key==='Enter') loadLocal(this.value)">
           <button class="btn-icon" title="Go" onclick="loadLocal(document.getElementById('localPathInput').value)">Go</button>
           <button class="btn-icon" title="Parent Directory" onclick="goUp('local')">..</button>
@@ -174,7 +174,7 @@
         </div>
       </div>
       <div class="file-table-container">
-        <table class="file-table">
+        <table class="file-table" role="grid" aria-label="Local files">
           <thead>
             <tr>
               <th style="width: 45%;">Name</th>
@@ -222,7 +222,7 @@
     </div>
 
     <!-- RIGHT PANE: REMOTE -->
-    <div class="pane" id="remotePane" onclick="focusPane('remote')"
+    <div class="pane" id="remotePane" role="region" aria-label="Remote panel" tabindex="0" onclick="focusPane('remote')"
          ondragover="dragOverPane('remote', event)"
          ondragleave="dragLeavePane('remote', event)"
          ondrop="dropOnPane('remote', event)">
@@ -232,7 +232,7 @@
           Remote
         </div>
         <div class="path-input-group">
-          <input type="text" id="remotePathInput" class="path-input"
+          <input type="text" id="remotePathInput" class="path-input" aria-label="Remote directory path"
                  onkeydown="if(event.key==='Enter') loadRemote(this.value)">
           <button class="btn-icon" title="Go" onclick="loadRemote(document.getElementById('remotePathInput').value)">Go</button>
           <button class="btn-icon" title="Parent Directory" onclick="goUp('remote')">..</button>
@@ -240,7 +240,7 @@
         </div>
       </div>
       <div class="file-table-container">
-        <table class="file-table">
+        <table class="file-table" role="grid" aria-label="Remote files">
           <thead>
             <tr>
               <th style="width: 45%;">Name</th>
@@ -330,7 +330,7 @@
   <div id="toast" class="toast"></div>
 
   <!-- Site manager / login modal -->
-  <div class="modal-overlay" id="siteModal">
+  <div class="modal-overlay" id="siteModal" role="dialog" aria-modal="true" aria-label="Site Manager">
     <div class="modal-box" style="width:640px;">
       <div class="modal-header">
         <span>Site Manager</span>
@@ -387,7 +387,7 @@
   </div>
 
   <!-- Synchronization dialog -->
-  <div class="modal-overlay" id="syncModal">
+  <div class="modal-overlay" id="syncModal" role="dialog" aria-modal="true" aria-label="Synchronize directories">
     <div class="modal-box" style="width:600px;">
       <div class="modal-header">
         <span>Synchronize directories</span>
@@ -413,6 +413,14 @@
             <option value="none">Always copy</option>
           </select>
         </div>
+        <div class="form-row"><label>On conflict:</label>
+          <select id="syncConflict" class="select-field">
+            <option value="skip">Skip conflicting files (safest)</option>
+            <option value="local">Local wins (upload local over remote)</option>
+            <option value="remote">Remote wins (download remote over local)</option>
+            <option value="newer">Newer wins (compare modification times)</option>
+          </select>
+        </div>
         <div class="form-row"><label>File mask:</label><input type="text" id="syncMask" class="input-field" placeholder="e.g. *.txt|*.bak (empty = every file)"></div>
         <div class="form-row"><label></label>
           <label style="flex:1; font-weight:normal; width:auto;"><input type="checkbox" id="syncRecursive" checked> Include subdirectories</label>
@@ -435,7 +443,7 @@
   </div>
 
   <!-- Remote editor -->
-  <div class="modal-overlay" id="editorModal">
+  <div class="modal-overlay" id="editorModal" role="dialog" aria-modal="true" aria-label="Editor">
     <div class="modal-box" style="width:760px; height:80vh;">
       <div class="modal-header">
         <span id="editorTitle">Remote editor</span>
@@ -456,7 +464,7 @@
   </div>
 
   <!-- Search -->
-  <div class="modal-overlay" id="searchModal">
+  <div class="modal-overlay" id="searchModal" role="dialog" aria-modal="true" aria-label="Search remote directory">
     <div class="modal-box" style="width:620px;">
       <div class="modal-header">
         <span>Search the remote directory</span>
@@ -490,7 +498,7 @@
   </div>
 
   <!-- Host key verification -->
-  <div class="modal-overlay" id="hostKeyModal">
+  <div class="modal-overlay" id="hostKeyModal" role="dialog" aria-modal="true" aria-label="Host key verification">
     <div class="modal-box" style="width:540px;">
       <div class="modal-header">
         <span>Unknown host key</span>
@@ -518,7 +526,7 @@
   </div>
 
   <!-- Help -->
-  <div class="modal-overlay" id="helpModal">
+  <div class="modal-overlay" id="helpModal" role="dialog" aria-modal="true" aria-label="Help">
     <div class="modal-box" style="width:560px;">
       <div class="modal-header">
         <span>LinSCP Commander</span>
@@ -681,20 +689,15 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function joinPath(base, name, remote) {
-    if (remote) {
-      return (base.replace(/\/+$/, '') || '/') + '/' + name;
-    }
-    const separator = base.includes('\\') ? '\\' : '/';
-    return base.replace(/[\\\/]+$/, '') + separator + name;
+  function joinPath(base, name) {
+    return (base.replace(/\/+$/, '') || '/') + '/' + name;
   }
 
-  function parentPath(path, remote) {
-    const separator = (!remote && path.includes('\\')) ? '\\' : '/';
-    const trimmed = path.replace(/[\\\/]+$/, '');
-    const index = trimmed.lastIndexOf(separator);
-    if (index <= 0) return separator;
-    return trimmed.substring(0, index) || separator;
+  function parentPath(path) {
+    const trimmed = path.replace(/\/+$/, '');
+    const index = trimmed.lastIndexOf('/');
+    if (index <= 0) return '/';
+    return trimmed.substring(0, index) || '/';
   }
 
   function activeTab() {
@@ -902,6 +905,8 @@
     let selected = 0;
     for (const entry of pane.entries) {
       const row = document.createElement('tr');
+      row.setAttribute('role', 'row');
+      row.setAttribute('aria-selected', pane.selection.has(entry.name) ? 'true' : 'false');
       if (pane.selection.has(entry.name)) {
         row.className = 'selected';
         selected++;
@@ -1181,6 +1186,20 @@
     });
   }
 
+  async function saveLocalDesktopFile(file, relativePath) {
+    const query = new URLSearchParams({
+      tab: String(tabId() || ''),
+      local_dir: state.local.path,
+      name: file.name,
+      relative_path: relativePath
+    });
+    return api('/api/local/drop?' + query.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file
+    });
+  }
+
   async function dropOnPane(side, event) {
     if (event) event.preventDefault();
     endDrag();
@@ -1191,10 +1210,6 @@
       (dataTransfer.files && dataTransfer.files.length > 0) ||
       (dataTransfer.items && Array.from(dataTransfer.items).some(item => item.kind === 'file'));
     if (externalFileDrop) {
-      if (side !== 'remote') {
-        toast('Drop files onto the remote pane to upload them.', true);
-        return;
-      }
       let entries;
       try {
         entries = await collectDesktopDrop(dataTransfer);
@@ -1204,6 +1219,24 @@
       }
       if (!entries.length) {
         toast('This browser did not expose the dropped files or folder contents.', true);
+        return;
+      }
+      if (side === 'local') {
+        let saved = 0, failed = 0;
+        for (const entry of entries) {
+          const result = entry.kind === 'directory' ?
+            await apiPost('/api/local/drop-dir', {
+              tab: tabId(), local_dir: state.local.path,
+              relative_path: entry.path
+            }) : await saveLocalDesktopFile(entry.file, entry.path);
+          if (result && result.success) saved++;
+          else failed++;
+        }
+        if (saved) toast('Saved ' + saved + ' desktop item' +
+          (saved === 1 ? '' : 's') + ' to local directory.');
+        if (failed) toast(failed + ' desktop item' +
+          (failed === 1 ? ' was' : 's were') + ' refused.', true);
+        await loadLocal(state.local.path);
         return;
       }
       let queued = 0, failed = 0;
@@ -1430,16 +1463,46 @@
   function renderSites() {
     const list = $('siteList');
     list.innerHTML = '';
+    const seenFolders = new Set();
     for (const site of state.sessions) {
+      const slash = (site.name || '').lastIndexOf('/');
       const div = document.createElement('div');
       div.className = 'site-item' + (state.selectedSite === site.name ? ' selected' : '');
-      div.textContent = site.name;
+      const nameSpan = document.createElement('span');
+      nameSpan.textContent = site.name;
+      div.appendChild(nameSpan);
+      if (slash > 0) {
+        const folder = site.name.substring(0, slash);
+        div.dataset.folder = folder;
+        if (!seenFolders.has(folder)) {
+          seenFolders.add(folder);
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn tiny site-folder';
+          delBtn.style.cssText = 'padding:0 5px; font-size:10px; float:right;';
+          delBtn.textContent = '×';
+          delBtn.title = 'Delete folder "' + folder + '"';
+          delBtn.onclick = (event) => { event.stopPropagation(); deleteSiteFolder(folder); };
+          div.appendChild(delBtn);
+        }
+      }
       div.onclick = () => fillSiteForm(site);
       list.appendChild(div);
     }
     if (!state.sessions.length) {
       list.innerHTML = '<div class="site-empty">No stored sessions yet.</div>';
     }
+  }
+
+  async function deleteSiteFolder(folder) {
+    if (!folder) return;
+    if (!confirm('Remove all stored sessions in folder "' + folder + '"?')) return;
+    const result = await apiPost('/api/sessions/delete', { name: folder, folder: true });
+    if (!result.success) { toast(result.error || 'Cannot remove the folder.', true); return; }
+    if (state.selectedSite && state.selectedSite.startsWith(folder + '/')) {
+      state.selectedSite = null;
+    }
+    await loadSessions();
+    newSite();
   }
 
   function fillSiteForm(site) {
@@ -1575,10 +1638,16 @@
       local_dir: $('syncLocal').value,
       remote_dir: $('syncRemote').value,
       criteria: $('syncCriteria').value,
+      conflict: $('syncConflict') ? $('syncConflict').value : 'skip',
       filemask: $('syncMask').value.trim(),
       recursive: $('syncRecursive').checked,
       delete: $('syncDelete').checked
     };
+  }
+
+  async function resolveSyncConflictPolicy(policy) {
+    if ($('syncConflict')) $('syncConflict').value = policy;
+    await previewSynchronization();
   }
 
   async function previewSynchronization() {
@@ -1594,6 +1663,16 @@
       (summary['delete-local'] || 0) + ' local and ' + (summary['delete-remote'] || 0) +
       ' remote deletions, ' + (summary.conflict || 0) + ' conflict(s), ' +
       (summary.unchanged || 0) + ' unchanged.';
+    if ((summary.conflict || 0) > 0) {
+      const bar = document.createElement('span');
+      bar.className = 'plan-conflict-bar';
+      bar.style.cssText = 'display:inline-flex; gap:4px; align-items:center; margin-left:8px; font-size:11px;';
+      bar.innerHTML = '<span>Resolve:</span>' +
+        '<button class="btn tiny" onclick="resolveSyncConflictPolicy(\'local\')">Local wins</button>' +
+        '<button class="btn tiny" onclick="resolveSyncConflictPolicy(\'remote\')">Remote wins</button>' +
+        '<button class="btn tiny" onclick="resolveSyncConflictPolicy(\'newer\')">Newer wins</button>';
+      $('syncSummary').appendChild(bar);
+    }
     const list = $('syncPreview');
     list.innerHTML = '';
     for (const item of result.plan.items) {
@@ -1842,6 +1921,9 @@
           formatBytes(task.bytes_total) + '</span>'
         : '<span class="progress-text">' + escapeHtml(task.detail || '') + '</span>';
       const actions = [];
+      if (task.status === 'Queued') {
+        actions.push('<button class="btn tiny" title="Move to front of queue" onclick="prioritizeTask(' + task.id + ', \'top\')">Top</button>');
+      }
       if (task.status === 'Running' || task.status === 'Queued') actions.push('<button class="btn tiny" onclick="cancelTask(' + task.id + ')">Cancel</button>');
       if (task.status === 'Failed' || task.status === 'Cancelled') actions.push('<button class="btn tiny" onclick="retryTask(' + task.id + ')">Retry</button>');
       row.innerHTML =
@@ -1858,8 +1940,9 @@
     }
   }
 
-  async function cancelTask(id) { await apiPost('/api/queue/cancel', { task_id: id }); refreshQueue(); }
-  async function retryTask(id) { await apiPost('/api/queue/retry', { task_id: id }); refreshQueue(); }
+  async function cancelTask(id) { await apiPost('/api/queue/cancel', { task_id: id }); await refreshQueue(); }
+  async function retryTask(id) { await apiPost('/api/queue/retry', { task_id: id }); await refreshQueue(); }
+  async function prioritizeTask(id, position) { await apiPost('/api/queue/priority', { task_id: id, position: position || 'top' }); await refreshQueue(); }
   async function togglePause() {
     await apiPost(state.paused ? '/api/queue/resume' : '/api/queue/pause', {});
     refreshQueue();
@@ -1990,6 +2073,23 @@
         break;
       }
       case 'Backspace': event.preventDefault(); goUp(state.focusPane); break;
+      case 'ArrowDown':
+      case 'ArrowUp':
+      case 'Home':
+      case 'End': {
+        const pane = state[state.focusPane];
+        if (!pane || !pane.entries.length) break;
+        event.preventDefault();
+        const names = pane.entries.map(item => item.name);
+        let idx = pane.lastClicked ? names.indexOf(pane.lastClicked) : -1;
+        if (event.key === 'Home') idx = 0;
+        else if (event.key === 'End') idx = names.length - 1;
+        else if (event.key === 'ArrowDown') idx = Math.min(names.length - 1, idx + 1);
+        else if (event.key === 'ArrowUp') idx = Math.max(0, idx <= 0 ? 0 : idx - 1);
+        const target = pane.entries[idx];
+        if (target) selectEntry(state.focusPane, target, event);
+        break;
+      }
     }
   });
 

@@ -13,6 +13,7 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <pwd.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <sys/time.h>
@@ -90,7 +91,20 @@ bool LocalTime(std::time_t value, std::tm & result)
 
 std::string HomeDirectory()
 {
-    return EnvironmentVariable("HOME");
+    std::string home = EnvironmentVariable("HOME");
+    if (!home.empty())
+    {
+        return home;
+    }
+    struct passwd pwd = {};
+    struct passwd * result = NULL;
+    char buffer[4096];
+    if (getpwuid_r(getuid(), &pwd, buffer, sizeof(buffer), &result) == 0 &&
+        result != NULL && pwd.pw_dir != NULL)
+    {
+        return std::string(pwd.pw_dir);
+    }
+    return std::string();
 }
 
 std::string ConfigDirectory()
@@ -120,7 +134,20 @@ std::string CurrentUserName()
     {
         return user;
     }
-    return EnvironmentVariable("LOGNAME");
+    user = EnvironmentVariable("LOGNAME");
+    if (!user.empty())
+    {
+        return user;
+    }
+    struct passwd pwd = {};
+    struct passwd * result = NULL;
+    char buffer[4096];
+    if (getpwuid_r(getuid(), &pwd, buffer, sizeof(buffer), &result) == 0 &&
+        result != NULL && pwd.pw_name != NULL)
+    {
+        return std::string(pwd.pw_name);
+    }
+    return std::string();
 }
 
 bool SetFileTimes(const std::string & path, unsigned long atime,

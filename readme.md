@@ -68,10 +68,9 @@ synchronization, and a browser-based dual-pane Commander interface
 and remote file viewing/editing, a transfer queue and bounded UTF-8 full-text
 search of remote files. The `keepuptodate` command reflects local changes onto
 the remote side, watching the local tree recursively with inotify and falling
-back to interval polling. The remote pane queues files and folders dropped
-from a file manager, retaining nested paths and empty directories where the
-browser exposes file-entry APIs; local-pane and cross-desktop drops still need
-work.
+back to interval polling. The remote and local panes accept files and folders dropped from a file
+manager, retaining nested paths and empty directories where the browser
+exposes file-entry APIs.
 
 Protocol URL acceptance is not proof of complete support: WebDAV lists and
 stats through PROPFIND, moves with MOVE, and file copies with COPY (falling
@@ -79,12 +78,12 @@ back to a streamed copy when the server refuses COPY); `lock`/`unlock` take
 an exclusive write lock whose token every later upload, delete and move of
 that path carries (the `If` header), and `property -get`/`-set` reads and
 writes dead properties. Upstream's WebDAV backend has no locking or dead
-properties at all, so those are LinSCP extensions; collection-level
-preconditions beyond the lock token remain gaps. Amazon S3 signs with
-Signature Version 4, lists and stats objects, uses CopyObject for remote
-copies, and switches uploads larger than 16 MiB to multipart requests.
-Interrupted multipart uploads restart from the first part; ACLs, versioning,
-storage classes and server-side encryption options remain unsupported.
+properties at all, so those are LinSCP extensions. Amazon S3 signs with
+Signature Version 4, lists and stats objects, uses CopyObject (and multipart
+UploadPartCopy for large objects) for remote copies, switches uploads larger
+than 16 MiB to multipart requests with local sidecar state to resume
+interrupted multipart uploads, and signs storage class, ACL, server-side
+encryption, requester-pays and custom metadata headers via `-rawsettings`.
 
 Host keys are verified rather than accepted: `-hostkey=` takes a SHA-256 pin
 (hex, `SHA256:base64` or `sha256//base64`) or an MD5 one, and where the
@@ -101,9 +100,11 @@ ProxyMethod=SOCKS5 ProxyHost=... ProxyPort=...` applies upstream's proxy
 settings (SOCKS 4 and 5, HTTP CONNECT, a telnet or local command, with their
 DNS, localhost and exclude-list policy), `savesession -rawsettings` stores
 them with the site and encrypts the proxy password, and a setting or proxy
-this build cannot use is refused by name instead of being dropped. The .NET
-assembly and PowerShell automation APIs, SSH tunnels and session folder trees
-remain open gaps.
+this build cannot use is refused by name instead of being dropped. Stored
+sessions support slash-delimited folder hierarchies (`sessions folders`,
+`rmsession -folder`) in both the CLI and the GUI site manager. The .NET
+assembly and PowerShell automation APIs, GSSAPI/SSH tunnels and upstream's
+remote-shell SCP directory engine remain intentional non-goals on Linux.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 and its [Linux capability matrix](docs/linux-feature-inventory.md) for the

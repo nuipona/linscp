@@ -49,7 +49,8 @@ namespace linuxscp {
  * returns an empty string and no error.
  */
 std::string PreparePrivateKeyFile(const std::string & keyFile,
-    std::string & error);
+    std::string & error,
+    const std::string & suppliedPassphrase = std::string());
 
 /* Removes the converted key file, if one was created. */
 void DiscardImportedPrivateKeyFile();
@@ -62,7 +63,8 @@ void DiscardImportedPrivateKeyFile();
  * no usable SSH-2 public key.
  */
 bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
-    std::string & error);
+    std::string & error,
+    const std::string & suppliedPassphrase = std::string());
 
 } /* namespace linuxscp */
 
