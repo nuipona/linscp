@@ -373,6 +373,6 @@ AES_ALL_VTABLES(_ni, "AES-NI accelerated");
 
 #else
 
-extern int aes_ni_dummy_linuxscp; // unit cannot be empty
+extern int aes_ni_dummy_linscp; // unit cannot be empty
 
 #endif // FORK_VS || _WIN64

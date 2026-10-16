@@ -7,15 +7,15 @@
  * See docs/localization.md for supported scope and locale selection.
  */
 
-#ifndef LINUXSCP_TEXTS_H
-#define LINUXSCP_TEXTS_H
+#ifndef LINSCP_TEXTS_H
+#define LINSCP_TEXTS_H
 
 #include <cstdint>
 #include <string>
 #include <initializer_list>
 #include <utility>
 
-namespace linuxscp {
+namespace linscp {
 namespace Texts {
 
 extern const char * const ProductName;
@@ -91,6 +91,6 @@ std::string OptionSet(const std::string & name, const std::string & value);
 std::string TerminalOpening();
 
 } // namespace Texts
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_TEXTS_H */
+#endif /* LINSCP_TEXTS_H */

@@ -548,7 +548,7 @@ bool fxp_rename_recv(struct sftp_packet *pktin, struct sftp_request *req)
 }
 
 /*
- * LinuxSCP additions: the SFTP v3 SYMLINK request and the copy-data and
+ * LinSCP additions: the SFTP v3 SYMLINK request and the copy-data and
  * check-file-name extensions (both understood by OpenSSH), which the
  * stock PuTTY client never sends.
  */

@@ -6,7 +6,7 @@ source/linux/build-*/
 build-stamp
 debian/files
 debian/substvars
-debian/linuxscp/
+debian/linscp/
 
 # CMake build output
 build/

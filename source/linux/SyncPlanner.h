@@ -22,8 +22,8 @@
  * silently overwritten in one direction.
  */
 
-#ifndef LINUXSCP_SYNCPLANNER_H
-#define LINUXSCP_SYNCPLANNER_H
+#ifndef LINSCP_SYNCPLANNER_H
+#define LINSCP_SYNCPLANNER_H
 
 #include <map>
 #include <string>
@@ -31,7 +31,7 @@
 
 #include "TextMode.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /* Which side is the target of the synchronization.
  *
@@ -334,6 +334,6 @@ private:
     std::map<std::string, SyncStateEntry> mEntries;
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SYNCPLANNER_H */
+#endif /* LINSCP_SYNCPLANNER_H */

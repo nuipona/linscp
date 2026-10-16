@@ -192,10 +192,10 @@ class InventoryTests(unittest.TestCase):
         checker.check_command_coverage(inventory, dispatched, errors)
         self.assertEqual(errors, [])
         for change, expected in [
-                (lambda j: j['linuxscp_additions'][0]['commands'].append('open'), 'multiple ledger groups'),
-                (lambda j: j['linuxscp_additions'][0]['commands'].append('imaginary'), 'no dispatcher'),
-                (lambda j: j['linuxscp_additions'].pop(), 'absent from inventory'),
-                (lambda j: j['linuxscp_additions'][0].pop('commands'), 'explicit command names')]:
+                (lambda j: j['linscp_additions'][0]['commands'].append('open'), 'multiple ledger groups'),
+                (lambda j: j['linscp_additions'][0]['commands'].append('imaginary'), 'no dispatcher'),
+                (lambda j: j['linscp_additions'].pop(), 'absent from inventory'),
+                (lambda j: j['linscp_additions'][0].pop('commands'), 'explicit command names')]:
             candidate = copy.deepcopy(inventory)
             change(candidate)
             errors = []
@@ -233,7 +233,7 @@ class InventoryTests(unittest.TestCase):
         report = matrix_report(inventory)
         for name in inventory['commands']:
             self.assertIn('| `' + name + '` |', report)
-        for addition in inventory['linuxscp_additions']:
+        for addition in inventory['linscp_additions']:
             self.assertIn(addition['name'], report)
         for row in inventory['capabilities']:
             self.assertIn('| `' + row['id'] + '` |', report)
@@ -262,7 +262,7 @@ class InventoryTests(unittest.TestCase):
         errors = []
         capabilities = check_capabilities(inventory, errors)
         entries = (list(inventory["commands"].values()) + inventory["features"] +
-                   inventory.get("linuxscp_additions", []) + capabilities)
+                   inventory.get("linscp_additions", []) + capabilities)
         check_verification(inventory, entries, errors)
         self.assertEqual(errors, [])
         self.assertGreaterEqual(len(capabilities), 80)

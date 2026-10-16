@@ -6,8 +6,8 @@
  * transport glue in PuttyGlue.cpp reaches it through CurrentSession().
  */
 
-#ifndef LINUXSCP_SESSION_H
-#define LINUXSCP_SESSION_H
+#ifndef LINSCP_SESSION_H
+#define LINSCP_SESSION_H
 
 #include <cstddef>
 #include <map>
@@ -16,7 +16,7 @@
 
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /* True when 'protocol' is served by the native PuTTY SFTP engine rather
  * than by the curl backend of ProtocolClient. All protocol dispatch in
@@ -265,7 +265,7 @@ int SessionDefaultPort(const std::string & protocol, int ftpsMode);
  */
 bool HostKeySha256(const std::string & hostKey, std::string & base64);
 /* Parses 'sftp://[user[:password]@]host[:port]/[path]' (the password may
- * also be given by -password= or LINUXSCP_PASSWORD). */
+ * also be given by -password= or LINSCP_PASSWORD). */
 bool ParseSiteUrl(const std::string & url, SessionOptions & options,
     std::string & error);
 
@@ -398,6 +398,6 @@ private:
 Session * CurrentSession();
 void SetCurrentSession(Session * session);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SESSION_H */
+#endif /* LINSCP_SESSION_H */

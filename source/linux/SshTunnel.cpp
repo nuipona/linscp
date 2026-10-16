@@ -10,7 +10,7 @@
 
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 bool ParseTunnelSpec(const std::string & spec, TunnelType type,
     SshTunnel & tunnel, std::string & error)
@@ -149,4 +149,4 @@ bool ApplyGssapiSetting(const std::string & value, std::string & error)
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp

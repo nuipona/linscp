@@ -32,13 +32,13 @@
  * '*.txt = ascii' becomes true for exactly those files.
  */
 
-#ifndef LINUXSCP_TRANSFERPRESETS_H
-#define LINUXSCP_TRANSFERPRESETS_H
+#ifndef LINSCP_TRANSFERPRESETS_H
+#define LINSCP_TRANSFERPRESETS_H
 
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 struct TransferFlags;
 enum class TransferMode;
@@ -143,6 +143,6 @@ private:
     std::string mPath;
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_TRANSFERPRESETS_H */
+#endif /* LINSCP_TRANSFERPRESETS_H */

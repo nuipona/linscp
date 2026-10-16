@@ -17,7 +17,7 @@
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -1085,7 +1085,7 @@ bool DavPropfindOnce(const SessionOptions & options, const std::string & path,
  * prints that rather than reporting a write that was never protected.
  */
 
-const char * const kDavPropertyNamespace = "urn:linuxscp:properties";
+const char * const kDavPropertyNamespace = "urn:linscp:properties";
 const char * const kDavPropertyPrefix = "lscp";
 
 /* The lock token this session holds for a path, or an empty string: the
@@ -2439,7 +2439,7 @@ bool ProtocolClient::DavLock(const SessionOptions & options,
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
         "<lockinfo xmlns=\"DAV:\"><lockscope><exclusive/></lockscope>"
         "<locktype><write/></locktype>"
-        "<owner><href>linuxscp</href></owner></lockinfo>";
+        "<owner><href>linscp</href></owner></lockinfo>";
     DavResult result;
     if (!DavInvoke(options, "LOCK", remotePath, headers, body, result, error))
     {
@@ -2645,4 +2645,4 @@ std::string DavPropertyUpdateBody(const std::string & name,
         kDavPropertyPrefix + ":" + name + "></D:prop></D:set></D:propertyupdate>";
 }
 
-} // namespace linuxscp
+} // namespace linscp

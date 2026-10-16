@@ -8,7 +8,7 @@
 #include <cstring>
 #include <ctime>
 
-namespace linuxscp {
+namespace linscp {
 
 Console & Console::Instance()
 {
@@ -272,7 +272,7 @@ bool Console::SetActionLogFile(const std::string & path, std::string & error)
     }
     fprintf(mActionLog, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     fprintf(mActionLog, "<log_session client=\"%s\" created=\"%s\">\n",
-        EscapeXml(linuxscp::Texts::VersionLine()).c_str(), Timestamp().c_str());
+        EscapeXml(linscp::Texts::VersionLine()).c_str(), Timestamp().c_str());
     fflush(mActionLog);
     return true;
 }
@@ -387,4 +387,4 @@ void Console::TransferEnd(bool success)
     mTransferSize = 0;
 }
 
-} // namespace linuxscp
+} // namespace linscp

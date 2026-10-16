@@ -23,7 +23,7 @@
 #include "Platform.h"
 #include "Texts.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -203,7 +203,7 @@ std::vector<std::string> ResolveEditorCommand(const std::string & configured,
     std::string command = configured;
     if (command.empty())
     {
-        const char * variables[] = { "LINUXSCP_EDITOR", "VISUAL", "EDITOR" };
+        const char * variables[] = { "LINSCP_EDITOR", "VISUAL", "EDITOR" };
         for (size_t i = 0; i < sizeof(variables) / sizeof(variables[0]); i++)
         {
             const std::string value = EnvironmentVariable(variables[i]);
@@ -230,7 +230,7 @@ std::vector<std::string> ResolveEditorCommand(const std::string & configured,
     }
     if (command.empty())
     {
-        error = "No editor is configured. Set the LINUXSCP_EDITOR, VISUAL or "
+        error = "No editor is configured. Set the LINSCP_EDITOR, VISUAL or "
             "EDITOR variable, use 'option editor <command>', or install one of "
             "the common editors.";
         return std::vector<std::string>();
@@ -248,7 +248,7 @@ std::vector<std::string> ResolveEditorCommand(const std::string & configured,
         if (resolved.empty())
         {
             error = "The editor '" + words[0] + "' was not found. Set the "
-                "LINUXSCP_EDITOR variable or 'option editor <command>' to the "
+                "LINSCP_EDITOR variable or 'option editor <command>' to the "
                 "editor to use.";
             return std::vector<std::string>();
         }
@@ -272,7 +272,7 @@ bool PrepareEditorTempFile(const std::string & remotePath, std::string & path,
         return false;
     }
     char suffix[32];
-    snprintf(suffix, sizeof(suffix), "linuxscp-edit-%ld",
+    snprintf(suffix, sizeof(suffix), "linscp-edit-%ld",
         static_cast<long>(getpid()));
     const std::string directory = root + "/." + suffix;
     std::string createError;
@@ -806,4 +806,4 @@ bool WriteWithEncoding(const std::string & localPath,
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp

@@ -32,8 +32,8 @@
  * rather than being spliced onto bytes nobody can vouch for.
  */
 
-#ifndef LINUXSCP_SCPCLIENT_H
-#define LINUXSCP_SCPCLIENT_H
+#ifndef LINSCP_SCPCLIENT_H
+#define LINSCP_SCPCLIENT_H
 
 #include <string>
 #include <vector>
@@ -42,7 +42,7 @@
 #include "SftpClient.h"
 #include "Session.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /* Set in the 'codeOut' of List when the failure was the connection itself -
  * the host could not be reached, the host key did not match or the
@@ -188,6 +188,6 @@ public:
         std::string & error, unsigned speedKBytesPerSecond = 0);
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SCPCLIENT_H */
+#endif /* LINSCP_SCPCLIENT_H */

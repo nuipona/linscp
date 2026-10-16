@@ -1,4 +1,4 @@
-Source: linuxscp
+Source: linscp
 Section: net
 Priority: optional
 Maintainer: nuipona <nuipona@users.noreply.github.com>
@@ -6,14 +6,14 @@ Build-Depends: dpkg-dev (>= 1.20), g++ | c++-compiler, make
 Standards-Version: 4.6.2
 Rules-Requires-Root: no
 
-Package: linuxscp
+Package: linscp
 Architecture: any
 Depends: ${shlibs:Depends}, python3
 Recommends: curl
 Description: graphical and console file transfer client for Linux
  LinSCP is a native open-source file transfer client for Linux, inspired
- by WinSCP. It provides an interactive command-line client (linuxscp) and
- a dual-pane Commander graphical client (linuxscp-gui) in the browser.
+ by WinSCP. It provides an interactive command-line client (linscp) and
+ a dual-pane Commander graphical client (linscp-gui) in the browser.
  .
  SFTP and SCP are served by the bundled PuTTY core and this client's own
  protocol code - for SCP the remote-shell directory engine and the rcp

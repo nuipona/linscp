@@ -1,12 +1,12 @@
-#ifndef LINUXSCP_S3CLIENT_H
-#define LINUXSCP_S3CLIENT_H
+#ifndef LINSCP_S3CLIENT_H
+#define LINSCP_S3CLIENT_H
 
 #include <string>
 
 #include "Session.h"
 #include "SftpClient.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /*
  * Amazon S3 over HTTPS with AWS Signature Version 4: a real bucket and
@@ -79,6 +79,6 @@ public:
         std::string & error);
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_S3CLIENT_H */
+#endif /* LINSCP_S3CLIENT_H */

@@ -24,7 +24,7 @@
 #include "PathUtil.h"
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -1784,4 +1784,4 @@ bool SyncState::Save(const std::string & path, std::string & error) const
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp

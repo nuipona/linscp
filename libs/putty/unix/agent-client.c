@@ -136,13 +136,13 @@ Socket *agent_connect(Plug *plug)
     if (!path)
         return new_error_socket_fmt(plug, "SSH_AUTH_SOCK not set");
     return sk_new(unix_sock_addr(path), 0, false, false, false, false, plug,
-                  0, 0, NULL); /* LinuxSCP: MPEXT parameters */
+                  0, 0, NULL); /* LinSCP: MPEXT parameters */
 }
 
 agent_pending_query *agent_query(
     strbuf *query, void **out, int *outlen,
     void (*callback)(void *, void *, int), void *callback_ctx,
-    struct callback_set *callback_set) /* LinuxSCP: MPEXT parameter */
+    struct callback_set *callback_set) /* LinSCP: MPEXT parameter */
 {
     const char *name;
     int sock;

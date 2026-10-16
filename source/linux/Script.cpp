@@ -33,7 +33,7 @@
 #include "Platform.h"
 #include "Texts.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -6261,7 +6261,7 @@ std::string MakeTempPath(const char * suffix)
     for (unsigned int attempt = 0; attempt < 64; attempt++)
     {
         char buffer[512];
-        snprintf(buffer, sizeof(buffer), "%s/linuxscp-%ld-%s-%lu",
+        snprintf(buffer, sizeof(buffer), "%s/linscp-%ld-%s-%lu",
             dir.c_str(), static_cast<long>(getpid()), suffix, ++counter);
         const std::string path(buffer);
         FILE * probe = fopen(path.c_str(), "wx");
@@ -7603,7 +7603,7 @@ bool Script::StatRemote(const std::vector<std::string> & args)
  * SFTP subsystem only, so the shell comes from the system ssh client in
  * a terminal window, which is also what makes the command useful in a
  * script file. The terminal program is picked by the platform layer
- * (LINUXSCP_TERMINAL overrides it on POSIX).
+ * (LINSCP_TERMINAL overrides it on POSIX).
  */
 void Script::OpenTerminal(const std::vector<std::string> & args)
 {
@@ -7800,7 +7800,7 @@ bool Script::SetOption(const std::vector<std::string> & args)
         if (name == "editor")
         {
             Console::Instance().Status(std::string("editor = ") +
-                (mEditor.empty() ? std::string("(from LINUXSCP_EDITOR, VISUAL or EDITOR)") : mEditor));
+                (mEditor.empty() ? std::string("(from LINSCP_EDITOR, VISUAL or EDITOR)") : mEditor));
             return true;
         }
         if (name == "editmaxsize")
@@ -8855,4 +8855,4 @@ int Script::RunServer()
     return mErrors != 0 ? 1 : 0;
 }
 
-} // namespace linuxscp
+} // namespace linscp

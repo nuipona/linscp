@@ -1090,8 +1090,8 @@ static size_t ssh_sendbuffer(Backend *be)
     backlog = ssh_stdin_backlog(ssh->cl);
 
     #ifndef FORK_BUILD
-    // This throttles LinuxSCP unnecessarily, as it uses its own throttling mechanism.
-    // This value is used only by LinuxSCP, never directly by PuTTY code.
+    // This throttles LinSCP unnecessarily, as it uses its own throttling mechanism.
+    // This value is used only by LinSCP, never directly by PuTTY code.
     if (ssh->base_layer)
         backlog += ssh_ppl_queued_data_size(ssh->base_layer);
     #endif
@@ -1378,12 +1378,12 @@ const struct ssh_decompressor * get_sccomp(Backend * be)
   return ssh2_bpp_get_sccomp(ssh->bpp);
 }
 
-unsigned int linuxscp_query(Backend * be, int query)
+unsigned int linscp_query(Backend * be, int query)
 {
   Ssh * ssh = container_of(be, Ssh, backend);
-  if ((ssh->base_layer != NULL) && (ssh->base_layer->vt->linuxscp_query != NULL))
+  if ((ssh->base_layer != NULL) && (ssh->base_layer->vt->linscp_query != NULL))
   {
-    return ssh_ppl_linuxscp_query(ssh->base_layer, query);
+    return ssh_ppl_linscp_query(ssh->base_layer, query);
   }
   else
   {

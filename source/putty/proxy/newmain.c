@@ -1,6 +1,6 @@
 #include "putty.h"
 
-// pre_connect_command not supported in LinuxSCP
+// pre_connect_command not supported in LinSCP
 // (needs subprocess_waiter.c - what needs callback injection)
 
 #ifndef FORK_BUILD

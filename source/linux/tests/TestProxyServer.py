@@ -236,7 +236,7 @@ class ProxyServer(threading.Thread):
             if headers.get("proxy-authorization", "") != expected:
                 client.sendall(
                     b"HTTP/1.1 407 Proxy Authentication Required\r\n"
-                    b"Proxy-Authenticate: Basic realm=\"linuxscp-test\"\r\n"
+                    b"Proxy-Authenticate: Basic realm=\"linscp-test\"\r\n"
                     b"Connection: close\r\n"
                     b"Content-Length: 4\r\n\r\n407\n")
                 client.close()

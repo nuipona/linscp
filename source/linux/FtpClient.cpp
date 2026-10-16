@@ -34,7 +34,7 @@
 #include "Platform.h"
 #include "SftpClient.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -1632,4 +1632,4 @@ int FtpClient::SetPermissions(const SessionOptions & options,
     return 0;
 }
 
-} // namespace linuxscp
+} // namespace linscp

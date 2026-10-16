@@ -28,8 +28,8 @@ import os
 PREFIX = "lscp1$"
 PREFIX_BYTES = b"lscp1$"
 TAG_LABEL = b"lscp1"
-ENC_KEY_LABEL = b"LinuxSCP sessions file v1 encryption key"
-MAC_KEY_LABEL = b"LinuxSCP sessions file v1 authentication key"
+ENC_KEY_LABEL = b"LinSCP sessions file v1 encryption key"
+MAC_KEY_LABEL = b"LinSCP sessions file v1 authentication key"
 KEY_BYTES = 32
 NONCE_BYTES = 16
 TAG_BYTES = 32

@@ -17,14 +17,14 @@
  * The functions never print and never touch the session.
  */
 
-#ifndef LINUXSCP_SCRIPTPARAMS_H
-#define LINUXSCP_SCRIPTPARAMS_H
+#ifndef LINSCP_SCRIPTPARAMS_H
+#define LINSCP_SCRIPTPARAMS_H
 
 #include <ctime>
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 /* Result of FindPrefixedName when nothing or several names match. */
 enum
@@ -96,6 +96,6 @@ bool ExpandScriptParameters(const std::string & line,
 bool ExpandScriptParameters(const std::string & line, std::string & expanded,
     std::string & error);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SCRIPTPARAMS_H */
+#endif /* LINSCP_SCRIPTPARAMS_H */

@@ -29,15 +29,15 @@
  * version prefix the other side understands.
  */
 
-#ifndef LINUXSCP_SESSIONSTORE_H
-#define LINUXSCP_SESSIONSTORE_H
+#ifndef LINSCP_SESSIONSTORE_H
+#define LINSCP_SESSIONSTORE_H
 
 #include <string>
 #include <vector>
 
 #include "Session.h"
 
-namespace linuxscp {
+namespace linscp {
 
 struct StoredSession
 {
@@ -186,6 +186,6 @@ private:
     std::string mKeyPath;
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SESSIONSTORE_H */
+#endif /* LINSCP_SESSIONSTORE_H */

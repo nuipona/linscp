@@ -13,13 +13,13 @@
  * this build does not apply.
  */
 
-#ifndef LINUXSCP_SSHTUNNEL_H
-#define LINUXSCP_SSHTUNNEL_H
+#ifndef LINSCP_SSHTUNNEL_H
+#define LINSCP_SSHTUNNEL_H
 
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 /*
  * SSH tunnel specification, as the user would write it on the ssh(1)
@@ -65,6 +65,6 @@ std::string TunnelSshFlags(const SshTunnel & tunnel);
 bool IsGssapiSupported();
 bool ApplyGssapiSetting(const std::string & value, std::string & error);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SSHTUNNEL_H */
+#endif /* LINSCP_SSHTUNNEL_H */

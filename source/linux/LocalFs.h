@@ -3,14 +3,14 @@
  * by local wildcard expansion and by the local end of a transfer.
  */
 
-#ifndef LINUXSCP_LOCALFS_H
-#define LINUXSCP_LOCALFS_H
+#ifndef LINSCP_LOCALFS_H
+#define LINSCP_LOCALFS_H
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 struct LocalFileInfo
 {
@@ -57,6 +57,6 @@ bool SetLocalDirectory(const std::string & path, std::string & error);
 /* Text of the last errno, e.g. 'Permission denied'. */
 std::string LastSystemError();
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_LOCALFS_H */
+#endif /* LINSCP_LOCALFS_H */

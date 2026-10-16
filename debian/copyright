@@ -26,7 +26,7 @@ License: MIT
  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
 
-Files: logo/* debian/linuxscp.png debian/linuxscp.svg source/gui/web/favicon.png
+Files: logo/* debian/linscp.png debian/linscp.svg source/gui/web/favicon.png
  source/gui/web/icon.svg
 Copyright: 2026 LinSCP contributors
 License: LicenseRef-LinSCP-Logo

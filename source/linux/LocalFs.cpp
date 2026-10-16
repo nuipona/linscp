@@ -12,7 +12,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -265,4 +265,4 @@ std::string LastSystemError()
     return text != NULL ? std::string(text) : std::string("Unknown error");
 }
 
-} // namespace linuxscp
+} // namespace linscp

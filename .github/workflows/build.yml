@@ -25,7 +25,7 @@ jobs:
       - name: Script compatibility regressions
         run: |
           set -o pipefail
-          python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp 2>&1 |
+          python3 source/linux/tests/ScriptTest.py source/linux/build/linscp 2>&1 |
             tee "$RUNNER_TEMP/script-tests.log"
           grep '^evidence: ' "$RUNNER_TEMP/script-tests.log" |
             { while IFS= read -r line; do
@@ -39,7 +39,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/live-test-venv"
           "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko botocore pyftpdlib pyOpenSSL
           "$RUNNER_TEMP/live-test-venv/bin/python" \
-            -u source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp 2>&1 |
+            -u source/linux/tests/LiveSftpTest.py source/linux/build/linscp 2>&1 |
             tee "$RUNNER_TEMP/live-tests.log"
           grep -E 'evidence: suite=live-sftp .*ran=[1-9]' \
             "$RUNNER_TEMP/live-tests.log" > /dev/null || {
@@ -56,7 +56,7 @@ jobs:
           # reference-signature test needs to run instead of skipping.
           set -o pipefail
           "$RUNNER_TEMP/live-test-venv/bin/python" \
-            -u source/linux/tests/LiveS3Test.py source/linux/build/linuxscp 2>&1 |
+            -u source/linux/tests/LiveS3Test.py source/linux/build/linscp 2>&1 |
             tee "$RUNNER_TEMP/live-s3-tests.log"
           grep -E 'evidence: suite=live-s3 .*ran=[1-9]' \
             "$RUNNER_TEMP/live-s3-tests.log" > /dev/null || {
@@ -72,7 +72,7 @@ jobs:
           # no venv dependencies at all.
           set -o pipefail
           python3 -u source/linux/tests/LiveDavTest.py \
-            source/linux/build/linuxscp 2>&1 |
+            source/linux/build/linscp 2>&1 |
             tee "$RUNNER_TEMP/live-dav-tests.log"
           grep -E 'evidence: suite=live-dav .*ran=[1-9]' \
             "$RUNNER_TEMP/live-dav-tests.log" > /dev/null || {
@@ -90,15 +90,15 @@ jobs:
           python3 tools/tests/test_parity_inventory.py
       - name: Smoke test
         run: |
-          source/linux/build/linuxscp -version
-          source/linux/build/linuxscp -batch -command="echo ok; exit"
+          source/linux/build/linscp -version
+          source/linux/build/linscp -batch -command="echo ok; exit"
       - name: Smoke test the GUI backend
         run: |
-          python3 -m py_compile source/gui/linuxscp_gui.py
+          python3 -m py_compile source/gui/linscp_gui.py
           gui_log="$RUNNER_TEMP/gui-backend.log"
           rm -f "$gui_log"
-          LINUXSCP_CONFIG_DIR="$RUNNER_TEMP/linuxscp-gui-config" \
-            python3 source/gui/linuxscp_gui.py --port=18080 --print-token > "$gui_log" &
+          LINSCP_CONFIG_DIR="$RUNNER_TEMP/linscp-gui-config" \
+            python3 source/gui/linscp_gui.py --port=18080 --print-token > "$gui_log" &
           gui=$!
           token=""
           for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
@@ -132,8 +132,8 @@ jobs:
           gui_log="$RUNNER_TEMP/gui-launcher.log"
           rm -f "$gui_log"
           cd "$RUNNER_TEMP"
-          LINUXSCP_CONFIG_DIR="$RUNNER_TEMP/linuxscp-launcher-config" \
-            "$GITHUB_WORKSPACE/source/gui/linuxscp-gui" \
+          LINSCP_CONFIG_DIR="$RUNNER_TEMP/linscp-launcher-config" \
+            "$GITHUB_WORKSPACE/source/gui/linscp-gui" \
             --port=18085 --print-token > "$gui_log" &
           gui=$!
           token=""
@@ -180,7 +180,7 @@ jobs:
           fi
           status=0
           "$RUNNER_TEMP/live-test-venv/bin/python" \
-            -u source/linux/tests/LiveScpTest.py source/linux/build/linuxscp 2>&1 |
+            -u source/linux/tests/LiveScpTest.py source/linux/build/linscp 2>&1 |
             tee "$RUNNER_TEMP/live-scp-tests.log" || status=$?
           grep '^evidence: ' "$RUNNER_TEMP/live-scp-tests.log" |
             { while IFS= read -r line; do
@@ -199,7 +199,7 @@ jobs:
           set -o pipefail
           status=0
           "$RUNNER_TEMP/live-test-venv/bin/python" \
-            -u source/linux/tests/LiveCurlTest.py source/linux/build/linuxscp 2>&1 |
+            -u source/linux/tests/LiveCurlTest.py source/linux/build/linscp 2>&1 |
             tee "$RUNNER_TEMP/live-curl-tests.log" || status=$?
           grep '^evidence: ' "$RUNNER_TEMP/live-curl-tests.log" |
             { while IFS= read -r line; do
@@ -243,15 +243,15 @@ jobs:
         run: |
           prefix="$RUNNER_TEMP/linscp-relocated"
           cmake --install build --prefix "$prefix"
-          "$prefix/bin/linuxscp" -version
-          "$prefix/bin/linuxscp-gui" --help > "$RUNNER_TEMP/linscp-gui-help.txt"
-          LIN_PREFIX="$prefix" PYTHONPATH="$prefix/share/linuxscp/gui" python3 - <<'PY'
+          "$prefix/bin/linscp" -version
+          "$prefix/bin/linscp-gui" --help > "$RUNNER_TEMP/linscp-gui-help.txt"
+          LIN_PREFIX="$prefix" PYTHONPATH="$prefix/share/linscp/gui" python3 - <<'PY'
           import os
           from pathlib import Path
-          import linuxscp_gui as gui
+          import linscp_gui as gui
           prefix = Path(os.environ['LIN_PREFIX'])
-          assert gui.find_linuxscp_binary() == str(prefix / 'bin/linuxscp')
-          assert (prefix / 'share/linuxscp/gui/web/index.html').is_file()
+          assert gui.find_linscp_binary() == str(prefix / 'bin/linscp')
+          assert (prefix / 'share/linscp/gui/web/index.html').is_file()
           PY
 
   debian-package:
@@ -282,7 +282,7 @@ jobs:
       - name: Check the package contents
         run: |
           set -o pipefail
-          deb=$(ls ../linuxscp_*_*.deb)
+          deb=$(ls ../linscp_*_*.deb)
           echo "Built $deb"
           dpkg-deb --contents "$deb" | tee "$RUNNER_TEMP/contents-raw.txt" |
             awk '{print $NF}' | sed 's|^\./||' | sort > "$RUNNER_TEMP/contents.txt"
@@ -292,23 +292,23 @@ jobs:
           # are listed by name because a package that ships only one of them
           # installs a launcher that cannot start, which is what the previous
           # packaging did.
-          for path in usr/bin/linuxscp usr/bin/linuxscp-gui \
-                      usr/share/linuxscp/gui/linuxscp_gui.py \
-                      usr/share/linuxscp/gui/linscp_crypto.py \
-                      usr/share/linuxscp/gui/web/index.html \
-                      usr/share/applications/linuxscp.desktop \
-                      usr/share/pixmaps/linuxscp.png \
-                      usr/share/icons/hicolor/scalable/apps/linuxscp.svg \
-                      usr/share/man/man1/linuxscp.1.gz; do
+          for path in usr/bin/linscp usr/bin/linscp-gui \
+                      usr/share/linscp/gui/linscp_gui.py \
+                      usr/share/linscp/gui/linscp_crypto.py \
+                      usr/share/linscp/gui/web/index.html \
+                      usr/share/applications/linscp.desktop \
+                      usr/share/pixmaps/linscp.png \
+                      usr/share/icons/hicolor/scalable/apps/linscp.svg \
+                      usr/share/man/man1/linscp.1.gz; do
             grep -qx "$path" "$RUNNER_TEMP/contents.txt" ||
               { echo "::error::$path is missing from the package"; exit 1; }
           done
       - name: Install and smoke test it
         run: |
-          sudo dpkg -i ../linuxscp_*_*.deb
-          linuxscp -version
-          linuxscp -batch -command="echo ok; exit"
-          test -x /usr/bin/linuxscp-gui
+          sudo dpkg -i ../linscp_*_*.deb
+          linscp -version
+          linscp -batch -command="echo ok; exit"
+          test -x /usr/bin/linscp-gui
       - name: Start the installed graphical client
         run: |
           # The launcher is the part a broken install hides: it has to find
@@ -316,8 +316,8 @@ jobs:
           # API it opens has to keep its token and Host checks.
           gui_log="$RUNNER_TEMP/installed-gui.log"
           rm -f "$gui_log"
-          LINUXSCP_CONFIG_DIR="$RUNNER_TEMP/installed-gui-config" \
-            linuxscp-gui --port=18082 --print-token > "$gui_log" &
+          LINSCP_CONFIG_DIR="$RUNNER_TEMP/installed-gui-config" \
+            linscp-gui --port=18082 --print-token > "$gui_log" &
           gui=$!
           token=""
           for attempt in $(seq 1 15); do
@@ -331,7 +331,7 @@ jobs:
             echo "::error::the installed GUI did not print an API token"
             exit 1
           fi
-          grep -q 'Serving web client from: /usr/share/linuxscp/gui' "$gui_log" ||
+          grep -q 'Serving web client from: /usr/share/linscp/gui' "$gui_log" ||
             { cat "$gui_log"; kill "$gui"
               echo "::error::the installed GUI is not serving the packaged web client"
               exit 1; }

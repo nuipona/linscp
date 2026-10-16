@@ -77,7 +77,7 @@ void ReportFailure(const char * file, int line, const std::string & what)
         }                                                                     \
     } while (false)
 
-using namespace linuxscp;
+using namespace linscp;
 
 void SetEnvVar(const char * name, const char * value)
 {
@@ -102,7 +102,7 @@ std::string MakeTempDirectory()
     for (int attempt = 0; attempt < 100; attempt++)
     {
         std::filesystem::path candidate = base /
-            ("linuxscp-unittest-" + std::to_string(attempt) + "-" +
+            ("linscp-unittest-" + std::to_string(attempt) + "-" +
              std::to_string(static_cast<unsigned long>(time(NULL))));
         if (std::filesystem::create_directory(candidate, ec))
         {
@@ -243,7 +243,7 @@ void TestMasks()
     CHECK_FALSE(MatchesMask("a?c", "abbc"));
     CHECK_TRUE(MatchesMask("*", "anything"));
     CHECK_TRUE(MatchesMask("*", ""));
-    CHECK_TRUE(MatchesMask("*.tar.gz", "linuxscp-1.0.tar.gz"));
+    CHECK_TRUE(MatchesMask("*.tar.gz", "linscp-1.0.tar.gz"));
     CHECK_TRUE(MatchesMask("a*b*c", "axxbyyc"));
     CHECK_FALSE(MatchesMask("a*b*c", "axxbyy"));
     /* A mask without wildcards matches exactly one name. */
@@ -302,7 +302,7 @@ void TestPlatformServices()
 
     /* A missing program is a start failure, not a crash. */
     std::vector<std::string> missing;
-    missing.push_back("linuxscp-no-such-program-xyz");
+    missing.push_back("linscp-no-such-program-xyz");
     CHECK_TRUE(RunCapture(missing, out, err) == -1 || !err.empty() || out.empty());
 
     CHECK_TRUE(!HomeDirectory().empty() || !ConfigDirectory().empty());
@@ -1483,10 +1483,10 @@ void TestSyncStateFile()
     {
         return;
     }
-    const char * oldConfig = getenv("LINUXSCP_CONFIG_DIR");
+    const char * oldConfig = getenv("LINSCP_CONFIG_DIR");
     const bool hadConfig = oldConfig != NULL;
     const std::string savedConfig = hadConfig ? oldConfig : "";
-    SetEnvVar("LINUXSCP_CONFIG_DIR", temporary.c_str());
+    SetEnvVar("LINSCP_CONFIG_DIR", temporary.c_str());
 
     const std::string key = SyncState::MakeKey("host", "/local", "/remote");
     CHECK_FALSE(key.empty());
@@ -1532,7 +1532,7 @@ void TestSyncStateFile()
     CHECK_TRUE(missingState.Load(path + ".does-not-exist", error));
     CHECK_TRUE(missingState.Empty());
 
-    SetEnvVar("LINUXSCP_CONFIG_DIR", hadConfig ? savedConfig.c_str() : NULL);
+    SetEnvVar("LINSCP_CONFIG_DIR", hadConfig ? savedConfig.c_str() : NULL);
     RemoveTreeQuiet(temporary);
 }
 
@@ -1550,7 +1550,7 @@ void TestSyncStateFile()
  */
 void TestS3SigV4()
 {
-    using namespace linuxscp::s3sig;
+    using namespace linscp::s3sig;
 
     const std::string secret = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
     CHECK_EQ(HexEncode(SigningKey(secret, "20150830", "us-east-1", "iam")),
@@ -1912,12 +1912,12 @@ void TestSessionStore()
         std::string plain;
         std::string error;
         const std::string kat1 =
-            "lscp1$AAECAwQFBgcICQoLDA0ODzNWSp01TpOx8x81IxUhAo51bcOMpoJg2g83"
-            "SWf7byn+amPfGSNCsg==";
+            "lscp1$AAECAwQFBgcICQoLDA0OD3Wb1s8nH47WZ4wX/c56mwbuHDPKIXLzlIBI"
+            "SVg1Sd1Trz51POogBQ==";
         const std::string kat2 =
-            "lscp1$AAECAwQFBgcICQoLDA0ODyh/TZpwV840DnvHA0xT2r+AMLWGHq75A+y"
-            "WlakWbPb1Vamz4fx1qXAujDW+jENVNco73r8LQnf9okOrUaR9J3/jO9TylMxS"
-            "ZCsE0g==";
+            "lscp1$AAECAwQFBgcICQoLDA0OD26y0chiBtPlC5uzMB+K5Xl4mcJpKa7hN7n"
+            "X1ECfqzXFe61r6rb6CDTNrNqVN35FAiSoOPdDUVxNwgMXI+d71V0fqmCVb/6g"
+            "CGAd7A==";
         CHECK_TRUE(SessionStore::DecryptPassword(kat1, key, plain, error));
         CHECK_EQ(plain, "kitten2");
         CHECK_TRUE(SessionStore::DecryptPassword(kat2, key, plain, error));
@@ -2260,7 +2260,7 @@ void TestEditorHelpers()
     std::string error;
     /* A configured editor that does not exist is an error, not a
      * surprise later on. */
-    CHECK_TRUE(ResolveEditorCommand("linuxscp-no-such-editor-xyz", error).empty());
+    CHECK_TRUE(ResolveEditorCommand("linscp-no-such-editor-xyz", error).empty());
     CHECK_FALSE(error.empty());
     (void)text;
     (void)binary;
@@ -2280,17 +2280,17 @@ void TestEditorHelpers()
     }
 
     /* The environment decides when nothing is configured. */
-    const char * oldEditor = getenv("LINUXSCP_EDITOR");
+    const char * oldEditor = getenv("LINSCP_EDITOR");
     const bool hadEditor = oldEditor != NULL;
     const std::string savedEditor = hadEditor ? oldEditor : "";
-    SetEnvVar("LINUXSCP_EDITOR", "linuxscp-no-such-editor-xyz");
+    SetEnvVar("LINSCP_EDITOR", "linscp-no-such-editor-xyz");
     CHECK_TRUE(ResolveEditorCommand("", error).empty());
     if (!program.empty())
     {
-        SetEnvVar("LINUXSCP_EDITOR", program.c_str());
+        SetEnvVar("LINSCP_EDITOR", program.c_str());
         CHECK_TRUE(!ResolveEditorCommand("", error).empty());
     }
-    SetEnvVar("LINUXSCP_EDITOR", hadEditor ? savedEditor.c_str() : NULL);
+    SetEnvVar("LINSCP_EDITOR", hadEditor ? savedEditor.c_str() : NULL);
 
     /* The temporary copy lives in a private directory. */
     std::string temporary;
@@ -2497,10 +2497,10 @@ void TestNewScriptCommands()
     {
         return;
     }
-    const char * oldConfig = getenv("LINUXSCP_CONFIG_DIR");
+    const char * oldConfig = getenv("LINSCP_CONFIG_DIR");
     const bool hadConfig = oldConfig != NULL;
     const std::string savedConfig = hadConfig ? oldConfig : "";
-    SetEnvVar("LINUXSCP_CONFIG_DIR", temporary.c_str());
+    SetEnvVar("LINSCP_CONFIG_DIR", temporary.c_str());
     Console::Instance().SetBatchMode(false);
 
     /* The store is reachable through the script engine, and an empty one
@@ -2558,7 +2558,7 @@ void TestNewScriptCommands()
     CHECK_TRUE(script.ExecuteLine("synchronize local -unknown"));
     CHECK_TRUE(script.ErrorCount() == 11);
 
-    SetEnvVar("LINUXSCP_CONFIG_DIR", hadConfig ? savedConfig.c_str() : NULL);
+    SetEnvVar("LINSCP_CONFIG_DIR", hadConfig ? savedConfig.c_str() : NULL);
     RemoveTreeQuiet(temporary);
 }
 
@@ -2734,14 +2734,14 @@ void TestScriptParameterExpansion()
     parameters.pop_back();
 
     /* an unset variable is left alone, a set one is substituted */
-    SetEnvVar("LINUXSCP_TEST_VARIABLE", "a value");
-    CHECK_TRUE(ExpandScriptParameters("echo %LINUXSCP_TEST_VARIABLE%", parameters,
+    SetEnvVar("LINSCP_TEST_VARIABLE", "a value");
+    CHECK_TRUE(ExpandScriptParameters("echo %LINSCP_TEST_VARIABLE%", parameters,
         expanded, error));
     CHECK_EQ(expanded, std::string("echo a value"));
-    SetEnvVar("LINUXSCP_TEST_VARIABLE", NULL);
-    CHECK_TRUE(ExpandScriptParameters("echo %LINUXSCP_TEST_VARIABLE%", parameters,
+    SetEnvVar("LINSCP_TEST_VARIABLE", NULL);
+    CHECK_TRUE(ExpandScriptParameters("echo %LINSCP_TEST_VARIABLE%", parameters,
         expanded, error));
-    CHECK_EQ(expanded, std::string("echo %LINUXSCP_TEST_VARIABLE%"));
+    CHECK_EQ(expanded, std::string("echo %LINSCP_TEST_VARIABLE%"));
 
     /* %TIMESTAMP% is yyyymmddhhnnss unless the variable is set */
     CHECK_TRUE(ExpandScriptParameters("echo %TIMESTAMP%", parameters, expanded, error));
@@ -3084,7 +3084,7 @@ void TestDavLockAndPropertyXml()
     /* The request bodies carry the property in this client's namespace,
      * so a protected DAV: property is never the target. */
     CHECK_TRUE(DavPropertyPropfindBody("author").find(
-        "xmlns:lscp=\"urn:linuxscp:properties\"") != std::string::npos);
+        "xmlns:lscp=\"urn:linscp:properties\"") != std::string::npos);
     CHECK_TRUE(DavPropertyPropfindBody("author").find(
         "<lscp:author/>") != std::string::npos);
     CHECK_TRUE(DavPropertyUpdateBody("author", "Ada").find(
@@ -3100,7 +3100,7 @@ void TestDavLockAndPropertyXml()
     std::string value;
     bool found = true;
     CHECK_TRUE(DavPropertyValueFromXml(
-        "<d:multistatus xmlns:d=\"DAV:\" xmlns:lscp=\"urn:linuxscp:properties\">"
+        "<d:multistatus xmlns:d=\"DAV:\" xmlns:lscp=\"urn:linscp:properties\">"
         "<d:response><d:propstat><d:prop><lscp:author>Ada</lscp:author>"
         "</d:prop></d:propstat></d:response></d:multistatus>", "author", value,
         found));
@@ -3117,7 +3117,7 @@ void TestDavLockAndPropertyXml()
     /* A property set to the empty string is set: the element is there. */
     found = false;
     CHECK_TRUE(DavPropertyValueFromXml(
-        "<lscp:author xmlns:lscp=\"urn:linuxscp:properties\"></lscp:author>",
+        "<lscp:author xmlns:lscp=\"urn:linscp:properties\"></lscp:author>",
         "author", value, found));
     CHECK_TRUE(found);
     CHECK_EQ(value, std::string(""));
@@ -3125,10 +3125,10 @@ void TestDavLockAndPropertyXml()
 
 void TestLocalization()
 {
-    const char * oldValue = std::getenv("LINUXSCP_LANGUAGE");
+    const char * oldValue = std::getenv("LINSCP_LANGUAGE");
     const bool hadValue = oldValue != NULL;
     const std::string saved = oldValue ? oldValue : "";
-    setenv("LINUXSCP_LANGUAGE", "es_MX.UTF-8", 1);
+    setenv("LINSCP_LANGUAGE", "es_MX.UTF-8", 1);
     CHECK_EQ(Texts::DirectoryRead(0), std::string("0 entradas"));
     CHECK_EQ(Texts::DirectoryRead(1), std::string("1 entrada"));
     CHECK_EQ(Texts::DirectoryRead(2), std::string("2 entradas"));
@@ -3150,12 +3150,12 @@ void TestLocalization()
     CHECK_EQ(Texts::Translate("Overwrite remote file '{path}'?", {{"path", "{path}%n"}}),
         std::string("¿Sobrescribir el archivo remoto '{path}%n'?"));
     CHECK_EQ(Texts::Translate(" [y/N]: "), std::string(" [s/N]: "));
-    setenv("LINUXSCP_LANGUAGE", "unsupported", 1);
+    setenv("LINSCP_LANGUAGE", "unsupported", 1);
     CHECK_EQ(Texts::ConnectionClosed(), std::string("Connection has been unexpectedly closed."));
-    setenv("LINUXSCP_LANGUAGE", "C", 1);
+    setenv("LINSCP_LANGUAGE", "C", 1);
     CHECK_EQ(Texts::DirectoryRead(2), std::string("2 entries"));
-    if (hadValue) setenv("LINUXSCP_LANGUAGE", saved.c_str(), 1);
-    else unsetenv("LINUXSCP_LANGUAGE");
+    if (hadValue) setenv("LINSCP_LANGUAGE", saved.c_str(), 1);
+    else unsetenv("LINSCP_LANGUAGE");
 }
 
 void TestNonUnixListingFormats()

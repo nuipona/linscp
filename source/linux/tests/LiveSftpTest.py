@@ -82,7 +82,7 @@ class LiveSftpTests(unittest.TestCase):
             raise unittest.SkipTest(
                 "paramiko is not installed; the live SFTP tests are skipped. "
                 "Install it with 'pip install paramiko' to run them.")
-        cls.workdir = tempfile.TemporaryDirectory(prefix="linuxscp-live-")
+        cls.workdir = tempfile.TemporaryDirectory(prefix="linscp-live-")
         cls.root = pathlib.Path(cls.workdir.name) / "jail"
         cls.root.mkdir()
         cls.local = pathlib.Path(cls.workdir.name) / "local"
@@ -208,7 +208,7 @@ class LiveSftpTests(unittest.TestCase):
         argv += list(extra_args)
         argv.append("-command=open sftp://%s:%s@127.0.0.1:%d/ %s ; %s" %
                     (USER, PASSWORD, self.port, " ".join(open_args), commands))
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env)
 
@@ -218,7 +218,7 @@ class LiveSftpTests(unittest.TestCase):
         argv += list(extra_args)
         argv.append("-command=open sftp://%s:%s@127.0.0.1:%d/ ; %s" %
                     (USER, PASSWORD, self.port, commands))
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.Popen(argv, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, env=env)
 
@@ -334,7 +334,7 @@ class LiveSftpTests(unittest.TestCase):
         data = "Contenido UTF-8: áéíóú\n".encode("utf-8")
         (self.root / name).write_bytes(data)
         target = self.local / name
-        with mock.patch.dict(os.environ, {"LINUXSCP_LANGUAGE": "es"}):
+        with mock.patch.dict(os.environ, {"LINSCP_LANGUAGE": "es"}):
             result = self.run_script('get "%s" "%s"' % (name, target))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertEqual(target.read_bytes(), data)
@@ -352,7 +352,7 @@ class LiveSftpTests(unittest.TestCase):
                 "-command=open sftp://%s:not-the-password@127.0.0.1:%d/" %
                 (USER, self.port)]
         result = subprocess.run(argv, capture_output=True, text=True, timeout=60,
-                                env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+                                env=dict(os.environ, LINSCP_CONFIG_DIR=str(self.config)))
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("Cannot open session", result.stderr)
         self.assertNotIn("Connected", result.stdout)
@@ -579,7 +579,7 @@ class LiveSftpTests(unittest.TestCase):
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout,
                               env=dict(os.environ,
-                                       LINUXSCP_CONFIG_DIR=str(self.config)))
+                                       LINSCP_CONFIG_DIR=str(self.config)))
 
     def gui_crypto(self):
         """The graphical client's own reader for sessions.ini."""
@@ -702,16 +702,16 @@ class LiveSftpTests(unittest.TestCase):
 
             # The GUI's own session reader (the one the site list uses)
             # reports it as usable, not locked.
-            import linuxscp_gui
-            old = os.environ.get("LINUXSCP_CONFIG_DIR")
-            os.environ["LINUXSCP_CONFIG_DIR"] = str(self.config)
+            import linscp_gui
+            old = os.environ.get("LINSCP_CONFIG_DIR")
+            os.environ["LINSCP_CONFIG_DIR"] = str(self.config)
             try:
-                sessions = linuxscp_gui.read_stored_sessions()
+                sessions = linscp_gui.read_stored_sessions()
             finally:
                 if old is None:
-                    os.environ.pop("LINUXSCP_CONFIG_DIR", None)
+                    os.environ.pop("LINSCP_CONFIG_DIR", None)
                 else:
-                    os.environ["LINUXSCP_CONFIG_DIR"] = old
+                    os.environ["LINSCP_CONFIG_DIR"] = old
             match = [s for s in sessions if s["name"] == "katsite"]
             self.assertEqual(len(match), 1, sessions)
             self.assertEqual(match[0]["password"], PASSWORD)
@@ -927,7 +927,7 @@ class LiveSftpTests(unittest.TestCase):
                            "ProxyHost=127.0.0.1 ProxyPort=%d ProxyLocalhost=1"
                  % (self.port, USER, PASSWORD, proxy_port)],
                 capture_output=True, text=True, timeout=60,
-                env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+                env=dict(os.environ, LINSCP_CONFIG_DIR=str(self.config)))
             self.assertEqual(save.returncode, 0, save.stdout + save.stderr)
             text = store.read_text()
             self.assertIn("proxy_method=SOCKS5", text)
@@ -937,7 +937,7 @@ class LiveSftpTests(unittest.TestCase):
             result = subprocess.run(
                 [BINARY, "-batch", "-command=open proxied ; pwd ; exit"],
                 capture_output=True, text=True, timeout=60,
-                env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+                env=dict(os.environ, LINSCP_CONFIG_DIR=str(self.config)))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertTrue(proxy_lines.contains(
                 lambda line: line == "CONNECT 127.0.0.1:%d" % self.port),
@@ -1053,7 +1053,7 @@ class LiveSftpTests(unittest.TestCase):
         self.assertIn("ssh-ed25519", auth_keys)
 
         # Connect using the encrypted key + -passphrase= (no password in URL).
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         env.pop("SSH_AUTH_SOCK", None)
         good_key = subprocess.run(
             [BINARY, "-batch", "-hostkey=*",

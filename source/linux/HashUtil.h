@@ -4,8 +4,8 @@
  * reason as SftpClient.c: the core headers are C.
  */
 
-#ifndef LINUXSCP_HASHUTIL_H
-#define LINUXSCP_HASHUTIL_H
+#ifndef LINSCP_HASHUTIL_H
+#define LINSCP_HASHUTIL_H
 
 #include <stddef.h>
 
@@ -39,4 +39,4 @@ int lscp_sha256(const void * data, size_t dataLen,
 } /* extern "C" */
 #endif
 
-#endif /* LINUXSCP_HASHUTIL_H */
+#endif /* LINSCP_HASHUTIL_H */

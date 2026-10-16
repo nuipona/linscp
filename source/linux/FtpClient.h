@@ -21,8 +21,8 @@
  * (code and text) instead of hiding it.
  */
 
-#ifndef LINUXSCP_FTPCLIENT_H
-#define LINUXSCP_FTPCLIENT_H
+#ifndef LINSCP_FTPCLIENT_H
+#define LINSCP_FTPCLIENT_H
 
 #include <string>
 #include <vector>
@@ -31,7 +31,7 @@
 #include "SftpClient.h"
 #include "Session.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /* Set in the 'codeOut' of List when the failure was at the transport
  * level - the host could not be reached, the connection broke, or the
@@ -69,6 +69,6 @@ public:
         const std::string & remotePath, int permissions, std::string & error);
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_FTPCLIENT_H */
+#endif /* LINSCP_FTPCLIENT_H */

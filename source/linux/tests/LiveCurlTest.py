@@ -226,7 +226,7 @@ class LiveCurlTests(unittest.TestCase):
         args.append("-command=" + self.open_and_run(url, commands, rawsettings))
         return subprocess.run(
             args, cwd=self.local, capture_output=True, text=True, timeout=90,
-            env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+            env=dict(os.environ, LINSCP_CONFIG_DIR=str(self.config)))
 
     def open_and_run(self, url, commands, rawsettings=()):
         settings = ""
@@ -241,7 +241,7 @@ class LiveCurlTests(unittest.TestCase):
         args.append("-command=" + self.open_and_run(url, commands, rawsettings))
         return subprocess.run(
             args, cwd=self.local, capture_output=True, text=True, timeout=90,
-            env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
+            env=dict(os.environ, LINSCP_CONFIG_DIR=str(self.config)))
 
     def test_ftp_authenticated_download_and_upload(self):
         port = self.start_ftp()
@@ -477,7 +477,7 @@ class LiveCurlTests(unittest.TestCase):
             "-command=open ftp://test:test@127.0.0.1:%d/ ; "
             "get -resume -speed=128 /progress.bin %s ; exit" % (port, dest)
         ]
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         proc = subprocess.Popen(
             argv, stdin=slave, stdout=slave, stderr=slave,
             cwd=str(self.local), env=env, close_fds=True)

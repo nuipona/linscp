@@ -1,11 +1,11 @@
-#ifndef LINUXSCP_S3SIGV4_H
-#define LINUXSCP_S3SIGV4_H
+#ifndef LINSCP_S3SIGV4_H
+#define LINSCP_S3SIGV4_H
 
 #include <string>
 #include <utility>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 /*
  * AWS Signature Version 4, the signing scheme every Amazon S3 request
@@ -107,6 +107,6 @@ SignedRequest Sign(const std::string & method, const std::string & uri,
     const std::string & secretAccessKey);
 
 } // namespace s3sig
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_S3SIGV4_H */
+#endif /* LINSCP_S3SIGV4_H */

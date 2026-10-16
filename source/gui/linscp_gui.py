@@ -6,7 +6,7 @@ backed by the LinSCP protocol engine.
 
 Architecture
 ------------
-* One *persistent core process* per tab (``linuxscp -server``). It holds
+* One *persistent core process* per tab (``linscp -server``). It holds
   the SSH connection, so browsing, renaming and editing do not log in
   again for every operation.
 * Transfers, synchronizations and searches run as *tasks* in their own
@@ -78,8 +78,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
 if not os.path.isdir(WEB_DIR):
     # The installed locations: the package puts this module and the web
-    # client under /usr/share/linuxscp/gui.
-    for candidate in ["/usr/share/linuxscp/gui/web", "/usr/share/linuxscp/gui"]:
+    # client under /usr/share/linscp/gui.
+    for candidate in ["/usr/share/linscp/gui/web", "/usr/share/linscp/gui"]:
         if os.path.isdir(candidate):
             WEB_DIR = candidate
             break
@@ -206,8 +206,8 @@ def _default_user():
         return "user"
 
 
-def find_linuxscp_binary():
-    name = "linuxscp"
+def find_linscp_binary():
+    name = "linscp"
     candidates = [
         # Next to the GUI script, then the usual build trees, then the
         # installed locations.
@@ -216,20 +216,20 @@ def find_linuxscp_binary():
         os.path.join(BASE_DIR, "..", "..", "source", "linux", "build", name),
         os.path.join(BASE_DIR, "..", "..", "build", name),
         # CMake installs into any prefix, not just /usr. With the module at
-        # PREFIX/share/linuxscp/gui, the executable is PREFIX/bin/linuxscp.
+        # PREFIX/share/linscp/gui, the executable is PREFIX/bin/linscp.
         os.path.join(BASE_DIR, "..", "..", "..", "bin", name),
     ]
     found = shutil.which(name)
     if found:
         candidates.append(found)
-    candidates.extend(["/usr/bin/linuxscp", "/usr/local/bin/linuxscp"])
+    candidates.extend(["/usr/bin/linscp", "/usr/local/bin/linscp"])
     for c in candidates:
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return os.path.abspath(c)
     return name
 
 
-LINUXSCP_BIN = find_linuxscp_binary()
+LINSCP_BIN = find_linscp_binary()
 
 STATE_LOCK = threading.RLock()
 STATE = {
@@ -259,11 +259,11 @@ def add_log(message, level="info"):
 
 def session_store_path():
     """The sessions.ini the console client and this server share."""
-    override = os.environ.get("LINUXSCP_CONFIG_DIR")
+    override = os.environ.get("LINSCP_CONFIG_DIR")
     if override:
         return os.path.join(override, "sessions.ini")
     root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
-    return os.path.join(root, "LinuxSCP", "sessions.ini")
+    return os.path.join(root, "LinSCP", "sessions.ini")
 
 
 def _unescape(text):
@@ -493,7 +493,7 @@ def session_url(session, path=None):
 
 def core_command_line(session):
     """The arguments every core process of this session needs."""
-    cmd = [find_linuxscp_binary(), "-batch=on"]
+    cmd = [find_linscp_binary(), "-batch=on"]
     hostkey = session.get("hostkey") or "*"
     cmd.append("-hostkey=" + hostkey)
     if session.get("keyfile"):
@@ -513,7 +513,7 @@ def ui_language(environment=None):
     """Messages only: never call setlocale or change protocol number formats."""
     environment = os.environ if environment is None else environment
     value = next((environment.get(key) for key in
-                  ("LINUXSCP_LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG")
+                  ("LINSCP_LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG")
                   if environment.get(key)), "en")
     base = re.split(r"[-_.@]", value.lower())[0]
     return "es" if base == "es" else "en"
@@ -522,7 +522,7 @@ def ui_language(environment=None):
 def popen_kwargs():
     # These processes speak an internal machine protocol. Browser messages
     # are localized separately; changing these diagnostics breaks parsers.
-    environment = dict(os.environ, LINUXSCP_LANGUAGE="en")
+    environment = dict(os.environ, LINSCP_LANGUAGE="en")
     kwargs = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -535,10 +535,10 @@ def popen_kwargs():
     return kwargs
 
 
-def run_linuxscp(command_script, session=None, timeout=300):
+def run_linscp(command_script, session=None, timeout=300):
     """Run one script in a short-lived core process. Returns (code, out, err)."""
     session = session or new_session()
-    bin_path = find_linuxscp_binary()
+    bin_path = find_linscp_binary()
     cmd = core_command_line(session)
     cmd.extend(["-literal", "-command=" + "option confirm off ; " + command_script])
     add_log("Executing: " + command_script, "cmd")
@@ -546,7 +546,7 @@ def run_linuxscp(command_script, session=None, timeout=300):
         proc = subprocess.Popen(cmd, **popen_kwargs())
     except OSError as exc:
         message = ("Cannot start the LinSCP core binary '%s': %s. "
-                   "Build it first (make -C source/linux) or put linuxscp "
+                   "Build it first (make -C source/linux) or put linscp "
                    "on PATH." % (bin_path, exc))
         add_log(message, "error")
         return 1, "", message
@@ -594,7 +594,7 @@ class CoreSession(object):
         with self.lock:
             if self.proc is not None and self.proc.poll() is None:
                 return True, ""
-            cmd = [find_linuxscp_binary(), "-server", "-batch=on"]
+            cmd = [find_linscp_binary(), "-server", "-batch=on"]
             hostkey = (self.session.get("hostkey") or "").strip()
             if hostkey:
                 cmd.append("-hostkey=" + hostkey)
@@ -1027,7 +1027,7 @@ class TaskManager(object):
                 return "The transfer completed, but the remote source changed; it was kept."
             command = "open %s ; rm %s" % (
                 session_url(task.session), quote_remote(path))
-            code, stdout, stderr = run_linuxscp(command, task.session, timeout=300)
+            code, stdout, stderr = run_linscp(command, task.session, timeout=300)
             if code != 0:
                 return "The transfer completed, but the remote source could not be removed: %s" % (
                     stderr.strip() or stdout.strip() or "remove failed")
@@ -1461,7 +1461,7 @@ def save_stored_session(name, session, pin_hostkey=False):
     # is not in 'session' and stays as it is in the file.
     if session.get("password"):
         command += ' -password="%s"' % str(session["password"]).replace('"', "")
-    code, stdout, stderr = run_linuxscp(command, session)
+    code, stdout, stderr = run_linscp(command, session)
     if code == 0:
         add_log("Saved session '%s'" % name, "success")
         return True, ""
@@ -1470,7 +1470,7 @@ def save_stored_session(name, session, pin_hostkey=False):
     return False, message
 
 
-class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
+class LinScpGuiHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=WEB_DIR, **kwargs)
 
@@ -1635,7 +1635,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 "session": tab.session if tab else new_session(),
                 "local_dir": tab.local_dir if tab else os.path.expanduser("~"),
                 "remote_dir": tab.remote_dir if tab else "/",
-                "binary": LINUXSCP_BIN,
+                "binary": LINSCP_BIN,
                 "tabs": tabs,
                 "active_tab": active,
                 "paused": STATE["paused"],
@@ -2035,7 +2035,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Not connected"}, status=400)
                 return
             add_log("Opening a terminal on the server", "info")
-            code, stdout, stderr = run_linuxscp(
+            code, stdout, stderr = run_linscp(
                 "open %s ; terminal" % session_url(tab.session), tab.session)
             if code == 0:
                 add_log("Terminal opened", "success")
@@ -2069,7 +2069,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                                status=400)
                 return
             rm_cmd = ("rmsession -folder %s" if is_folder else "rmsession %s") % quote_remote(name)
-            code, stdout, stderr = run_linuxscp(rm_cmd)
+            code, stdout, stderr = run_linscp(rm_cmd)
             if code == 0:
                 add_log("Removed session %s'%s'" % ("folder " if is_folder else "", name), "success")
                 self.send_json({"success": True, "sessions": read_stored_sessions()})
@@ -2457,7 +2457,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 recursive=body.get("recursive", True),
                 preview=True,
                 conflict=body.get("conflict") or "skip")
-            code, stdout, stderr = run_linuxscp(
+            code, stdout, stderr = run_linscp(
                 "open %s ; %s" % (session_url(tab.session, tab.remote_dir), command),
                 tab.session)
             if code != 0:
@@ -2542,7 +2542,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                                 "stdout": "\n".join(lines),
                                 "stderr": "\n".join(errors)})
                 return
-            code, stdout, stderr = run_linuxscp(cmd_text)
+            code, stdout, stderr = run_linscp(cmd_text)
             self.send_json({"success": code == 0, "exit_code": code,
                             "stdout": stdout, "stderr": stderr})
             return
@@ -2589,7 +2589,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                         continue
                     safe_fn = "'" + fn.replace("'", "'\\''") + "'"
                     actual_cmd = cmd["command"].replace("{file}", safe_fn)
-                    code, stdout, stderr = run_linuxscp(actual_cmd)
+                    code, stdout, stderr = run_linscp(actual_cmd)
                     results.append({"file": fn, "success": code == 0,
                                     "stdout": stdout, "stderr": stderr})
                 self.send_json({"success": True, "results": results})
@@ -2606,9 +2606,9 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
 # ---------------------------------------------------------------------------
 
 def _custom_commands_path():
-    root = os.environ.get("LINUXSCP_CONFIG")
+    root = os.environ.get("LINSCP_CONFIG")
     if not root:
-        root = os.path.join(os.path.expanduser("~"), ".config", "LinuxSCP")
+        root = os.path.join(os.path.expanduser("~"), ".config", "LinSCP")
     return os.path.join(root, "custom-commands.json")
 
 
@@ -2688,7 +2688,7 @@ MAX_REMOTE_SEARCH_DEPTH = 12
 
 def _content_match_in_remote_file(tab, remote_path, query, case_sensitive):
     """Download and scan one bounded UTF-8 text file, returning its first hit."""
-    directory = tempfile.mkdtemp(prefix="linuxscp-search-")
+    directory = tempfile.mkdtemp(prefix="linscp-search-")
     local_path = os.path.join(directory, "content")
     try:
         command = "get -transfer=binary %s %s" % (
@@ -2837,7 +2837,7 @@ def remote_search(tab, start, pattern, limit=500, case_sensitive=False,
 
 
 def edit_temp_root():
-    root = os.path.join(tempfile.gettempdir(), "linuxscp-gui-edit")
+    root = os.path.join(tempfile.gettempdir(), "linscp-gui-edit")
     os.makedirs(root, exist_ok=True)
     return root
 
@@ -3062,7 +3062,7 @@ def main():
 
     server_address = (host, port)
     try:
-        httpd = ThreadingHTTPServer(server_address, LinuxScpGuiHandler)
+        httpd = ThreadingHTTPServer(server_address, LinScpGuiHandler)
     except OSError as exc:
         print("Cannot listen on %s:%d: %s" % (host, port, exc), file=sys.stderr)
         return 1
@@ -3070,7 +3070,7 @@ def main():
         open_desktop_site(startup_session)
     print("LinSCP Commander GUI running at http://localhost:%d/" % port)
     print("Serving web client from: %s" % WEB_DIR)
-    print("LinSCP core binary: %s" % LINUXSCP_BIN)
+    print("LinSCP core binary: %s" % LINSCP_BIN)
     print("Stored sessions: %s" % session_store_path())
     if REQUIRE_TOKEN:
         print("API calls need this run's token (X-LSCP-Token header); the")

@@ -10,7 +10,7 @@
  * All strings are UTF-8.  The caller owns every string returned by
  * lscp_*_result_string() and must free it with lscp_free_string().
  *
- * Build:  gcc -shared -fPIC -o liblinscp.so liblinscp.c -llinuxscp-frontend
+ * Build:  gcc -shared -fPIC -o liblinscp.so liblinscp.c -llinscp-frontend
  */
 
 #ifndef LIBLINSCP_H

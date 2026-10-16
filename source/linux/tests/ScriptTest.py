@@ -15,13 +15,13 @@ class ScriptTests(unittest.TestCase):
     def setUp(self):
         # Every test gets its own configuration directory, so that a test
         # never reads or writes the sessions of the user running them.
-        self._config = tempfile.TemporaryDirectory(prefix="linuxscp-config-")
+        self._config = tempfile.TemporaryDirectory(prefix="linscp-config-")
         self.config = self._config.name
         self.addCleanup(self._config.cleanup)
 
     def environment(self, extra=None):
         env = dict(os.environ)
-        env["LINUXSCP_CONFIG_DIR"] = self.config
+        env["LINSCP_CONFIG_DIR"] = self.config
         if extra:
             env.update(extra)
         return env
@@ -40,8 +40,8 @@ class ScriptTests(unittest.TestCase):
 
     def test_gui_launcher_is_selected_beside_the_running_binary(self):
         with tempfile.TemporaryDirectory(prefix="linscp-install-") as temp:
-            binary = pathlib.Path(temp) / "linuxscp"
-            launcher = pathlib.Path(temp) / "linuxscp-gui"
+            binary = pathlib.Path(temp) / "linscp"
+            launcher = pathlib.Path(temp) / "linscp-gui"
             shutil.copyfile(BINARY, binary)  # not a symlink: /proc/self/exe is resolved
             binary.chmod(0o755)
             launcher.write_text("#!/bin/sh\necho ADJACENT_GUI\n", encoding="utf-8")
@@ -55,14 +55,14 @@ class ScriptTests(unittest.TestCase):
     def test_gui_launcher_finds_source_tree_from_make_and_cmake_builds(self):
         with tempfile.TemporaryDirectory(prefix="linscp-source-") as temp:
             root = pathlib.Path(temp)
-            launcher = root / "source" / "gui" / "linuxscp-gui"
+            launcher = root / "source" / "gui" / "linscp-gui"
             launcher.parent.mkdir(parents=True)
             launcher.write_text("#!/bin/sh\necho SOURCE_TREE_GUI\n", encoding="utf-8")
             launcher.chmod(0o755)
             for directory in (root / "source" / "linux" / "build",
                               root / "build"):
                 directory.mkdir(parents=True)
-                binary = directory / "linuxscp"
+                binary = directory / "linscp"
                 shutil.copyfile(BINARY, binary)
                 binary.chmod(0o755)
                 with self.subTest(directory=directory):
@@ -74,21 +74,21 @@ class ScriptTests(unittest.TestCase):
 
     def test_translation_locale_selection_and_literal_placeholders(self):
         for locale in ("es", "es_MX.UTF-8", "es_ES@formal"):
-            result = self.run_commands("{reason}", env={"LINUXSCP_LANGUAGE": locale})
+            result = self.run_commands("{reason}", env={"LINSCP_LANGUAGE": locale})
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("Orden desconocida '{reason}'", result.stdout + result.stderr)
         for locale in ("en", "C", "POSIX", "zz_ZZ.UTF-8", "../../es"):
-            result = self.run_commands("nosuchcommand", env={"LINUXSCP_LANGUAGE": locale})
+            result = self.run_commands("nosuchcommand", env={"LINSCP_LANGUAGE": locale})
             self.assertIn("Unknown command", result.stdout + result.stderr)
 
     def test_translation_locale_environment_precedence(self):
-        env = {"LINUXSCP_LANGUAGE": "", "LC_ALL": "C", "LC_MESSAGES": "es", "LANG": "es"}
+        env = {"LINSCP_LANGUAGE": "", "LC_ALL": "C", "LC_MESSAGES": "es", "LANG": "es"}
         result = self.run_commands("nosuchcommand", env=env)
         self.assertIn("Unknown command", result.stdout + result.stderr)
         env["LC_ALL"] = ""
         result = self.run_commands("nosuchcommand", env=env)
         self.assertIn("Orden desconocida", result.stdout + result.stderr)
-        env["LINUXSCP_LANGUAGE"] = "en"
+        env["LINSCP_LANGUAGE"] = "en"
         result = self.run_commands("nosuchcommand", env=env)
         self.assertIn("Unknown command", result.stdout + result.stderr)
 
@@ -98,10 +98,10 @@ class ScriptTests(unittest.TestCase):
                                     (["-unknown"], "Opción desconocida")]:
             result = subprocess.run([BINARY] + arguments,
                                     capture_output=True, text=True, timeout=10,
-                                    env=self.environment({"LINUXSCP_LANGUAGE": "es"}))
+                                    env=self.environment({"LINSCP_LANGUAGE": "es"}))
             self.assertIn(expected, result.stdout + result.stderr)
             self.assertEqual(result.returncode, 0 if arguments == ["-help"] else 1)
-        result = self.run_commands("echo Delete %1%", env={"LINUXSCP_LANGUAGE": "es"})
+        result = self.run_commands("echo Delete %1%", env={"LINSCP_LANGUAGE": "es"})
         self.assertIn("Delete", result.stdout)
 
     def test_default_abort(self):
@@ -611,7 +611,7 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("-server", result.stderr)
 
     def test_local_listing(self):
-        with tempfile.TemporaryDirectory(prefix="linuxscp script ") as tmp:
+        with tempfile.TemporaryDirectory(prefix="linscp script ") as tmp:
             root = pathlib.Path(tmp)
             (root / "hello world.txt").write_text("data")
             (root / "other.bin").write_bytes(b"data")
@@ -674,7 +674,7 @@ class ScriptTests(unittest.TestCase):
 
     def test_lcd_prints_where_it_went(self):
         """lcd reports the directory it changed into, like cd does."""
-        with tempfile.TemporaryDirectory(prefix="linuxscp lcd ") as tmp:
+        with tempfile.TemporaryDirectory(prefix="linscp lcd ") as tmp:
             result = self.run_commands(f'lpwd; lcd "{tmp}"; lpwd; echo MARK')
             self.assertEqual(result.returncode, 0, result.stderr)
             lines = result.stdout.splitlines()
@@ -1187,18 +1187,18 @@ class ScriptTests(unittest.TestCase):
                  "DESTDIR=" + str(destdir), "PREFIX=/usr"],
                 capture_output=True, text=True, timeout=30)
             self.assertEqual(install.returncode, 0, install.stderr)
-            self.assertTrue((destdir / "usr/bin/linuxscp").is_file())
-            self.assertTrue((destdir / "usr/bin/linuxscp-gui").is_file())
+            self.assertTrue((destdir / "usr/bin/linscp").is_file())
+            self.assertTrue((destdir / "usr/bin/linscp-gui").is_file())
             self.assertTrue(
-                (destdir / "usr/share/applications/linuxscp.desktop").is_file())
+                (destdir / "usr/share/applications/linscp.desktop").is_file())
 
             # Verify CMakeLists.txt and Debian packaging metadata remain aligned.
             cmake_text = (repo_root / "CMakeLists.txt").read_text(encoding="utf-8")
-            self.assertIn("add_executable(linuxscp", cmake_text)
-            self.assertIn("add_executable(linuxscp-unittest", cmake_text)
-            self.assertIn("linuxscp-gui", cmake_text)
+            self.assertIn("add_executable(linscp", cmake_text)
+            self.assertIn("add_executable(linscp-unittest", cmake_text)
+            self.assertIn("linscp-gui", cmake_text)
             control_text = (repo_root / "debian/control").read_text(encoding="utf-8")
-            self.assertIn("Package: linuxscp", control_text)
+            self.assertIn("Package: linscp", control_text)
             rules_text = (repo_root / "debian/rules").read_text(encoding="utf-8")
             self.assertIn("source/linux", rules_text)
 

@@ -1,12 +1,12 @@
-#ifndef LINUXSCP_PROTOCOLCLIENT_H
-#define LINUXSCP_PROTOCOLCLIENT_H
+#ifndef LINSCP_PROTOCOLCLIENT_H
+#define LINSCP_PROTOCOLCLIENT_H
 
 #include <string>
 #include <vector>
 #include "Session.h"
 #include "SftpClient.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /*
  * The curl exit codes that say the endpoint itself is unusable (it
@@ -73,7 +73,7 @@ public:
      * server that does not implement one answers 405 and the command says
      * so rather than pretending the write was protected. DavLock returns
      * the server's token, DavSetProperty moves a property in the
-     * 'urn:linuxscp:properties' namespace, and DavGetProperty reports
+     * 'urn:linscp:properties' namespace, and DavGetProperty reports
      * 'found' false when the server answered with a 404 propstat.
      */
     static bool DavLock(const SessionOptions & options, const std::string & remotePath,
@@ -132,6 +132,6 @@ public:
     static void FreeNames(LscpNames * names);
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_PROTOCOLCLIENT_H */
+#endif /* LINSCP_PROTOCOLCLIENT_H */

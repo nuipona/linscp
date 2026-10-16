@@ -629,7 +629,7 @@
    }
   }
  ],
- "linuxscp_additions": [
+ "linscp_additions": [
   {
    "name": "lock / unlock / property",
    "status": "verified",
@@ -662,7 +662,7 @@
   {
    "name": "edit",
    "status": "verified",
-   "notes": "Downloads the remote file, normalizes line endings when -eol=lf|crlf is requested, runs $LINUXSCP_EDITOR/$EDITOR or option editor, compares full file contents and mtime (with -monitor re-uploading across multiple saves while the editor stays open), and refuses files over option editmaxsize or modified remotely since download; covered by unit and live-sftp.",
+   "notes": "Downloads the remote file, normalizes line endings when -eol=lf|crlf is requested, runs $LINSCP_EDITOR/$EDITOR or option editor, compares full file contents and mtime (with -monitor re-uploading across multiple saves while the editor stays open), and refuses files over option editmaxsize or modified remotely since download; covered by unit and live-sftp.",
    "verified_on": {
     "linux": [
      "unit",
@@ -773,7 +773,7 @@
    "source": [
     "source/linux/Script.cpp",
     "source/linux/Platform.cpp",
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "verified_on": {
     "linux": [
@@ -1207,7 +1207,7 @@
    "id": "dav.dead-properties-and-preconditions",
    "area": "WebDAV",
    "status": "verified",
-   "notes": "'property <file> -set=NAME=VALUE' stores one dead property through PROPPATCH and 'property <file> -get=NAME' reads it back with a named-property PROPFIND; both use this client's own namespace (urn:linuxscp:properties), a name that would build invalid XML is refused before any request, and a property the server does not have prints 'NAME is not set' rather than failing. The conditional write is the lock token: PUT, DELETE and MOVE of a locked path send If, which is what makes the server refuse a write whose lock is gone (423).",
+   "notes": "'property <file> -set=NAME=VALUE' stores one dead property through PROPPATCH and 'property <file> -get=NAME' reads it back with a named-property PROPFIND; both use this client's own namespace (urn:linscp:properties), a name that would build invalid XML is refused before any request, and a property the server does not have prints 'NAME is not set' rather than failing. The conditional write is the lock token: PUT, DELETE and MOVE of a locked path send If, which is what makes the server refuse a write whose lock is gone (423).",
    "source": [
     "source/linux/ProtocolClient.cpp",
     "source/linux/Script.cpp"
@@ -1540,7 +1540,7 @@
    "status": "verified",
    "notes": "GUI task queue supports pause, SIGINT cancel, retry and queue reordering (/api/queue/priority) with private staging for browser uploads.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -1728,7 +1728,7 @@
    "source": [
     "source/linux/SyncPlanner.cpp",
     "source/linux/Script.cpp",
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -1761,7 +1761,7 @@
    "notes": "Stored sites can be saved, opened, removed, exported and imported.",
    "source": [
     "source/linux/SessionStore.cpp",
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "script": [
@@ -1856,7 +1856,7 @@
    "source": [
     "source/linux/SessionStore.cpp",
     "source/linux/Script.cpp",
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -1997,7 +1997,7 @@
    "status": "verified",
    "notes": "The local browser API rejects requests missing its per-run token.",
    "source": [
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "gui-browser-upload": [
@@ -2036,7 +2036,7 @@
    "status": "verified",
    "notes": "The browser renders local/remote panes and session tabs and routes Commander function keys.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2058,7 +2058,7 @@
    "status": "verified",
    "notes": "The transfer queue renders progress, retry, SIGINT cancel and priority reordering controls (/api/queue/priority).",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2083,7 +2083,7 @@
    "status": "verified",
    "notes": "The preview renders planned actions and posts the chosen comparison on run.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2144,7 +2144,7 @@
    "status": "verified",
    "notes": "A desktop File is staged under an authenticated request with exact bytes and a remote destination.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2168,7 +2168,7 @@
    "status": "verified",
    "notes": "Entry/handle recursion queues nested files and empty directories; parent creation is idempotent, paths validated.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html",
     "source/linux/Script.cpp"
    ],
@@ -2199,7 +2199,7 @@
    "status": "verified",
    "notes": "FileSystemEntry, FileSystemHandle and plain File drops preserve nested paths and empty folders across both remote and local panes with path-traversal rejection.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2225,7 +2225,7 @@
    "status": "verified",
    "notes": "Dropping files or folders from the desktop onto the local pane saves them into the active local directory via /api/local/drop and /api/local/drop-dir with path confinement.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2261,7 +2261,7 @@
    "source": [
     "source/linux/Editor.cpp",
     "source/linux/Script.cpp",
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "unit": [
@@ -2288,7 +2288,7 @@
    "status": "verified",
    "notes": "GUI reads text and saves locally with a conflict check and atomic replace; symlinks are refused.",
    "source": [
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "gui-local-editor": [
@@ -2309,7 +2309,7 @@
    "status": "verified",
    "notes": "Filename search and bounded literal UTF-8 content search skip binary/oversized files and cap the scan.",
    "source": [
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "gui-search": [
@@ -2354,7 +2354,7 @@
    "notes": "The browser editor and search enforce UTF-8 text and reject binary files, while CLI 'edit -eol=lf|crlf' normalizes line endings before upload.",
    "source": [
     "source/linux/Editor.cpp",
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "unit": [
@@ -2424,7 +2424,7 @@
    "source": [
     "source/linux/main.cpp",
     "source/linux/Script.cpp",
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "script": [
@@ -2484,7 +2484,7 @@
    "id": "automation.powershell",
    "area": "Automation",
    "status": "partial",
-   "notes": "automation/LinSCP.psm1 is a PowerShell 7 (pwsh) module that wraps the console client in -server mode and exports Open-LScpSession, Close-LScpSession, Get-LScpItem, Send-LScpItem, Get-LScpDirectory and Sync-LScpDirectory; 'make install' puts it in PREFIX/share/linuxscp/automation. Nothing exercises it: no automated case runs PowerShell, so its session lifetime, pipeline objects, terminating errors, cancellation and secret handling are unevidenced, and it is a shim over the CLI rather than upstream's assembly API.",
+   "notes": "automation/LinSCP.psm1 is a PowerShell 7 (pwsh) module that wraps the console client in -server mode and exports Open-LScpSession, Close-LScpSession, Get-LScpItem, Send-LScpItem, Get-LScpDirectory and Sync-LScpDirectory; 'make install' puts it in PREFIX/share/linscp/automation. Nothing exercises it: no automated case runs PowerShell, so its session lifetime, pipeline objects, terminating errors, cancellation and secret handling are unevidenced, and it is a shim over the CLI rather than upstream's assembly API.",
    "gap": "Exercise the shipped module with PowerShell on Linux: a session opened and closed, an upload and a download of exact bytes, a listing as pipeline objects, a terminating error, a cancelled transfer, and a password that appears neither in the process list nor in the output.",
    "acceptance": [
     "Build cmdlets or a documented compatibility module on the tested automation contract. Exercise them with PowerShell on Linux, including pipeline objects, terminating errors, cancellation and secret handling."
@@ -2500,8 +2500,8 @@
    "status": "verified",
    "notes": "The desktop entry and GUI parse sftp://, ftp:// and ftps:// startup URLs with escaped paths.",
    "source": [
-    "debian/linuxscp.desktop",
-    "source/gui/linuxscp_gui.py"
+    "debian/linscp.desktop",
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "gui-desktop-uri": [
@@ -2522,7 +2522,7 @@
    "notes": "Installed, Makefile and CMake binaries select their own GUI launcher; the GUI finds the matching core under a relocatable prefix.",
    "source": [
     "source/linux/Platform.cpp",
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "script": [
@@ -2546,7 +2546,7 @@
    "status": "verified",
    "notes": "Desktop file and folder drops work on both the remote pane (queued upload) and the local pane (atomic local save) with traversal rejection.",
    "source": [
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/web/index.html"
    ],
    "checks": {
@@ -2590,7 +2590,7 @@
     "source/linux/locales/en.json",
     "source/linux/locales/es.json",
     "source/gui/web/index.html",
-    "source/gui/linuxscp_gui.py",
+    "source/gui/linscp_gui.py",
     "source/gui/locales/en.json",
     "source/gui/locales/es.json",
     "tools/compile_translations.py"
@@ -2717,9 +2717,9 @@
    "id": "platform.prefix-lookup",
    "area": "Packaging/platforms",
    "status": "verified",
-   "notes": "An arbitrary PREFIX/share/linuxscp/gui resolves PREFIX/bin/linuxscp before /usr/bin.",
+   "notes": "An arbitrary PREFIX/share/linscp/gui resolves PREFIX/bin/linscp before /usr/bin.",
    "source": [
-    "source/gui/linuxscp_gui.py"
+    "source/gui/linscp_gui.py"
    ],
    "checks": {
     "gui-desktop-uri": [
