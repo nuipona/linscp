@@ -13,10 +13,10 @@
   "policy": "A status of 'verified' means the behavior was checked, not that it looked right while somebody was reading the code. So an entry carries 'verified_on': for each platform LinSCP ships on, the suites whose tests cover it. LinSCP ships on Linux alone - the Windows port was removed - so an entry may be 'verified' only when 'linux' appears in that map naming the suites that actually ran it. The rule is still written for any number of platforms, and a suite that is not listed under a platform cannot be cited for it, because evidence nobody can reproduce is not evidence. The notes stay authoritative about what is missing either way - evidence for the parts that are covered does not certify the rest, which is why --require-full fails while any entry is not verified.",
   "platforms": {
    "linux": {
-    "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite",
-    "date": "2026-10-16",
+    "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite; npm install --no-save --package-lock=false jsdom@26 && node source/gui/tests/ClientTest.js && node source/gui/tests/LocalizationTest.js exercises the browser UI; python3 tools/tests/test_translations.py checks catalog generation.",
+    "date": "2026-10-15",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 1178 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, a plan refused over a file nobody could hash, and '-conflict=skip|local|remote|newer' two-way resolution), the proxy session settings, the FTP engine and TLS policy settings, the S3 object write settings and multipart upload resume state sidecar, the SSH private-key passphrase option and XML action log elements, the host-key pin spellings, the WebDAV lock-token and dead-property XML, parameter and timestamp expansion, the stored-session file and folder hierarchy helpers, the editor content-comparison and EOL normalization helpers, the file-hash and HMAC helpers, and AWS Signature Version 4 signing.",
+     "unit": "source/linux/tests/UnitTest.cpp - checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, a plan refused over a file nobody could hash, and '-conflict=skip|local|remote|newer' two-way resolution), the proxy session settings, the FTP engine and TLS policy settings, the S3 object write settings and multipart upload resume state sidecar, the SSH private-key passphrase option and XML action log elements, the host-key pin spellings, the WebDAV lock-token and dead-property XML, parameter and timestamp expansion, the stored-session file and folder hierarchy helpers, the editor content-comparison and EOL normalization helpers, the file-hash and HMAC helpers, and AWS Signature Version 4 signing. Includes English/Spanish help, security messages, named-placeholder safety, locale fallback and plural-count messages.",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log. It checks -literal command input (including GUI filenames with percent placeholders), mkdir -parents argument validation, that a SHA-256 host key pin the installed curl cannot enforce is refused by name instead of dropped (a fake curl whose version names libssh stands in for those systems), and the adjacent -gui launcher plus Makefile/CMake source-tree launchers.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader). Recursive directory copy and multiple source files into an existing destination directory are tested over SFTP; the test server refuses the optional copy-data extension, so these prove the streamed fallback rather than the native extension. A second server mode implements copy-data and verifies the native extension path as well as exact copied bytes. The server can also refuse check-file-name, which proves the download-and-hash fallback for sha-256, sha-1, md5 and crc32, or implement the extension, which proves the native sha-256 digest and that the client does not fall back after a valid reply. It also proves that synchronize remote with a path exclusion ('-filemask=|skip/') leaves an excluded file untouched despite -delete and does not upload files from the excluded subtree. Recursive symbolic chmod is checked over a nested tree, including exact directory and file modes. copyid installs a generated OpenSSH public key into the test SFTP home, verifies the 0700/0600 permissions and proves that repeating the command does not duplicate the key.",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
@@ -26,7 +26,8 @@
      "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet.",
      "gui-browser-upload": "source/gui/tests/BrowserUploadTest.py - rejects missing run tokens and invalid/traversal paths, stages exact bytes from HTTP to a private file, queues nested uploads and explicit empty directories with retry-safe parent creation, verifies that background tasks use -literal for percent-sign filenames, and removes partial staging on an incomplete upload. ClientTest.js exercises browser file/folder traversal, batches, and target selection.",
      "gui-desktop-uri": "source/gui/tests/DesktopUriTest.py - validates sftp://, ftp:// and ftps:// desktop URLs, default and explicit ports, escaped credentials and paths, IPv6 authorities, rejected malformed/query URLs, and startup creation/activation of the site tab without trusting an unknown host key. It also checks core lookup under a relocated install prefix.",
-     "gui-local-editor": "source/gui/tests/LocalEditorTest.py - read and atomic local text save, stale-edit conflicts, rejection of binary/large files and symlink overwrite, and panel path confinement; standard library only."
+     "gui-local-editor": "source/gui/tests/LocalEditorTest.py - read and atomic local text save, stale-edit conflicts, rejection of binary/large files and symlink overwrite, and panel path confinement; standard library only.",
+     "gui-localization": "source/gui/tests/LocalizationTest.js under node/jsdom - boots the real English/Spanish page with persisted, server and browser language selection; checks static text and ARIA, queue statuses, plural forms, literal placeholders, host-key verification, editor saves, sync preview and transfer API payloads, and unsaved-edit protection on language changes."
     }
    }
   }
@@ -440,40 +441,44 @@
     "linux": [
      "live-curl"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: scp.shell-directory-engine, scp.command-and-metadata."
   },
   {
    "name": "FTP/FTPS",
-   "status": "verified",
-   "notes": "Plain FTP directory and metadata commands run on the native FTP engine (MLSD/MLST with LIST fallback, active/passive and FtpForcePasvIp, SITE CHMOD, mkdir/rmdir/rename/delete), while transfers and FTPS run on curl with upstream's TLS policy settings (Ftps implicit/explicit, TLS version bounds, client cert, CA bundle, PinnedPublicKey) and .filepart staging, covered by unit and live-curl.",
+   "status": "partial",
+   "notes": "Plain FTP directory and metadata commands run on the native FTP engine (MLSD/MLST with LIST fallback, active/passive and FtpForcePasvIp, SITE CHMOD, mkdir/rmdir/rename/delete), while transfers and FTPS run on curl with upstream's TLS policy settings (Ftps implicit/explicit, TLS version bounds, client cert, CA bundle, PinnedPublicKey) and .filepart staging, covered by unit and live-curl. Non-Unix LIST formats remain unsupported; automated protocol fixtures are not a real-world server compatibility certification.",
    "verified_on": {
     "linux": [
      "unit",
      "live-curl"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: ftp.non-unix-listings."
   },
   {
    "name": "WebDAV",
-   "status": "verified",
-   "notes": "PROPFIND-driven filesystem (Depth 0/1 listings, stat, MKCOL, MOVE, single-file COPY with streamed fallback, non-empty rmdir guard, escaped paths, LOCK/UNLOCK with If-header write protection, and PROPPATCH dead properties), covered by unit and live-dav.",
+   "status": "partial",
+   "notes": "PROPFIND-driven filesystem (Depth 0/1 listings, stat, MKCOL, MOVE, single-file COPY with streamed fallback, non-empty rmdir guard, escaped paths, LOCK/UNLOCK with If-header write protection, and PROPPATCH dead properties), covered by unit and live-dav. ETag/collection preconditions beyond session lock tokens remain unimplemented.",
    "verified_on": {
     "linux": [
      "unit",
      "live-dav"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: dav.etag-preconditions."
   },
   {
    "name": "Amazon S3",
-   "status": "verified",
-   "notes": "AWS Signature Version 4 over curl with bucket/object CRUD, range-resumed downloads, PutObject and resumable multipart uploads (persisting completed part ETags across interruptions), single-object CopyObject and multipart UploadPartCopy for large objects, and signed object write headers (storage class, ACL, SSE, KMS key ID, requester pays and custom metadata), covered by unit and live-s3.",
+   "status": "partial",
+   "notes": "AWS Signature Version 4 over curl with bucket/object CRUD, range-resumed downloads, PutObject and resumable multipart uploads (persisting completed part ETags across interruptions), single-object CopyObject and multipart UploadPartCopy for large objects, and signed object write headers (storage class, ACL, SSE, KMS key ID, requester pays and custom metadata), covered by unit and live-s3. Version-aware operations and delete-marker semantics remain unimplemented.",
    "verified_on": {
     "linux": [
      "unit",
      "live-s3"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: s3.versioned-objects."
   },
   {
    "name": "Transfers",
@@ -523,37 +528,47 @@
   {
    "name": "Security/authentication",
    "status": "partial",
-   "notes": "Password, private-key and ssh-agent authentication and the host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration is in place under upstream's setting names - SOCKS 4 and 5, HTTP CONNECT, a telnet command or a local command through the PuTTY core, with its DNS, localhost and exclude-list policy - and the curl protocols translate the same settings to --proxy/--proxy-user/--noproxy, refusing a telnet or local-command proxy they cannot run; a proxy password is masked in the echo and in the action log. The curl path honors ProxyLocalhost=0 by adding localhost, 127.0.0.0/8 and ::1/128 to --noproxy; ProxyLocalhost=1 leaves loopback destinations eligible for proxying. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
+   "notes": "Password, private-key/passphrase and ssh-agent authentication, host-key pinning, stored-password encryption, proxy isolation and loopback GUI API tokens are covered by unit, script, live-sftp, live-curl and gui-browser-upload. curl SSH pins are enforced where its backend supports them and explicitly refused otherwise; TLS verification and public-key pinning are configurable. GSSAPI is compiled out, SSH tunnel configuration is not implemented and the GUI has no multi-user accounts or authorization roles.",
    "verified_on": {
     "linux": [
-     "live-sftp",
-     "live-dav",
+     "unit",
      "script",
-     "unit"
+     "live-sftp",
+     "live-curl",
+     "gui-browser-upload"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: security.gssapi-and-tunnels, security.gui-account."
   },
   {
    "name": "GUI",
    "status": "partial",
-   "notes": "Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote filename and bounded UTF-8 content search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API behind a per-run token (Host-checked) over -server. Synchronized browsing (the toggle follows directory changes across both panes, refuses when the counterpart folder is missing, and keeps the pair aligned going up) and drag and drop between the panes (dragged entries carry a payload, the target pane highlights, dropping queues the upload/download with exactly those names, a same-pane drop does nothing) are implemented like WinSCP's Commander, both covered by the jsdom regression test. Dropping files and folders from the operating system's file manager onto the remote pane queues authenticated, bounded uploads, preserving nested paths and empty directories through the task queue (jsdom and BrowserUploadTest.py); local-pane drops and cross-browser/file-manager behavior remain unverified. Still not upstream Commander/Explorer: custom commands and localization.",
+   "notes": "Browser Commander provides persistent session tabs, dual panes, transfer queue controls, synchronization preview/conflict controls, UTF-8 editing/search, synchronized browsing and host-key verification. Local and remote panes accept files/folders through FileSystemEntry, FileSystemHandle and plain File APIs with path validation; English/Spanish interface localization is implemented. These behaviors are covered by gui, gui-localization, gui-browser-upload, gui-local-editor and gui-search. A separate Explorer UI and custom-command framework are missing; automated browser API fixtures are not a real-world browser/file-manager compatibility certification.",
    "verified_on": {
     "linux": [
      "gui",
-     "gui-browser-upload"
+     "gui-localization",
+     "gui-browser-upload",
+     "gui-local-editor",
+     "gui-search"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: gui.explorer-custom-commands."
   },
   {
    "name": "Editing/search",
    "status": "partial",
-   "notes": "'edit' downloads, runs the configured editor and uploads on change, with a size limit and a refusal when the remote file changed meanwhile; GUI remote search matches filename masks recursively or searches literal UTF-8 content inside files matching the mask. Content search caps each file at 8 MiB, each search at 200 files/64 MiB, and reports skipped and truncated results; binary, non-UTF-8 and oversized files are skipped. Missing: save/upload monitoring of local edits, broader encoding handling and the custom command system.",
+   "notes": "CLI remote editing supports save monitoring (-monitor), conflict checks and EOL/BOM policy; the browser supports local/remote text editing with conflict detection and bounded literal UTF-8 content search. These behaviors are covered by unit, live-sftp, gui, gui-local-editor and gui-search. Legacy-encoding selection/transcoding is missing; arbitrary external editor behavior is outside the tested UTF-8 workflow.",
    "verified_on": {
     "linux": [
+     "unit",
+     "live-sftp",
      "gui",
+     "gui-local-editor",
      "gui-search"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: editing.non-utf8-encodings."
   },
   {
    "name": "Automation",
@@ -563,27 +578,38 @@
     "linux": [
      "script"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: automation.dotnet, automation.powershell, automation.upstream-xml-compatibility."
   },
   {
    "name": "Desktop integration",
    "status": "partial",
-   "notes": "The Debian desktop entry registers sftp://, ftp:// and ftps://; the GUI launcher parses those URLs, connects the requested site in a background tab, preserves the remote directory, and routes an unknown host key into the normal verification UI. URL parsing, tab startup and relocatable core lookup are covered by gui-desktop-uri and the script suite. Browser-backed remote folder drops are tested, while local-pane drops, cross-browser/file-manager behavior, shell integration and the extension system remain gaps.",
+   "notes": "The desktop entry registers SFTP/FTP/FTPS URLs, the GUI opens startup URLs without bypassing host-key verification, and launcher/core lookup supports relocatable prefixes. Local and remote pane desktop drops are tested using browser API fixtures. Covered by gui-desktop-uri, script, gui and gui-browser-upload; file-manager shell commands and a general upstream extension system are missing, and real browser/desktop combinations still need acceptance validation.",
    "verified_on": {
     "linux": [
-     "gui-desktop-uri"
+     "gui-desktop-uri",
+     "script",
+     "gui",
+     "gui-browser-upload"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: desktop.shell-and-extensions."
   },
   {
    "name": "Localization/accessibility",
    "status": "partial",
-   "notes": "The browser Commander provides ARIA landmarks, grid/tablist/dialog roles, aria-selected state and keyboard navigation across panes, while upstream translation catalogs remain unimplemented.",
+   "notes": "The Commander provides ARIA roles and keyboard navigation. English/Spanish catalogs localize its static and dynamic interface and shared CLI help, status/security messages and destructive prompts; browser, script, unit and live SFTP regressions exercise language selection, plurals, data preservation and host-key refusals. Remaining human-facing script/engine diagnostics not routed through Texts keep this area partial; server/OS diagnostics and wire data are preserved verbatim.",
    "verified_on": {
     "linux": [
-     "gui"
+     "gui",
+     "gui-localization",
+     "script",
+     "unit",
+     "live-sftp",
+     "gui-browser-upload"
     ]
-   }
+   },
+   "gap": "See remaining capabilities: locale.translations."
   },
   {
    "name": "Packaging/platforms",
@@ -622,7 +648,12 @@
      "live-dav",
      "unit"
     ]
-   }
+   },
+   "commands": [
+    "lock",
+    "unlock",
+    "property"
+   ]
   },
   {
    "name": "edit",
@@ -633,7 +664,10 @@
      "unit",
      "live-sftp"
     ]
-   }
+   },
+   "commands": [
+    "edit"
+   ]
   },
   {
    "name": "savesession / rmsession",
@@ -643,7 +677,11 @@
     "linux": [
      "script"
     ]
-   }
+   },
+   "commands": [
+    "savesession",
+    "rmsession"
+   ]
   },
   {
    "name": "sessions",
@@ -653,7 +691,10 @@
     "linux": [
      "script"
     ]
-   }
+   },
+   "commands": [
+    "sessions"
+   ]
   },
   {
    "name": "show",
@@ -663,18 +704,30 @@
     "linux": [
      "script"
     ]
-   }
+   },
+   "commands": [
+    "show"
+   ]
   },
   {
-   "name": "del, md, sync, quit, end",
+   "name": "del, md, sync, quit, end, ?, delsession",
    "status": "verified",
-   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage. Covered by the script suite (sync, quit, end) and the live WebDAV suite (md, del).",
+   "notes": "Extra aliases accepted for convenience (rm, mkdir, synchronize, exit, exit). Upstream registers 'dir' but not these, so they are not counted as upstream coverage. Covered by the script suite (sync, quit, end) and the live WebDAV suite (md, del). The ? alias routes to help, and delsession routes to rmsession; covered by the script alias regression.",
    "verified_on": {
     "linux": [
      "script",
      "live-dav"
     ]
-   }
+   },
+   "commands": [
+    "del",
+    "md",
+    "sync",
+    "quit",
+    "end",
+    "?",
+    "delsession"
+   ]
   },
   {
    "name": "attr",
@@ -685,7 +738,48 @@
      "live-dav",
      "live-s3"
     ]
-   }
+   },
+   "commands": [
+    "attr"
+   ]
+  },
+  {
+   "name": "presets / savepreset / rmspreset",
+   "status": "verified",
+   "notes": "Lists, stores, updates, activates and removes named transfer presets and validates preset options; covered by script.",
+   "source": [
+    "source/linux/TransferPresets.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "verified_on": {
+    "linux": [
+     "script"
+    ]
+   },
+   "commands": [
+    "presets",
+    "savepreset",
+    "rmspreset"
+   ]
+  },
+  {
+   "name": "terminal",
+   "status": "verified",
+   "notes": "Builds an external SSH terminal command with explicit connection settings and lets the GUI request a terminal on the backend desktop; command-line construction and the GUI request are covered by unit and gui. This does not certify an interactive terminal emulator against every SSH server.",
+   "source": [
+    "source/linux/Script.cpp",
+    "source/linux/Platform.cpp",
+    "source/gui/linuxscp_gui.py"
+   ],
+   "verified_on": {
+    "linux": [
+     "unit",
+     "gui"
+    ]
+   },
+   "commands": [
+    "terminal"
+   ]
   }
  ],
  "capabilities": [
@@ -821,14 +915,20 @@
    "area": "SCP",
    "status": "missing",
    "notes": "No WinSCP-style remote shell filesystem engine or SCP directory listing.",
-   "gap": "Implement and test remote-shell listing, stat and directory operations before claiming SCP parity."
+   "gap": "Implement and test remote-shell listing, stat and directory operations before claiming SCP parity.",
+   "acceptance": [
+    "Implement an authenticated remote-shell filesystem backend with safely quoted listing/stat and directory CRUD. Test filenames containing spaces, newlines and shell metacharacters against a real SSH/SCP server; do not silently replace SCP semantics with SFTP."
+   ]
   },
   {
    "id": "scp.command-and-metadata",
    "area": "SCP",
    "status": "missing",
    "notes": "No SCP-specific remote command and metadata semantics matching upstream.",
-   "gap": "Implement and test SCP shell commands and metadata with an actual SCP server."
+   "gap": "Implement and test SCP shell commands and metadata with an actual SCP server.",
+   "acceptance": [
+    "Add remote commands, chmod and timestamp preservation to that backend. Check exit status, stderr, permission failures, recursion and interrupted transfers with a live server."
+   ]
   },
   {
    "id": "ftp.curl-transfer",
@@ -1840,14 +1940,20 @@
    "area": "Security/authentication",
    "status": "missing",
    "notes": "GSSAPI is compiled out; SSH tunnel configuration is not implemented.",
-   "gap": "Implement and test GSSAPI/SSH tunnels only with an explicit security review."
+   "gap": "Implement and test GSSAPI/SSH tunnels only with an explicit security review.",
+   "acceptance": [
+    "Enable optional GSSAPI with dependency detection and a Kerberos test realm. Add authenticated SSH forwarding, destination host-key verification and lifecycle cleanup. Security-review credentials, forwarding exposure and failure paths before enabling either by default."
+   ]
   },
   {
    "id": "security.gui-account",
    "area": "Security/authentication",
    "status": "missing",
    "notes": "The loopback GUI has no multi-user account or authorization roles.",
-   "gap": "Add authenticated accounts before claiming multi-user/server deployment support."
+   "gap": "Add authenticated accounts before claiming multi-user/server deployment support.",
+   "acceptance": [
+    "Define deployment/isolation boundaries before enabling network access. Add password hashing, login/session expiry, CSRF protection and per-user configuration, filesystem and queue isolation. Negative authorization tests must cover every API route, not just login."
+   ]
   },
   {
    "id": "gui.commander-panes-tabs",
@@ -2067,7 +2173,10 @@
    "area": "GUI",
    "status": "missing",
    "notes": "No separate upstream Explorer-style UI or custom-command framework.",
-   "gap": "Build/test Explorer navigation and custom-command execution with appropriate safety prompts."
+   "gap": "Build/test Explorer navigation and custom-command execution with appropriate safety prompts.",
+   "acceptance": [
+    "Implement single-pane Explorer navigation plus persisted command templates, explicit confirmation and safe filename substitution. Test local/remote scope, multiple selections and hostile filenames; never interpolate into a shell implicitly."
+   ]
   },
   {
    "id": "editing.remote-editor",
@@ -2291,14 +2400,20 @@
    "area": "Automation",
    "status": "missing",
    "notes": "No WinSCP .NET assembly or equivalent object model for Linux.",
-   "gap": "Define an API contract and test automation clients; a CLI is not the assembly."
+   "gap": "Define an API contract and test automation clients; a CLI is not the assembly.",
+   "acceptance": [
+    "Define the Linux object-model contract and upstream compatibility boundary. Build and test an actual .NET library for session lifecycle, listing, transfer, synchronization, cancellation, structured results and error propagation. A subprocess helper alone is not assembly parity."
+   ]
   },
   {
    "id": "automation.powershell",
    "area": "Automation",
    "status": "missing",
    "notes": "No PowerShell cmdlets or compatibility shim.",
-   "gap": "Provide and test PowerShell automation only if this is a product requirement."
+   "gap": "Provide and test PowerShell automation only if this is a product requirement.",
+   "acceptance": [
+    "Build cmdlets or a documented compatibility module on the tested automation contract. Exercise them with PowerShell on Linux, including pipeline objects, terminating errors, cancellation and secret handling."
+   ]
   },
   {
    "id": "desktop.scheme-handlers",
@@ -2376,14 +2491,69 @@
    "area": "Desktop integration",
    "status": "missing",
    "notes": "No system file-manager shell commands or upstream extension system.",
-   "gap": "Specify desired desktop environment integrations and build/test them individually."
+   "gap": "Specify desired desktop environment integrations and build/test them individually.",
+   "acceptance": [
+    "Specify supported file managers and extension API. Add explicit, opt-in installation and removal, selection transport without shell interpolation, confirmation and extension permission boundaries. Test packaged installation as well as source-tree execution."
+   ]
   },
   {
    "id": "locale.translations",
    "area": "Localization/accessibility",
-   "status": "missing",
-   "notes": "No upstream language catalogs or translation pipeline.",
-   "gap": "Choose supported locales and add translated strings with GUI/CLI language tests."
+   "status": "partial",
+   "notes": "English/Spanish catalogs cover the browser interface (menus, dialogs, help, ARIA/tooltips, dynamic status/queue/sync/editor/search messages) and shared CLI messages, CLI -help/option errors, host-key warnings, passphrase/destructive-action prompts and connection status. Locale precedence, regional fallback, plurals, literal data, safe embedded JSON and internal protocol isolation are tested. Raw server/OS diagnostics and core logs are intentionally preserved.",
+   "gap": "Translate command-specific help and remaining human-facing Script.cpp status and argument/engine error strings that bypass the shared Texts functions; no full upstream language-catalog coverage is claimed.",
+   "source": [
+    "source/linux/Texts.cpp",
+    "source/linux/Console.cpp",
+    "source/linux/Script.cpp",
+    "source/linux/Session.cpp",
+    "source/linux/main.cpp",
+    "source/linux/locales/en.json",
+    "source/linux/locales/es.json",
+    "source/gui/web/index.html",
+    "source/gui/linuxscp_gui.py",
+    "source/gui/locales/en.json",
+    "source/gui/locales/es.json",
+    "tools/compile_translations.py"
+   ],
+   "checks": {
+    "unit": [
+     "TestLocalization"
+    ],
+    "script": [
+     "test_translation_locale_selection_and_literal_placeholders",
+     "test_translation_locale_environment_precedence",
+     "test_translated_help_and_option_errors_preserve_command_syntax"
+    ],
+    "live-sftp": [
+     "test_spanish_transfer_and_host_key_refusal"
+    ],
+    "gui-localization": [
+     "Spanish selected",
+     "security warning translated",
+     "save bytes unchanged",
+     "API selections unchanged",
+     "unsaved editor prevents language reload"
+    ],
+    "gui-browser-upload": [
+     "test_ui_locale_selection_and_core_protocol_isolation",
+     "test_served_page_has_safe_locale_and_token_data"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit",
+     "script",
+     "live-sftp",
+     "gui-localization",
+     "gui-browser-upload"
+    ]
+   },
+   "acceptance": [
+    "Route command-specific help and every remaining human-facing script status/argument/engine message through English/Spanish catalogs, keeping paths, command tokens and server/OS diagnostics literal.",
+    "Add coverage checks that detect new uncatalogued messages and run translated positive/negative CLI workflows, including help, synchronization, editing, sessions and transfer failures.",
+    "Preserve host-key refusal behavior, machine protocol values and secret masking; review security-warning translations before adding more supported locales."
+   ]
   },
   {
    "id": "locale.accessibility",
@@ -2546,6 +2716,86 @@
      "live-dav"
     ]
    }
+  },
+  {
+   "id": "ftp.non-unix-listings",
+   "area": "FTP/FTPS",
+   "status": "missing",
+   "notes": "The shared LIST parser accepts Unix long listings. MLSD provides a structured alternative, but DOS/VMS and other non-Unix LIST dialects have no parser.",
+   "gap": "Implement the non-Unix LIST formats selected for support without treating an unparsed directory as empty.",
+   "acceptance": [
+    "Add fixture-based DOS/VMS listing cases with spaces, date/size variants and directory types, plus malformed-input rejection.",
+    "Exercise LIST fallback against live servers that emit the supported formats; document formats still unsupported."
+   ]
+  },
+  {
+   "id": "dav.etag-preconditions",
+   "area": "WebDAV",
+   "status": "missing",
+   "notes": "Session lock tokens protect writes to locked paths. General ETag-based If-Match/If-None-Match conditional writes and collection precondition policies are not implemented.",
+   "gap": "Add explicit ETag preconditions independently of the existing session lock-token support.",
+   "acceptance": [
+    "Test successful conditional writes and stale ETag failures against a live DAV server, including If-Match, If-None-Match and absent resources.",
+    "Define collection semantics and prove a rejected precondition leaves all destination bytes and metadata unchanged."
+   ]
+  },
+  {
+   "id": "s3.versioned-objects",
+   "area": "Amazon S3",
+   "status": "missing",
+   "notes": "The client manages current bucket objects; it does not expose version IDs, version listing, version-specific retrieval or delete markers.",
+   "gap": "Define and implement version-aware operations rather than claiming current-object CRUD is versioning support.",
+   "acceptance": [
+    "Test version listing with pagination and exact version-specific reads against a versioned S3 endpoint.",
+    "Test deletion of a named version versus creation/removal of delete markers without losing unrelated versions."
+   ]
+  },
+  {
+   "id": "editing.non-utf8-encodings",
+   "area": "Editing/search",
+   "status": "missing",
+   "notes": "The browser editor/search require UTF-8. CLI editing supports EOL/BOM preservation, but there is no explicit legacy-encoding selection or transcoding policy.",
+   "gap": "Add an explicit encoding contract and conversion implementation for any supported non-UTF-8 encodings.",
+   "acceptance": [
+    "Round-trip each supported encoding through CLI and browser editing with byte-exact fixtures and a documented BOM/EOL policy.",
+    "Reject invalid input or unrepresentable output without replacing bytes silently or overwriting the original file."
+   ]
+  },
+  {
+   "id": "automation.upstream-xml-compatibility",
+   "area": "Automation",
+   "status": "partial",
+   "notes": "The XML action log emits structured command, message and transfer actions with secret masking. Its structure resembles upstream but schema/consumer equivalence has not been established.",
+   "gap": "Pin the intended upstream XML schema and validate successful/failing operations with actual automation consumers.",
+   "acceptance": [
+    "Compare schema-valid fixtures for command results, transfer errors, cancellation and session lifecycle against the pinned upstream format.",
+    "Test at least one upstream-compatible parser and prove secret redaction preserves a valid document."
+   ],
+   "source": [
+    "source/linux/Console.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "script": [
+     "test_xml_action_log",
+     "test_xml_action_log_is_closed"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "script"
+    ]
+   }
   }
- ]
+ ],
+ "scope": {
+  "definition": "Inventory of the pinned upstream script registrations, Linux additions, reviewed feature areas and known implementation/compatibility gaps. Completeness of this ledger is not full WinSCP feature parity or an exhaustive behavioral/security certification.",
+  "reviewed_on": "2026-10-15",
+  "limitations": [
+   "Verified means the stated scoped behavior has named automated evidence, not every upstream variant.",
+   "Source/test citations record where evidence is defined, not a claim that every suite ran in this workspace.",
+   "Mock-server/browser fixtures do not certify every real server, browser, file manager or architecture.",
+   "Missing capabilities are retained and must not be deleted to pass the full-parity gate."
+  ]
+ }
 }

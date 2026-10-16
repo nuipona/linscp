@@ -203,6 +203,10 @@ $(OBJDIR)/libs/%.o: $(TOP)/libs/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS_PUTTY) -c $< -o $@
 
+# Catalogs are compiled into Texts.cpp; regenerate the table with
+# tools/compile_translations.py after editing locales/*.json.
+$(OBJDIR)/linux/Texts.o: Translations.inc
+
 $(OBJDIR)/linux/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_APP) -c $< -o $@

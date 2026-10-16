@@ -426,7 +426,7 @@ std::string PreparePrivateKeyFile(const std::string & keyFile,
             return std::string();
         }
         if (!Console::Instance().ReadPassword(
-                "Passphrase for key file '" + keyFile + "': ", passphrase) ||
+                linuxscp::Texts::Translate("Passphrase for key file '{path}': ", {{"path", keyFile}}), passphrase) ||
             passphrase.empty())
         {
             error = "No passphrase given for the private key file '" + keyFile + "'.";
@@ -620,7 +620,7 @@ bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
             return false;
         }
         if (!Console::Instance().ReadPassword(
-                "Passphrase for key file '" + path + "': ", passphrase) ||
+                linuxscp::Texts::Translate("Passphrase for key file '{path}': ", {{"path", path}}), passphrase) ||
             passphrase.empty())
         {
             error = "No passphrase given for the private key file '" + path + "'.";

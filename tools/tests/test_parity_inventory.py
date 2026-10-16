@@ -1,13 +1,18 @@
 """Validate the inventory checker, including intentionally failing gates."""
 import json
+import copy
+import contextlib
+import io
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
+import check_upstream_parity as checker
 from check_upstream_parity import (check_capabilities, check_verification,
                                    matrix_report, upstream_commands)
 
@@ -179,6 +184,76 @@ class InventoryTests(unittest.TestCase):
         check_capabilities(inventory, errors)
         self.assertIn("Pinned upstream gap was dropped from the inventory: dav.locks",
                       errors)
+
+    def test_every_dispatcher_name_is_in_exactly_one_group(self):
+        inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
+        dispatched = checker.command_table((ROOT / "source/linux/Script.cpp").read_text())
+        errors = []
+        checker.check_command_coverage(inventory, dispatched, errors)
+        self.assertEqual(errors, [])
+        for change, expected in [
+                (lambda j: j['linuxscp_additions'][0]['commands'].append('open'), 'multiple ledger groups'),
+                (lambda j: j['linuxscp_additions'][0]['commands'].append('imaginary'), 'no dispatcher'),
+                (lambda j: j['linuxscp_additions'].pop(), 'absent from inventory'),
+                (lambda j: j['linuxscp_additions'][0].pop('commands'), 'explicit command names')]:
+            candidate = copy.deepcopy(inventory)
+            change(candidate)
+            errors = []
+            checker.check_command_coverage(candidate, dispatched, errors)
+            self.assertIn(expected, ' | '.join(errors))
+
+    def test_area_status_cannot_hide_known_gaps(self):
+        inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
+        errors = []
+        checker.check_feature_rollups(inventory, errors)
+        self.assertEqual(errors, [])
+        next(f for f in inventory['features'] if f['name'] == 'Amazon S3')['status'] = 'verified'
+        checker.check_feature_rollups(inventory, errors)
+        self.assertIn('verified area has tracked gaps', ' | '.join(errors))
+
+    def test_every_gap_has_acceptance_criteria_and_appears_in_plan(self):
+        inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
+        plan = checker.plan_report(inventory)
+        self.assertEqual((ROOT / 'docs/remaining-parity-plan.md').read_text(), plan)
+        for row in inventory['capabilities']:
+            if row['status'] == 'verified':
+                self.assertNotIn('## ' + row['id'] + '\n', plan)
+            else:
+                self.assertIn('## ' + row['id'] + '\n', plan)
+                self.assertTrue(row['acceptance'])
+                for value in (None, [], [' ']):
+                    candidate = copy.deepcopy(inventory)
+                    next(r for r in candidate['capabilities'] if r['id'] == row['id'])['acceptance'] = value
+                    errors = []
+                    check_capabilities(candidate, errors)
+                    self.assertIn('needs acceptance criteria', ' | '.join(errors))
+
+    def test_complete_report_contains_all_ledger_sections_and_source_links(self):
+        inventory = json.loads((ROOT / 'docs/upstream-parity.json').read_text())
+        report = matrix_report(inventory)
+        for name in inventory['commands']:
+            self.assertIn('| `' + name + '` |', report)
+        for addition in inventory['linuxscp_additions']:
+            self.assertIn(addition['name'], report)
+        for row in inventory['capabilities']:
+            self.assertIn('| `' + row['id'] + '` |', report)
+            for path in row.get('source', []):
+                self.assertIn('(../' + path + ')', report)
+        self.assertIn('UnitTest.cpp#L', report)
+        self.assertIn('LiveSftpTest.py#L', report)
+        self.assertIn('Evidence suite registry', report)
+
+    def test_gap_plan_drift_fails_the_default_check(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            plan = pathlib.Path(tmp) / 'plan.md'
+            plan.write_text('stale plan')
+            error_output = io.StringIO()
+            with mock.patch.object(checker, 'PLAN_REPORT', plan), \
+                 mock.patch.object(sys, 'argv', ['check_upstream_parity.py']), \
+                 contextlib.redirect_stdout(io.StringIO()), \
+                 contextlib.redirect_stderr(error_output):
+                self.assertEqual(checker.main(), 1)
+            self.assertIn('out of date', error_output.getvalue())
 
     def test_the_real_ledger_is_consistent(self):
         """The shipped inventory has to satisfy its own rules, and the evidence

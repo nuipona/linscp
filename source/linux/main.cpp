@@ -144,8 +144,7 @@ int main(int argc, char ** argv)
         {
             if (!ParsePositiveInteger(value, 65535, &options.portNumber))
             {
-                console.Error("Invalid port number '" + std::string(value) +
-                    "' (expected 1 through 65535).");
+                console.Error(linuxscp::Texts::Translate("Invalid port number '{value}' (expected 1 through 65535).", {{"value", value}}));
                 return 1;
             }
         }
@@ -153,8 +152,7 @@ int main(int argc, char ** argv)
         {
             if (!ParsePositiveInteger(value, INT_MAX / 1000, &options.timeoutSecs))
             {
-                console.Error("Invalid timeout '" + std::string(value) +
-                    "' (expected a positive number of seconds).");
+                console.Error(linuxscp::Texts::Translate("Invalid timeout '{value}' (expected a positive number of seconds).", {{"value", value}}));
                 return 1;
             }
         }
@@ -197,7 +195,7 @@ int main(int argc, char ** argv)
         }
         else if (arg[0] == '-' && arg[1] != '\0')
         {
-            console.Error(std::string("Unknown option '") + arg + "'.");
+            console.Error(linuxscp::Texts::Translate("Unknown option '{argument}'.", {{"argument", arg}}));
             console.Error(linuxscp::Texts::Usage());
             return 1;
         }
@@ -207,7 +205,7 @@ int main(int argc, char ** argv)
         }
         else
         {
-            console.Error(std::string("Unexpected argument '") + arg + "'.");
+            console.Error(linuxscp::Texts::Translate("Unexpected argument '{argument}'.", {{"argument", arg}}));
             return 1;
         }
     }
@@ -235,35 +233,32 @@ int main(int argc, char ** argv)
     }
     if (serverMode && (scriptSpecified || commandSpecified))
     {
-        console.Error("-server reads commands from standard input and cannot "
-            "be combined with -script or -command.");
+        console.Error(linuxscp::Texts::Translate("-server reads commands from standard input and cannot be combined with -script or -command."));
         return 1;
     }
     if (scriptSpecified && commandSpecified)
     {
-        console.Error("Choose either -script or -command, not both.");
+        console.Error(linuxscp::Texts::Translate("Choose either -script or -command, not both."));
         return 1;
     }
     if (literalCommand && !commandSpecified)
     {
-        console.Error("-literal requires -command; scripts and interactive "
-            "commands still expand parameters.");
+        console.Error(linuxscp::Texts::Translate("-literal requires -command; scripts and interactive commands still expand parameters."));
         return 1;
     }
     if (scriptSpecified && scriptFile.empty())
     {
-        console.Error("-script requires a file name (use -script=- for standard input).");
+        console.Error(linuxscp::Texts::Translate("-script requires a file name (use -script=- for standard input)."));
         return 1;
     }
     if (commandSpecified && command.empty())
     {
-        console.Error("-command requires at least one command.");
+        console.Error(linuxscp::Texts::Translate("-command requires at least one command."));
         return 1;
     }
     if ((scriptSpecified || commandSpecified) && !url.empty())
     {
-        console.Error("A site URL cannot be combined with -script or -command; "
-            "put an 'open' command in the script instead.");
+        console.Error(linuxscp::Texts::Translate("A site URL cannot be combined with -script or -command; put an 'open' command in the script instead."));
         return 1;
     }
 
@@ -281,7 +276,7 @@ int main(int argc, char ** argv)
         std::string error;
         if (!console.SetLogFile(logFile, error))
         {
-            console.Error("Cannot open the log file '" + logFile + "': " + error);
+            console.Error(linuxscp::Texts::Translate("Cannot open the log file '{path}': {reason}", {{"path", logFile}, {"reason", error}}));
             return 1;
         }
     }
@@ -290,8 +285,7 @@ int main(int argc, char ** argv)
         std::string error;
         if (!console.SetActionLogFile(xmlLogFile, error))
         {
-            console.Error("Cannot open the XML log file '" + xmlLogFile + "': " +
-                error);
+            console.Error(linuxscp::Texts::Translate("Cannot open the XML log file '{path}': {reason}", {{"path", xmlLogFile}, {"reason", error}}));
             return 1;
         }
     }
@@ -325,8 +319,7 @@ int main(int argc, char ** argv)
     }
     else if (!console.IsInteractive() && url.empty())
     {
-        console.Error("No input. Pass -script, -command or a site URL, "
-            "or run interactively from a terminal.");
+        console.Error(linuxscp::Texts::Translate("No input. Pass -script, -command or a site URL, or run interactively from a terminal."));
         console.Error(linuxscp::Texts::Usage());
         result = 1;
     }

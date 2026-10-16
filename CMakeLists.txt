@@ -114,10 +114,29 @@ if(Python3_Interpreter_FOUND)
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/BrowserUploadTest.py)
   add_test(NAME gui-desktop-uri-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/DesktopUriTest.py)
+  add_test(NAME translation-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_translations.py)
   add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)
   add_test(NAME parity-inventory COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/check_upstream_parity.py)
+endif()
+
+# Browser workflow tests are available when the optional node/jsdom test
+# dependency is installed. The client itself still needs neither at runtime.
+find_program(NODE_EXECUTABLE node)
+if(NODE_EXECUTABLE)
+  execute_process(COMMAND ${NODE_EXECUTABLE} -e "require.resolve('jsdom')"
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    RESULT_VARIABLE JSDOM_RESULT OUTPUT_QUIET ERROR_QUIET)
+  if(JSDOM_RESULT EQUAL 0)
+    add_test(NAME gui-client-tests COMMAND ${NODE_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/ClientTest.js)
+    add_test(NAME gui-localization-tests COMMAND ${NODE_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/LocalizationTest.js)
+  else()
+    message(STATUS "Browser tests not registered: install jsdom@26 to run them")
+  endif()
 endif()
 
 # ---- PuTTY core + POSIX platform layer (mirrors source/linux/Makefile) ----
