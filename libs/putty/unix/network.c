@@ -78,7 +78,7 @@ struct NetSocket {
     bool listener;
     bool nodelay, keepalive;           /* for connect()-type sockets */
     bool privport;
-    /* LinuxSCP: MPEXT socket creation parameters (see sk_new below) */
+    /* LinSCP: MPEXT socket creation parameters (see sk_new below) */
     int connect_timeout;               /* milliseconds, 0 = none */
     int sndbuf;                        /* SO_SNDBUF, 0 = leave alone */
     char *srcaddr;                     /* local address to bind, or NULL */
@@ -620,7 +620,7 @@ static int try_connect(NetSocket *sock)
     }
 
     /*
-     * LinuxSCP: honour the send-buffer size that the WinSCP-style
+     * LinSCP: honour the send-buffer size that the WinSCP-style
      * configuration can specify, and widen the receive buffer to match
      * (same behaviour as the Windows platform layer).
      */
@@ -654,7 +654,7 @@ static int try_connect(NetSocket *sock)
             if (family == AF_INET6) {
                 u.sin6.sin6_family = AF_INET6;
                 u.sin6.sin6_addr = in6addr_any;
-                /* LinuxSCP: bind to the configured source address */
+                /* LinSCP: bind to the configured source address */
                 if (sock->srcaddr && sock->srcaddr[0] &&
                     inet_pton(AF_INET6, sock->srcaddr, &u.sin6.sin6_addr) != 1) {
                     err = EINVAL;
@@ -669,7 +669,7 @@ static int try_connect(NetSocket *sock)
                 assert(family == AF_INET);
                 u.sin.sin_family = AF_INET;
                 u.sin.sin_addr.s_addr = htonl(INADDR_ANY);
-                /* LinuxSCP: bind to the configured source address */
+                /* LinSCP: bind to the configured source address */
                 if (sock->srcaddr && sock->srcaddr[0] &&
                     inet_pton(AF_INET, sock->srcaddr, &u.sin.sin_addr) != 1) {
                     err = EINVAL;
@@ -742,7 +742,7 @@ static int try_connect(NetSocket *sock)
     nonblock(s);
 
     /*
-     * LinuxSCP: the WinSCP-style configuration carries a connect
+     * LinSCP: the WinSCP-style configuration carries a connect
      * timeout; apply it as a socket timeout for the duration of the
      * connect attempt (as the Windows platform layer does), then put
      * the previous settings back.
@@ -783,7 +783,7 @@ static int try_connect(NetSocket *sock)
                  &thisaddr, sock->port, NULL, 0);
     }
 
-    /* LinuxSCP: restore the socket timeouts used for the connect attempt */
+    /* LinSCP: restore the socket timeouts used for the connect attempt */
     if (sock->connect_timeout > 0) {
         if (have_old_rcvtimeo)
             setsockopt(s, SOL_SOCKET, SO_RCVTIMEO,
@@ -845,7 +845,7 @@ Socket *sk_new(SockAddr *addr, int port, bool privport, bool oobinline,
     s->keepalive = keepalive;
     s->privport = privport;
     s->port = port;
-    /* LinuxSCP: MPEXT socket parameters (WinSCP-style configuration) */
+    /* LinSCP: MPEXT socket parameters (WinSCP-style configuration) */
     s->connect_timeout = connect_timeout > 0 ? connect_timeout : 0;
     s->sndbuf = sndbuf > 0 ? sndbuf : 0;
     s->srcaddr = (srcaddr && srcaddr[0]) ? dupstr(srcaddr) : NULL;
@@ -1082,7 +1082,7 @@ static void sk_net_close(Socket *sock)
     if (s->addr)
         sk_addr_free(s->addr);
     delete_callbacks_for_context(DEFAULT_CALLBACK_SET, s);
-    sfree(s->srcaddr); /* LinuxSCP */
+    sfree(s->srcaddr); /* LinSCP */
     sfree(s);
 }
 

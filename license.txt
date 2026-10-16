@@ -684,7 +684,7 @@ Public License instead of this License.  But first, please read
 
 This program started as a fork of WinSCP. The WinSCP source it was forked
 from, with the copyright notices that go with it, is kept in the git history
-of this repository, in the commits before "Make LinuxSCP a Debian-only
+of this repository, in the commits before "Make LinSCP a Debian-only
 application" (2026-10-12). The GNU General Public License requires those
 notices to be kept, and they read:
 

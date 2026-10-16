@@ -21,7 +21,7 @@ static bool ssh2_connection_get_specials(
 static void ssh2_connection_special_cmd(PacketProtocolLayer *ppl,
                                         SessionSpecialCode code, int arg);
 static void ssh2_connection_reconfigure(PacketProtocolLayer *ppl, Conf *conf);
-static unsigned int ssh2_connection_linuxscp_query(PacketProtocolLayer *ppl, int query);
+static unsigned int ssh2_connection_linscp_query(PacketProtocolLayer *ppl, int query);
 
 static const PacketProtocolLayerVtable ssh2_connection_vtable = {
     .free = ssh2_connection_free,
@@ -32,7 +32,7 @@ static const PacketProtocolLayerVtable ssh2_connection_vtable = {
     .queued_data_size = ssh_ppl_default_queued_data_size,
     .final_output = ssh_ppl_default_final_output,
     .name = "ssh-connection",
-    .linuxscp_query = ssh2_connection_linuxscp_query,
+    .linscp_query = ssh2_connection_linscp_query,
 };
 
 static SshChannel *ssh2_lportfwd_open(
@@ -1812,7 +1812,7 @@ static void ssh2_connection_reconfigure(PacketProtocolLayer *ppl, Conf *conf)
 
 #include <puttyexp.h>
 
-static unsigned int ssh2_connection_linuxscp_query(PacketProtocolLayer *ppl, int query)
+static unsigned int ssh2_connection_linscp_query(PacketProtocolLayer *ppl, int query)
 {
     struct ssh2_connection_state *s =
         container_of(ppl, struct ssh2_connection_state, ppl);

@@ -43,7 +43,7 @@ const responses = {
       remote_dir: '/tmp/slowremote', local_dir: '/tmp/slowlocal',
       observed_hostkey: 'ssh-ed25519 255 SHA256:abc', error: ''
     }],
-    active_tab: 1, paused: false, binary: '/usr/bin/linuxscp',
+    active_tab: 1, paused: false, binary: '/usr/bin/linscp',
     local_dir: '/tmp/slowlocal', remote_dir: '/tmp/slowremote',
     sessions_file: '/tmp/cfg/sessions.ini'
   },

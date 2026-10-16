@@ -16,7 +16,7 @@
  * The hardware-accelerated crypto in source/putty/crypto is guarded per
  * toolchain (see the #if at the top of crypto/aes-ni.c), so a platform can
  * turn any of these off from the command line when it does not compile the
- * accelerated sources. [linuxscp-compat]
+ * accelerated sources. [linscp-compat]
  */
 #ifndef HAVE_AES_NI
 #define HAVE_AES_NI 1

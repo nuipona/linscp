@@ -30,11 +30,11 @@ names and API enum values must never be translated.
 ## CLI selection
 
 ```sh
-LINUXSCP_LANGUAGE=es linuxscp -help
-LINUXSCP_LANGUAGE=es linuxscp -batch -command='nosuchcommand'
+LINSCP_LANGUAGE=es linscp -help
+LINSCP_LANGUAGE=es linscp -batch -command='nosuchcommand'
 ```
 
-The first nonempty variable wins: `LINUXSCP_LANGUAGE`, `LC_ALL`, `LC_MESSAGES`,
+The first nonempty variable wins: `LINSCP_LANGUAGE`, `LC_ALL`, `LC_MESSAGES`,
 then `LANG`. An exact catalog is preferred; `es_MX.UTF-8` and `es_ES@formal`
 fall back to `es`. Unknown locales and `C`/`POSIX` use English. Selection changes
 messages only, not the process's numeric locale or protocol serialization.
@@ -58,7 +58,7 @@ the default still works; a preference change reports the storage failure rather
 than silently losing it.
 
 The GUI always runs its internal CLI subprocesses with
-`LINUXSCP_LANGUAGE=en`. The browser localizes their structured presentation
+`LINSCP_LANGUAGE=en`. The browser localizes their structured presentation
 separately. This is essential: language-dependent messages must not change the
 machine protocol, parsed sync plans, progress reports or error handling.
 

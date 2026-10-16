@@ -17,7 +17,7 @@ const struct ssh_decompressor * get_sccomp(Backend * be);
 #define FORK_QUERY_REMMAXPKT 1
 #define FORK_QUERY_MAIN_CHANNEL 2
 #define FORK_QUERY_TIMER 3
-unsigned int linuxscp_query(Backend * be, int query);
+unsigned int linscp_query(Backend * be, int query);
 void md5checksum(const char * buffer, int len, unsigned char output[16]);
 typedef const struct ssh_keyalg * cp_ssh_keyalg;
 void get_hostkey_algs(int type, int * count, cp_ssh_keyalg ** sign_keys);

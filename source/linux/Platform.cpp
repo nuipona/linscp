@@ -25,7 +25,7 @@
 #include <chrono>
 #include <thread>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -109,7 +109,7 @@ std::string HomeDirectory()
 
 std::string ConfigDirectory()
 {
-    std::string overrideDir = EnvironmentVariable("LINUXSCP_CONFIG_DIR");
+    std::string overrideDir = EnvironmentVariable("LINSCP_CONFIG_DIR");
     if (!overrideDir.empty())
     {
         return overrideDir;
@@ -117,12 +117,12 @@ std::string ConfigDirectory()
     std::string xdg = EnvironmentVariable("XDG_CONFIG_HOME");
     if (!xdg.empty())
     {
-        return xdg + "/LinuxSCP";
+        return xdg + "/LinSCP";
     }
     std::string home = HomeDirectory();
     if (!home.empty())
     {
-        return home + "/.config/LinuxSCP";
+        return home + "/.config/LinSCP";
     }
     return std::string();
 }
@@ -489,12 +489,12 @@ bool LaunchGuiApplication(std::string & error)
      * on PATH; /usr/bin must not win over the version being run. */
     const std::string directory = ExecutableDirectory();
     const std::string beside = directory.empty() ? std::string() :
-        directory + "/linuxscp-gui";
+        directory + "/linscp-gui";
     /* In an uninstalled source tree the Makefile binary is in
      * source/linux/build and the CMake binary is in build/. Use that tree's
      * launcher instead of a possibly older package on PATH. */
-    const std::string makeTree = directory + "/../../gui/linuxscp-gui";
-    const std::string cmakeTree = directory + "/../source/gui/linuxscp-gui";
+    const std::string makeTree = directory + "/../../gui/linscp-gui";
+    const std::string cmakeTree = directory + "/../source/gui/linscp-gui";
     std::string guiBin;
     if (!beside.empty() && access(beside.c_str(), X_OK) == 0)
         guiBin = beside;
@@ -503,10 +503,10 @@ bool LaunchGuiApplication(std::string & error)
     else if (!directory.empty() && access(cmakeTree.c_str(), X_OK) == 0)
         guiBin = cmakeTree;
     else
-        guiBin = FindExecutableOnPath("linuxscp-gui");
+        guiBin = FindExecutableOnPath("linscp-gui");
     if (guiBin.empty())
     {
-        guiBin = "/usr/bin/linuxscp-gui";
+        guiBin = "/usr/bin/linscp-gui";
     }
     execl(guiBin.c_str(), guiBin.c_str(), static_cast<char *>(NULL));
     error = std::string("Failed to launch LinSCP GUI '") + guiBin +
@@ -783,7 +783,7 @@ bool LaunchTerminalForServer(const std::string & userName,
 
     std::string program;
     std::vector<std::string> leading;
-    const std::string overrideProgram = EnvironmentVariable("LINUXSCP_TERMINAL");
+    const std::string overrideProgram = EnvironmentVariable("LINSCP_TERMINAL");
     if (!overrideProgram.empty())
     {
         /* '<program> [args]', e.g. 'xterm -e' or 'foot'. */
@@ -818,7 +818,7 @@ bool LaunchTerminalForServer(const std::string & userName,
         if (program.empty())
         {
             error = "None of the common desktop terminals is installed; set "
-                "LINUXSCP_TERMINAL to the terminal program to use.";
+                "LINSCP_TERMINAL to the terminal program to use.";
             error += SshHint(userName, hostName, portNumber);
             return false;
         }
@@ -900,4 +900,4 @@ bool LaunchTerminalForServer(const std::string & userName,
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp

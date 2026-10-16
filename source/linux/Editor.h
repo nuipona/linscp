@@ -14,15 +14,15 @@
  * server in the meantime is not silently overwritten.
  */
 
-#ifndef LINUXSCP_EDITOR_H
-#define LINUXSCP_EDITOR_H
+#ifndef LINSCP_EDITOR_H
+#define LINSCP_EDITOR_H
 
 #include <string>
 #include <vector>
 
 #include "SftpClient.h"
 
-namespace linuxscp {
+namespace linscp {
 
 class Console;
 
@@ -44,7 +44,7 @@ public:
 struct EditOptions
 {
     /* Editor command line (for example "vim" or "code --wait"). Empty:
-     * $LINUXSCP_EDITOR, $VISUAL, $EDITOR, or a common editor. */
+     * $LINSCP_EDITOR, $VISUAL, $EDITOR, or a common editor. */
     std::string editor;
     /* Keep the temporary file after a successful upload, for
      * inspection. It is always kept when the upload fails. */
@@ -136,6 +136,6 @@ private:
     Console * mConsole;    /* may be NULL: no status messages */
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_EDITOR_H */
+#endif /* LINSCP_EDITOR_H */

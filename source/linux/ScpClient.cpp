@@ -24,7 +24,7 @@
 #include "PathUtil.h"
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -1823,4 +1823,4 @@ int ScpClient::Put(const SessionOptions & options,
     return 0;
 }
 
-} // namespace linuxscp
+} // namespace linscp

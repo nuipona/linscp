@@ -58,7 +58,7 @@ No WinSCP .NET assembly or equivalent object model for Linux.
 
 **Area:** Automation · **Status:** partial
 
-automation/LinSCP.psm1 is a PowerShell 7 (pwsh) module that wraps the console client in -server mode and exports Open-LScpSession, Close-LScpSession, Get-LScpItem, Send-LScpItem, Get-LScpDirectory and Sync-LScpDirectory; 'make install' puts it in PREFIX/share/linuxscp/automation. Nothing exercises it: no automated case runs PowerShell, so its session lifetime, pipeline objects, terminating errors, cancellation and secret handling are unevidenced, and it is a shim over the CLI rather than upstream's assembly API.
+automation/LinSCP.psm1 is a PowerShell 7 (pwsh) module that wraps the console client in -server mode and exports Open-LScpSession, Close-LScpSession, Get-LScpItem, Send-LScpItem, Get-LScpDirectory and Sync-LScpDirectory; 'make install' puts it in PREFIX/share/linscp/automation. Nothing exercises it: no automated case runs PowerShell, so its session lifetime, pipeline objects, terminating errors, cancellation and secret handling are unevidenced, and it is a shim over the CLI rather than upstream's assembly API.
 
 **Next:** Exercise the shipped module with PowerShell on Linux: a session opened and closed, an upload and a download of exact bytes, a listing as pipeline objects, a terminating error, a cancelled transfer, and a password that appears neither in the process list nor in the output.
 

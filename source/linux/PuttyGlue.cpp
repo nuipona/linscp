@@ -10,7 +10,7 @@
  *     get_seat_callback_set() (MPEXT means "one callback queue per
  *     session"). The console client has a single session, so all of
  *     these return one statically allocated set; the vendored POSIX
- *     platform layer reaches it through linuxscp_posix_callback_set().
+ *     platform layer reaches it through linscp_posix_callback_set().
  *
  *  2. Persistent storage (storage.h): saved sessions, the SSH host key
  *     cache and the random seed file, as plain files below the
@@ -72,7 +72,7 @@ namespace {
 
 std::string StorageRoot()
 {
-    const char * overrideDir = getenv("LINUXSCP_CONFIG_DIR");
+    const char * overrideDir = getenv("LINSCP_CONFIG_DIR");
     if (overrideDir != NULL && overrideDir[0] != '\0')
     {
         return std::string(overrideDir);
@@ -80,15 +80,15 @@ std::string StorageRoot()
     const char * xdg = getenv("XDG_CONFIG_HOME");
     if (xdg != NULL && xdg[0] != '\0')
     {
-        return std::string(xdg) + "/LinuxSCP";
+        return std::string(xdg) + "/LinSCP";
     }
     const char * home = getenv("HOME");
     if (home != NULL && home[0] != '\0')
     {
-        return std::string(home) + "/.config/LinuxSCP";
+        return std::string(home) + "/.config/LinSCP";
     }
     char buffer[64];
-    snprintf(buffer, sizeof(buffer), "/tmp/LinuxSCP-%u",
+    snprintf(buffer, sizeof(buffer), "/tmp/LinSCP-%u",
         static_cast<unsigned int>(getuid()));
     return std::string(buffer);
 }
@@ -280,7 +280,7 @@ void PutUtf8(BinarySink * bs, unsigned long value)
  * configuration directory for the core to read.
  */
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -426,7 +426,7 @@ std::string PreparePrivateKeyFile(const std::string & keyFile,
             return std::string();
         }
         if (!Console::Instance().ReadPassword(
-                linuxscp::Texts::Translate("Passphrase for key file '{path}': ", {{"path", keyFile}}), passphrase) ||
+                linscp::Texts::Translate("Passphrase for key file '{path}': ", {{"path", keyFile}}), passphrase) ||
             passphrase.empty())
         {
             error = "No passphrase given for the private key file '" + keyFile + "'.";
@@ -620,7 +620,7 @@ bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
             return false;
         }
         if (!Console::Instance().ReadPassword(
-                linuxscp::Texts::Translate("Passphrase for key file '{path}': ", {{"path", path}}), passphrase) ||
+                linscp::Texts::Translate("Passphrase for key file '{path}': ", {{"path", path}}), passphrase) ||
             passphrase.empty())
         {
             error = "No passphrase given for the private key file '" + path + "'.";
@@ -664,7 +664,7 @@ bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp
 
 /* ======================================================================
  * C entry points expected by the core
@@ -674,14 +674,14 @@ extern "C" {
 
 /* --- 1. The MPEXT callback-set seam ---------------------------------- */
 
-struct callback_set * linuxscp_posix_callback_set(void)
+struct callback_set * linscp_posix_callback_set(void)
 {
     static struct callback_set callbackSet;
     static bool initialised = false;
     if (!initialised)
     {
         memset(&callbackSet, 0, sizeof(callbackSet));
-        linuxscp_critical_section_init(&callbackSet.ready_critsec[0]);
+        linscp_critical_section_init(&callbackSet.ready_critsec[0]);
         initialised = true;
     }
     return &callbackSet;
@@ -689,22 +689,22 @@ struct callback_set * linuxscp_posix_callback_set(void)
 
 struct callback_set * get_callback_set(Plug * plug)
 {
-    return linuxscp_posix_callback_set();
+    return linscp_posix_callback_set();
 }
 
 struct callback_set * get_seat_callback_set(Seat * seat)
 {
-    return linuxscp_posix_callback_set();
+    return linscp_posix_callback_set();
 }
 
 struct callback_set * get_log_callback_set(LogContext * ctx)
 {
-    return linuxscp_posix_callback_set();
+    return linscp_posix_callback_set();
 }
 
 Seat * get_log_seat(LogContext * ctx)
 {
-    linuxscp::Session * session = linuxscp::CurrentSession();
+    linscp::Session * session = linscp::CurrentSession();
     return session != NULL ? static_cast<Seat *>(session->SeatHandle()) : NULL;
 }
 
@@ -716,9 +716,9 @@ CRITICAL_SECTION putty_section;
 
 /* One-time setup of the recursive mutex type, before main() does anything
  * that could take a section. */
-void linuxscp_platform_init(void)
+void linscp_platform_init(void)
 {
-    linuxscp_critical_section_init(&putty_section);
+    linscp_critical_section_init(&putty_section);
 }
 
 } /* extern "C" */
@@ -743,17 +743,17 @@ const pthread_mutexattr_t & CriticalSectionAttributes()
 
 extern "C" {
 
-void linuxscp_critical_section_init(CRITICAL_SECTION * cs)
+void linscp_critical_section_init(CRITICAL_SECTION * cs)
 {
     pthread_mutex_init(cs, &CriticalSectionAttributes());
 }
 
-void linuxscp_critical_section_enter(CRITICAL_SECTION * cs)
+void linscp_critical_section_enter(CRITICAL_SECTION * cs)
 {
     pthread_mutex_lock(cs);
 }
 
-void linuxscp_critical_section_leave(CRITICAL_SECTION * cs)
+void linscp_critical_section_leave(CRITICAL_SECTION * cs)
 {
     pthread_mutex_unlock(cs);
 }
@@ -775,7 +775,7 @@ NORETURN void modalfatalbox(const char * format, ...)
     char buffer[2048];
     vsnprintf(buffer, sizeof(buffer), format, args);
     va_end(args);
-    linuxscp::Console::Instance().Fatal(buffer);
+    linscp::Console::Instance().Fatal(buffer);
     exit(1);
 }
 
@@ -799,7 +799,7 @@ const char * in_memory_key_data(const Filename * fn)
 
 void old_keyfile_warning(void)
 {
-    linuxscp::Console::Instance().Error(
+    linscp::Console::Instance().Error(
         "Warning: this private key is in an old format; consider converting it.");
 }
 
@@ -1034,7 +1034,7 @@ int retrieve_host_key(const char * hostname, int port, const char * keytype,
  *
  * 'key' is the server key in the same text form store_host_key() saved.
  */
-int linuxscp_check_cached_host_key(const char * hostname, int port,
+int linscp_check_cached_host_key(const char * hostname, int port,
     const char * keytype, const char * key)
 {
     std::vector<std::string> lines;
@@ -1166,7 +1166,7 @@ Filename * platform_default_filename(const char * name)
 {
     if (strcmp(name, "LogFileName") == 0)
     {
-        return filename_from_str("linuxscp.log");
+        return filename_from_str("linscp.log");
     }
     return filename_from_str("");
 }
@@ -1267,7 +1267,7 @@ bool BinarySink_put_wc_to_mb(BinarySink * bs, int codepage, const wchar_t * wcst
 
 bool sftp_senddata(const char * data, size_t len)
 {
-    linuxscp::Session * session = linuxscp::CurrentSession();
+    linscp::Session * session = linscp::CurrentSession();
     if (session == NULL)
     {
         return false;
@@ -1277,7 +1277,7 @@ bool sftp_senddata(const char * data, size_t len)
 
 size_t sftp_sendbuffer(void)
 {
-    linuxscp::Session * session = linuxscp::CurrentSession();
+    linscp::Session * session = linscp::CurrentSession();
     if (session == NULL)
     {
         return 0;
@@ -1287,7 +1287,7 @@ size_t sftp_sendbuffer(void)
 
 bool sftp_recvdata(char * data, size_t len)
 {
-    linuxscp::Session * session = linuxscp::CurrentSession();
+    linscp::Session * session = linscp::CurrentSession();
     if (session == NULL)
     {
         return false;

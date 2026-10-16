@@ -132,7 +132,7 @@ class LiveS3Tests(unittest.TestCase):
         argv += list(extra_args)
         argv.append("-command=open s3://%s:%s@127.0.0.1:%d/ ; %s" %
                     (user, secret, self.port, commands))
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env)
 
@@ -164,7 +164,7 @@ class LiveS3Tests(unittest.TestCase):
         result = subprocess.run(argv, capture_output=True, text=True,
                                 timeout=60,
                                 env=dict(os.environ,
-                                         LINUXSCP_CONFIG_DIR=str(self.config)))
+                                         LINSCP_CONFIG_DIR=str(self.config)))
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("secret access key", result.stderr)
         self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
@@ -473,7 +473,7 @@ class LiveS3Tests(unittest.TestCase):
             "put %s /vault/item.txt ; "
             "exit" % (ACCESS_KEY, SECRET_KEY, self.port, source)
         ]
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         result = subprocess.run(
             argv, capture_output=True, text=True, timeout=60, env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

@@ -12,12 +12,12 @@
  * temporary copy first so that the local file is never modified.
  */
 
-#ifndef LINUXSCP_TEXTMODE_H
-#define LINUXSCP_TEXTMODE_H
+#ifndef LINSCP_TEXTMODE_H
+#define LINSCP_TEXTMODE_H
 
 #include <string>
 
-namespace linuxscp {
+namespace linscp {
 
 /* Which files 'automatic' mode converts. This is WinSCP's default list
  * of text file extensions. */
@@ -51,6 +51,6 @@ bool ConvertToUnixLineEndings(const std::string & path,
 bool MakeCRLFUploadCopy(const std::string & source, std::string & tempPath,
     std::string & error);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_TEXTMODE_H */
+#endif /* LINSCP_TEXTMODE_H */

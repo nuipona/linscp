@@ -263,7 +263,7 @@ class DavHandler(BaseHTTPRequestHandler):
             return True
         self.send_response(401)
         self.send_header("WWW-Authenticate",
-                         'Basic realm="linuxscp-dav-test"')
+                         'Basic realm="linscp-dav-test"')
         self.send_header("Content-Length", "0")
         self.end_headers()
         return False
@@ -358,7 +358,7 @@ class DavHandler(BaseHTTPRequestHandler):
             # The dead properties this store holds, in the namespace the
             # client wrote them in, next to the live ones.
             dead = "".join(
-                "<lscp:%s xmlns:lscp=\"urn:linuxscp:properties\">%s</lscp:%s>"
+                "<lscp:%s xmlns:lscp=\"urn:linscp:properties\">%s</lscp:%s>"
                 % (name, xml_escape(value), name)
                 for name, value in sorted(
                     SERVER_STORE.get_properties(target).items()))
@@ -390,7 +390,7 @@ class DavHandler(BaseHTTPRequestHandler):
             timeout = int(header.split("-", 1)[1] or "0")
         owner = re.search(r"<owner>.*?<href>(.*?)</href>", body, re.S)
         status, token = SERVER_STORE.lock(
-            path, timeout, owner.group(1) if owner else "linuxscp")
+            path, timeout, owner.group(1) if owner else "linscp")
         if status == "missing":
             self.send_error_text(404, "Not Found.")
             return
@@ -459,7 +459,7 @@ class DavHandler(BaseHTTPRequestHandler):
             207,
             "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
             "<d:multistatus xmlns:d=\"DAV:\" "
-            "xmlns:lscp=\"urn:linuxscp:properties\">"
+            "xmlns:lscp=\"urn:linscp:properties\">"
             "<d:response><d:href>%s</d:href>%s</d:response></d:multistatus>"
             % (xml_escape(href), propstats),
             "application/xml; charset=utf-8")

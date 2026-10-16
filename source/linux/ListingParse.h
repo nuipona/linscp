@@ -15,13 +15,13 @@
  * ask the server something else.
  */
 
-#ifndef LINUXSCP_LISTINGPARSE_H
-#define LINUXSCP_LISTINGPARSE_H
+#ifndef LINSCP_LISTINGPARSE_H
+#define LINSCP_LISTINGPARSE_H
 
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 struct ListingEntry
 {
@@ -95,6 +95,6 @@ bool ParseVmsListingLine(const std::string & line, ListingEntry & entry);
  * it by checking its LooksLike* first. */
 bool ParseAnyListingLine(const std::string & line, ListingEntry & entry);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_LISTINGPARSE_H */
+#endif /* LINSCP_LISTINGPARSE_H */

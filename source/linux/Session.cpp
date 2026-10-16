@@ -15,7 +15,7 @@
 
 #include "PuttyCompat.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -279,7 +279,7 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
      * that differs from a stored one is refused, and only a host with no
      * cached key at all is a new host.
      */
-    const int cacheState = linuxscp_check_cached_host_key(host, port, keytype, keystr);
+    const int cacheState = linscp_check_cached_host_key(host, port, keytype, keystr);
     if (cacheState > 0)
     {
         Console::Instance().LogEvent(Texts::HostKeyCached(host, port));
@@ -2417,4 +2417,4 @@ void SetCurrentSession(Session * session)
     g_currentSession = session;
 }
 
-} // namespace linuxscp
+} // namespace linscp

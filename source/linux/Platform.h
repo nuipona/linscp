@@ -10,14 +10,14 @@
  * backend in ProtocolClient.cpp.
  */
 
-#ifndef LINUXSCP_PLATFORM_H
-#define LINUXSCP_PLATFORM_H
+#ifndef LINSCP_PLATFORM_H
+#define LINSCP_PLATFORM_H
 
 #include <ctime>
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 /* One-time console setup. Safe to call before anything is printed. */
 void InitConsole();
@@ -51,8 +51,8 @@ bool LocalTime(std::time_t value, std::tm & result);
 std::string HomeDirectory();
 
 /* Per-user configuration directory of the application, without a
- * trailing separator ($XDG_CONFIG_HOME/LinuxSCP or
- * ~/.config/LinuxSCP). Empty when no home directory is known. The
+ * trailing separator ($XDG_CONFIG_HOME/LinSCP or
+ * ~/.config/LinSCP). Empty when no home directory is known. The
  * directory is not created. */
 std::string ConfigDirectory();
 
@@ -128,7 +128,7 @@ std::string FindExecutableOnPath(const std::string & name);
 /* Directory containing the running executable, or an empty string. */
 std::string ExecutableDirectory();
 
-/* Starts the graphical client (linuxscp-gui). This replaces the current
+/* Starts the graphical client (linscp-gui). This replaces the current
  * process and only returns on failure. */
 bool LaunchGuiApplication(std::string & error);
 
@@ -147,13 +147,13 @@ std::vector<std::string> BuildSshArguments(const std::string & userName,
 int RunInteractive(const std::vector<std::string> & args, std::string & error);
 
 /* Opens an interactive terminal on the given server: the system ssh in a
- * desktop terminal emulator (the terminal from LINUXSCP_TERMINAL,
+ * desktop terminal emulator (the terminal from LINSCP_TERMINAL,
  * otherwise the first of the common ones that is installed). Returns
  * false with 'error' set when nothing could be started. */
 bool LaunchTerminalForServer(const std::string & userName,
     const std::string & hostName, int portNumber,
     const std::string & privateKeyFile, std::string & error);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_PLATFORM_H */
+#endif /* LINSCP_PLATFORM_H */

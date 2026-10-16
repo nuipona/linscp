@@ -34,7 +34,7 @@
 
 #include <unistd.h>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -185,7 +185,7 @@ S3Site S3SiteOf(const SessionOptions & options)
     if (options.password.empty())
     {
         site.error = "An Amazon S3 site needs its secret access key as the "
-            "password: -password=SECRET or the LINUXSCP_PASSWORD "
+            "password: -password=SECRET or the LINSCP_PASSWORD "
             "environment variable. Every request is signed with AWS "
             "Signature Version 4, which is what authenticates S3.";
         return site;
@@ -425,7 +425,7 @@ std::string MakeMultipartTempDirectory(std::string & error)
     for (unsigned int attempt = 0; attempt < 32; attempt++)
     {
         const unsigned long long serial = ++counter;
-        const std::string name = "linuxscp-s3-" +
+        const std::string name = "linscp-s3-" +
             std::to_string(static_cast<unsigned long long>(getpid())) + "-" +
             std::to_string(static_cast<unsigned long long>(time(NULL))) + "-" +
             std::to_string(serial);
@@ -2330,4 +2330,4 @@ int S3Client::Move(const SessionOptions & options,
     return 0;
 }
 
-} // namespace linuxscp
+} // namespace linscp

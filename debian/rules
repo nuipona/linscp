@@ -5,7 +5,7 @@
 # plain Makefile (source/linux/Makefile), so the few targets are written out
 # here and the build dependency list stays at dpkg-dev.
 
-package := linuxscp
+package := linscp
 destdir := debian/$(package)
 
 # dpkg-buildpackage calls clean, build and binary; make everything else a
@@ -27,22 +27,22 @@ binary: build
 	install -d $(destdir)/usr/share/applications
 	install -d $(destdir)/usr/share/pixmaps
 	install -d $(destdir)/usr/share/icons/hicolor/scalable/apps
-	install -d $(destdir)/usr/share/linuxscp/gui/web
+	install -d $(destdir)/usr/share/linscp/gui/web
 	install -d $(destdir)/DEBIAN
-	install -m 0755 source/linux/build/linuxscp $(destdir)/usr/bin/linuxscp
-	install -m 0755 source/gui/linuxscp-gui $(destdir)/usr/bin/linuxscp-gui
-	install -m 0644 source/gui/linuxscp_gui.py source/gui/linscp_crypto.py \
-		$(destdir)/usr/share/linuxscp/gui/
-	install -m 0644 source/gui/web/* $(destdir)/usr/share/linuxscp/gui/web/
-	install -m 0644 debian/linuxscp.desktop $(destdir)/usr/share/applications/linuxscp.desktop
-	install -m 0644 debian/linuxscp.png $(destdir)/usr/share/pixmaps/linuxscp.png
-	install -m 0644 debian/linuxscp.svg $(destdir)/usr/share/icons/hicolor/scalable/apps/linuxscp.svg
-	install -m 0644 docs/linuxscp.1 $(destdir)/usr/share/man/man1/linuxscp.1
-	gzip -9f $(destdir)/usr/share/man/man1/linuxscp.1
+	install -m 0755 source/linux/build/linscp $(destdir)/usr/bin/linscp
+	install -m 0755 source/gui/linscp-gui $(destdir)/usr/bin/linscp-gui
+	install -m 0644 source/gui/linscp_gui.py source/gui/linscp_crypto.py \
+		$(destdir)/usr/share/linscp/gui/
+	install -m 0644 source/gui/web/* $(destdir)/usr/share/linscp/gui/web/
+	install -m 0644 debian/linscp.desktop $(destdir)/usr/share/applications/linscp.desktop
+	install -m 0644 debian/linscp.png $(destdir)/usr/share/pixmaps/linscp.png
+	install -m 0644 debian/linscp.svg $(destdir)/usr/share/icons/hicolor/scalable/apps/linscp.svg
+	install -m 0644 docs/linscp.1 $(destdir)/usr/share/man/man1/linscp.1
+	gzip -9f $(destdir)/usr/share/man/man1/linscp.1
 	install -m 0644 debian/copyright $(destdir)/usr/share/doc/$(package)/copyright
 	install -m 0644 license.txt $(destdir)/usr/share/doc/$(package)/LICENSE.txt
 	install -m 0644 docs/debian.md $(destdir)/usr/share/doc/$(package)/README.Debian
-	dpkg-shlibdeps -Tdebian/substvars $(destdir)/usr/bin/linuxscp
+	dpkg-shlibdeps -Tdebian/substvars $(destdir)/usr/bin/linscp
 	dpkg-gencontrol -p$(package) -P$(destdir)
 	dpkg-deb --build $(destdir) ..
 

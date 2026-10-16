@@ -35,7 +35,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -45,8 +45,8 @@ const char * const kPasswordPrefix = "lscp1$";
 const char * const kTagLabel = "lscp1";
 /* Key derivation labels: one key per direction, never the raw file
  * bytes. Must match source/gui/linscp_crypto.py exactly. */
-const char * const kEncKeyLabel = "LinuxSCP sessions file v1 encryption key";
-const char * const kMacKeyLabel = "LinuxSCP sessions file v1 authentication key";
+const char * const kEncKeyLabel = "LinSCP sessions file v1 encryption key";
+const char * const kMacKeyLabel = "LinSCP sessions file v1 authentication key";
 const size_t kKeyBytes = 32;
 const size_t kNonceBytes = 16;
 const size_t kTagBytes = 32;
@@ -444,7 +444,7 @@ KeyReadResult ReadKeyFile(const std::string & path, std::string & key,
     if (path.empty())
     {
         error = "There is no configuration directory to keep a key file in "
-            "(set HOME, or LINUXSCP_CONFIG_DIR to choose one).";
+            "(set HOME, or LINSCP_CONFIG_DIR to choose one).";
         return KeyReadInvalid;
     }
     FILE * file = fopen(path.c_str(), "rb");
@@ -1208,7 +1208,7 @@ bool SessionStore::Save(std::string & error) const
     if (mPath.empty())
     {
         error = "There is no configuration directory, so the session cannot "
-            "be stored (set HOME, or LINUXSCP_CONFIG_DIR to choose one).";
+            "be stored (set HOME, or LINSCP_CONFIG_DIR to choose one).";
         return false;
     }
 
@@ -1493,4 +1493,4 @@ StoredSession SessionStore::FromSessionOptions(const std::string & name,
     return session;
 }
 
-} // namespace linuxscp
+} // namespace linscp

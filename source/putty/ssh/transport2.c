@@ -61,7 +61,7 @@ static void ssh2_transport_final_output(PacketProtocolLayer *ppl);
 static const char *terrapin_vulnerable(
     bool strict_kex, const transport_direction *d);
 static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s);
-static unsigned int ssh2_transport_linuxscp_query(PacketProtocolLayer *ppl, int query);
+static unsigned int ssh2_transport_linscp_query(PacketProtocolLayer *ppl, int query);
 
 static const PacketProtocolLayerVtable ssh2_transport_vtable = {
     .free = ssh2_transport_free,
@@ -72,7 +72,7 @@ static const PacketProtocolLayerVtable ssh2_transport_vtable = {
     .queued_data_size = ssh2_transport_queued_data_size,
     .final_output = ssh2_transport_final_output,
     .name = NULL, /* no protocol name for this layer */
-    .linuxscp_query = ssh2_transport_linuxscp_query,
+    .linscp_query = ssh2_transport_linscp_query,
 };
 
 #ifndef NO_GSSAPI
@@ -2734,7 +2734,7 @@ static bool try_to_avoid_terrapin(const struct ssh2_transport_state *s)
 
 #include "puttyexp.h"
 
-static unsigned int ssh2_transport_linuxscp_query(PacketProtocolLayer *ppl, int query)
+static unsigned int ssh2_transport_linscp_query(PacketProtocolLayer *ppl, int query)
 {
     struct ssh2_transport_state *s =
         container_of(ppl, struct ssh2_transport_state, ppl);
@@ -2743,9 +2743,9 @@ static unsigned int ssh2_transport_linuxscp_query(PacketProtocolLayer *ppl, int 
         ssh2_transport_timer(s, GETTICKCOUNT());
         return 1;
     }
-    else if (s->higher_layer->vt->linuxscp_query != NULL)
+    else if (s->higher_layer->vt->linscp_query != NULL)
     {
-        return ssh_ppl_linuxscp_query(s->higher_layer, query);
+        return ssh_ppl_linscp_query(s->higher_layer, query);
     }
     else
     {

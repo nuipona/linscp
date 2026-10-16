@@ -261,7 +261,7 @@ bool fxp_write_recv(struct sftp_packet *pktin, struct sftp_request *req);
 /*
  * Read from a directory.
  */
-/* LinuxSCP additions: symlink, server-side copy-data and the
+/* LinSCP additions: symlink, server-side copy-data and the
  * check-file-name checksum extension. */
 struct sftp_request *fxp_symlink_send(const char *target,
                                       const char *linkpath);

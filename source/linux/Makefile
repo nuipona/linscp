@@ -1,6 +1,6 @@
 # Native POSIX (Debian/Linux) build of LinSCP.
 #
-# This builds the console client `linuxscp` for Linux out of:
+# This builds the console client `linscp` for Linux out of:
 #
 #   * the platform-neutral PuTTY core (source/putty, listed in putty-core.mk),
 #   * a POSIX platform layer vendored from upstream PuTTY 0.85
@@ -9,7 +9,7 @@
 #   * the LinSCP front end in this directory.
 #
 # Usage:
-#   make -C source/linux            # builds build/linuxscp
+#   make -C source/linux            # builds build/linscp
 #   make -C source/linux check      # runs the unit tests
 #   make -C source/linux clean
 #
@@ -182,13 +182,13 @@ DESTDIR ?=
 
 .PHONY: all clean check check-live install
 
-all: $(BINDIR)/linuxscp
+all: $(BINDIR)/linscp
 
 $(PUTTY_LIB): $(PUTTY_OBJS)
 	@mkdir -p $(dir $@)
 	$(AR) rcs $@ $^
 
-$(BINDIR)/linuxscp: $(APP_OBJS) $(PUTTY_LIB)
+$(BINDIR)/linscp: $(APP_OBJS) $(PUTTY_LIB)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_APP) -o $@ $(APP_OBJS) $(PUTTY_LIB) $(LDFLAGS) $(LIBS)
 
@@ -236,13 +236,13 @@ check: $(BINDIR)/unittest
 # pyOpenSSL when available, and the GUI search test uses a fake session.
 PYTHON ?= python3
 
-check-live: $(BINDIR)/linuxscp
-	$(PYTHON) tests/ScriptTest.py $(BINDIR)/linuxscp
-	$(PYTHON) tests/LiveSftpTest.py $(BINDIR)/linuxscp
-	$(PYTHON) tests/LiveScpTest.py $(BINDIR)/linuxscp
-	$(PYTHON) tests/LiveS3Test.py $(BINDIR)/linuxscp
-	$(PYTHON) tests/LiveDavTest.py $(BINDIR)/linuxscp
-	$(PYTHON) tests/LiveCurlTest.py $(BINDIR)/linuxscp
+check-live: $(BINDIR)/linscp
+	$(PYTHON) tests/ScriptTest.py $(BINDIR)/linscp
+	$(PYTHON) tests/LiveSftpTest.py $(BINDIR)/linscp
+	$(PYTHON) tests/LiveScpTest.py $(BINDIR)/linscp
+	$(PYTHON) tests/LiveS3Test.py $(BINDIR)/linscp
+	$(PYTHON) tests/LiveDavTest.py $(BINDIR)/linscp
+	$(PYTHON) tests/LiveCurlTest.py $(BINDIR)/linscp
 	$(PYTHON) ../../source/gui/tests/RemoteSearchTest.py
 	$(PYTHON) ../../source/gui/tests/LocalEditorTest.py
 	$(PYTHON) ../../source/gui/tests/BrowserUploadTest.py
@@ -251,26 +251,26 @@ check-live: $(BINDIR)/linuxscp
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)
 
-install: $(BINDIR)/linuxscp
+install: $(BINDIR)/linscp
 	install -d $(DESTDIR)$(PREFIX)/bin
 	install -d $(DESTDIR)$(PREFIX)/share/man/man1
 	install -d $(DESTDIR)$(PREFIX)/share/applications
 	install -d $(DESTDIR)$(PREFIX)/share/pixmaps
 	install -d $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
-	install -d $(DESTDIR)$(PREFIX)/share/linuxscp/gui/web
-	install -d $(DESTDIR)$(PREFIX)/share/linuxscp/automation
-	install -d $(DESTDIR)$(PREFIX)/include/linuxscp
-	install -m 0755 $(BINDIR)/linuxscp $(DESTDIR)$(PREFIX)/bin/linuxscp
-	install -m 0755 $(TOP)/source/gui/linuxscp-gui $(DESTDIR)$(PREFIX)/bin/linuxscp-gui
-	install -m 0644 $(TOP)/source/gui/linuxscp_gui.py $(TOP)/source/gui/linscp_crypto.py \
-		$(DESTDIR)$(PREFIX)/share/linuxscp/gui/
-	install -m 0644 $(TOP)/source/gui/web/* $(DESTDIR)$(PREFIX)/share/linuxscp/gui/web/
-	install -m 0644 $(TOP)/debian/linuxscp.desktop $(DESTDIR)$(PREFIX)/share/applications/linuxscp.desktop
-	install -m 0644 $(TOP)/debian/linuxscp.png $(DESTDIR)$(PREFIX)/share/pixmaps/linuxscp.png
-	install -m 0644 $(TOP)/debian/linuxscp.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/linuxscp.svg
-	install -m 0644 $(TOP)/docs/linuxscp.1 $(DESTDIR)$(PREFIX)/share/man/man1/linuxscp.1
-	install -m 0644 $(TOP)/automation/LinSCP.psm1 $(DESTDIR)$(PREFIX)/share/linuxscp/automation/
-	install -m 0644 $(TOP)/source/linux/liblinscp.h $(DESTDIR)$(PREFIX)/include/linuxscp/
+	install -d $(DESTDIR)$(PREFIX)/share/linscp/gui/web
+	install -d $(DESTDIR)$(PREFIX)/share/linscp/automation
+	install -d $(DESTDIR)$(PREFIX)/include/linscp
+	install -m 0755 $(BINDIR)/linscp $(DESTDIR)$(PREFIX)/bin/linscp
+	install -m 0755 $(TOP)/source/gui/linscp-gui $(DESTDIR)$(PREFIX)/bin/linscp-gui
+	install -m 0644 $(TOP)/source/gui/linscp_gui.py $(TOP)/source/gui/linscp_crypto.py \
+		$(DESTDIR)$(PREFIX)/share/linscp/gui/
+	install -m 0644 $(TOP)/source/gui/web/* $(DESTDIR)$(PREFIX)/share/linscp/gui/web/
+	install -m 0644 $(TOP)/debian/linscp.desktop $(DESTDIR)$(PREFIX)/share/applications/linscp.desktop
+	install -m 0644 $(TOP)/debian/linscp.png $(DESTDIR)$(PREFIX)/share/pixmaps/linscp.png
+	install -m 0644 $(TOP)/debian/linscp.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/linscp.svg
+	install -m 0644 $(TOP)/docs/linscp.1 $(DESTDIR)$(PREFIX)/share/man/man1/linscp.1
+	install -m 0644 $(TOP)/automation/LinSCP.psm1 $(DESTDIR)$(PREFIX)/share/linscp/automation/
+	install -m 0644 $(TOP)/source/linux/liblinscp.h $(DESTDIR)$(PREFIX)/include/linscp/
 
 clean:
 	rm -rf $(BUILD)

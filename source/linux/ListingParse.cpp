@@ -12,7 +12,7 @@
 
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 ListingEntry::ListingEntry()
     : typeKnown(false), isDir(false), permissions(0100644), size(0),
@@ -585,4 +585,4 @@ bool ParseAnyListingLine(const std::string & line, ListingEntry & entry)
     return false;
 }
 
-} // namespace linuxscp
+} // namespace linscp

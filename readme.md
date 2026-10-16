@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo/linuxscp-mark.png" alt="LinSCP logo" width="160" height="160" />
+  <img src="logo/linscp-mark.png" alt="LinSCP logo" width="160" height="160" />
 </p>
 
 <img width="1681" height="1148" alt="image" src="https://github.com/user-attachments/assets/642f19d0-e14f-4f45-a8d7-02b2654d77b5" />
@@ -8,7 +8,7 @@
 
 LinSCP is a free, open-source file transfer client for Debian GNU/Linux. It has
 a command-line client with a WinSCP-style scripting language, and a
-browser-based dual-pane Commander (`linuxscp-gui`).
+browser-based dual-pane Commander (`linscp-gui`).
 
 LinSCP implements a subset of WinSCP's workflows. It is **not full WinSCP
 parity**: see [Protocols](#protocols) and the [parity audit](docs/upstream-parity.md).
@@ -28,7 +28,7 @@ LinSCP is Linux-only. The Makefile refuses to build on other systems.
 ## Building and testing
 
 ```sh
-make -C source/linux                 # -> source/linux/build/linuxscp
+make -C source/linux                 # -> source/linux/build/linscp
 make -C source/linux check           # unit tests
 make -C source/linux check-live      # script and live-server suites
 ```
@@ -49,18 +49,18 @@ The GUI suites (`source/gui/tests/`) run separately, as in CI. For the
 Debian package:
 
 ```sh
-dpkg-buildpackage -b -us -uc         # -> ../linuxscp_1.0-2_<arch>.deb
+dpkg-buildpackage -b -us -uc         # -> ../linscp_1.0-2_<arch>.deb
 ```
 
 ## Usage
 
 ```sh
-linuxscp -batch -script=script.txt
-linuxscp -batch -command="open sftp://user@example.com/; cd /data; get *.csv /tmp"
-linuxscp-gui                         # browser Commander on 127.0.0.1:8080
+linscp -batch -script=script.txt
+linscp -batch -command="open sftp://user@example.com/; cd /data; get *.csv /tmp"
+linscp-gui                         # browser Commander on 127.0.0.1:8080
 ```
 
-Run `linuxscp -help` for the options and `man linuxscp` for the full reference.
+Run `linscp -help` for the options and `man linscp` for the full reference.
 
 ## Protocols
 
@@ -104,7 +104,7 @@ over the CLI, is installed by the Makefile but no automated test runs it.
 
 - [`docs/debian.md`](docs/debian.md): options, commands, protocols,
   authentication, packaging and troubleshooting.
-- [`docs/linuxscp.1`](docs/linuxscp.1): the manual page.
+- [`docs/linscp.1`](docs/linscp.1): the manual page.
 - [`docs/upstream-parity.md`](docs/upstream-parity.md): the parity audit, its
   evidence rules and how to maintain them.
 - [`docs/linux-feature-inventory.md`](docs/linux-feature-inventory.md) and
@@ -122,7 +122,7 @@ docs/          documentation, manual page and parity inventory
 libs/putty/    POSIX platform layer and charset code from PuTTY 0.85
 logo/          logo artwork
 source/gui/    browser Commander: Python server, web client, tests
-source/linux/  linuxscp client: front end, protocol glue, tests, Makefile
+source/linux/  linscp client: front end, protocol glue, tests, Makefile
 source/putty/  platform-neutral PuTTY SSH and SFTP core
 tools/         parity inventory and translation checkers
 ```

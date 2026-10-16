@@ -341,7 +341,7 @@ class LiveScpTests(unittest.TestCase):
         argv.append("-command=open %s %s ; %s" % (
             url if url is not None else self.url(), " ".join(open_args),
             commands))
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env, cwd=str(self.local))
 
@@ -351,7 +351,7 @@ class LiveScpTests(unittest.TestCase):
         argv = [BINARY, "-batch", "-hostkey=" + hostkey, "-timeout=20",
                 "-privatekey=" + str(self.private_key)]
         argv.append("-command=open %s ; %s" % (self.url(), commands))
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.Popen(argv, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, env=env,
                                 cwd=str(self.local), start_new_session=True)
@@ -509,7 +509,7 @@ class LiveScpTests(unittest.TestCase):
                 "-privatekey=" + str(self.private_key),
                 "-command=open %s ; pwd ; echo SHOULD_NOT_RUN ; exit" %
                 self.url()]
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         unpinned = subprocess.run(argv, capture_output=True, text=True,
                                   timeout=90, env=env, cwd=str(self.local))
         self.assertNotEqual(unpinned.returncode, 0, unpinned.stdout)
@@ -760,7 +760,7 @@ class LiveScpTests(unittest.TestCase):
         master, slave = pty.openpty()
         argv = [BINARY, "-hostkey=*", "-timeout=20",
                 "-privatekey=" + str(self.private_key)]
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         process = subprocess.Popen(argv, stdin=slave, stdout=slave,
                                    stderr=slave, cwd=str(self.local), env=env,
                                    close_fds=True)

@@ -70,16 +70,16 @@ set(FRONTEND_SOURCES
   ${FRONTEND}/HashUtil.c
 )
 
-add_library(linuxscp-frontend STATIC ${FRONTEND_SOURCES})
-target_include_directories(linuxscp-frontend PUBLIC ${FRONTEND})
+add_library(linscp-frontend STATIC ${FRONTEND_SOURCES})
+target_include_directories(linscp-frontend PUBLIC ${FRONTEND})
 
-add_executable(linuxscp ${FRONTEND}/main.cpp)
-target_link_libraries(linuxscp PRIVATE linuxscp-frontend)
+add_executable(linscp ${FRONTEND}/main.cpp)
+target_link_libraries(linscp PRIVATE linscp-frontend)
 
 enable_testing()
-add_executable(linuxscp-unittest ${FRONTEND}/tests/UnitTest.cpp)
-target_link_libraries(linuxscp-unittest PRIVATE linuxscp-frontend)
-add_test(NAME unit-tests COMMAND linuxscp-unittest)
+add_executable(linscp-unittest ${FRONTEND}/tests/UnitTest.cpp)
+target_link_libraries(linscp-unittest PRIVATE linscp-frontend)
+add_test(NAME unit-tests COMMAND linscp-unittest)
 
 # Server-free script regressions and the offline upstream gap inventory.
 # Python is optional for a C++-only build; CI always provides it.
@@ -87,32 +87,32 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME script-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/ScriptTest.py
-    $<TARGET_FILE:linuxscp>)
+    $<TARGET_FILE:linscp>)
   # Skips itself where paramiko is not installed, so a plain C++ build is
   # never held up by a missing Python dependency.
   add_test(NAME live-sftp-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveSftpTest.py
-    $<TARGET_FILE:linuxscp>)
+    $<TARGET_FILE:linscp>)
   # Starts the throwaway S3 endpoint in tests/ over TLS; standard-library
   # only, with botocore an optional extra one test skips without.
   # The SCP engine talks to a throwaway sshd it starts itself; the suite
   # skips loudly where sshd, ssh-keygen or the server's scp binary is absent.
   add_test(NAME live-scp-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveScpTest.py
-    $<TARGET_FILE:linuxscp>)
+    $<TARGET_FILE:linscp>)
   add_test(NAME live-s3-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveS3Test.py
-    $<TARGET_FILE:linuxscp>)
+    $<TARGET_FILE:linscp>)
   # The WebDAV endpoint is standard-library-only and the client speaks
   # plain HTTP, so this suite needs nothing but curl.
   add_test(NAME live-dav-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveDavTest.py
-    $<TARGET_FILE:linuxscp>)
+    $<TARGET_FILE:linscp>)
   # FTP/FTPS use optional pyftpdlib and pyOpenSSL; the suite reports those
   # dependency limits as skips.
   add_test(NAME live-curl-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveCurlTest.py
-    $<TARGET_FILE:linuxscp>)
+    $<TARGET_FILE:linscp>)
   add_test(NAME gui-search-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/RemoteSearchTest.py)
   add_test(NAME gui-local-editor-tests COMMAND ${Python3_EXECUTABLE}
@@ -198,26 +198,26 @@ target_include_directories(putty PUBLIC
 
 find_package(Threads REQUIRED)
 target_link_libraries(putty PUBLIC Threads::Threads)
-target_link_libraries(linuxscp-frontend PUBLIC putty)
-target_compile_definitions(linuxscp-frontend PRIVATE
+target_link_libraries(linscp-frontend PUBLIC putty)
+target_compile_definitions(linscp-frontend PRIVATE
   FORK_BUILD MPEXT PLATFORM_HAS_SMEMCLR NO_GSSAPI
   HAVE_AES_NI=0 HAVE_SHA_NI=0 HAVE_CLMUL=0
   HAVE_NEON_CRYPTO=0 HAVE_NEON_PMULL=0 HAVE_NEON_SHA512=0)
 
-target_compile_options(linuxscp-frontend PRIVATE -Wall)
+target_compile_options(linscp-frontend PRIVATE -Wall)
 
 # ---- install -------------------------------------------------------------
 # The same layout the Debian package installs: the console client and the
 # GUI launcher in bin/, the GUI's Python modules and web client under
-# share/linuxscp/gui/, the manual page, the desktop entry and the icons.
-install(TARGETS linuxscp RUNTIME DESTINATION bin)
-install(PROGRAMS source/gui/linuxscp-gui DESTINATION bin)
-install(FILES docs/linuxscp.1 DESTINATION share/man/man1)
-install(FILES debian/linuxscp.desktop DESTINATION share/applications)
-install(FILES debian/linuxscp.png DESTINATION share/pixmaps)
-install(FILES debian/linuxscp.svg DESTINATION share/icons/hicolor/scalable/apps)
-install(FILES source/gui/linuxscp_gui.py source/gui/linscp_crypto.py
-  DESTINATION share/linuxscp/gui
+# share/linscp/gui/, the manual page, the desktop entry and the icons.
+install(TARGETS linscp RUNTIME DESTINATION bin)
+install(PROGRAMS source/gui/linscp-gui DESTINATION bin)
+install(FILES docs/linscp.1 DESTINATION share/man/man1)
+install(FILES debian/linscp.desktop DESTINATION share/applications)
+install(FILES debian/linscp.png DESTINATION share/pixmaps)
+install(FILES debian/linscp.svg DESTINATION share/icons/hicolor/scalable/apps)
+install(FILES source/gui/linscp_gui.py source/gui/linscp_crypto.py
+  DESTINATION share/linscp/gui
   PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE
     GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
-install(DIRECTORY source/gui/web/ DESTINATION share/linuxscp/gui/web)
+install(DIRECTORY source/gui/web/ DESTINATION share/linscp/gui/web)

@@ -260,7 +260,7 @@ def check_command_coverage(inventory, dispatched, errors):
     """Every implemented dispatcher name belongs to exactly one ledger group."""
     known = set(inventory['commands'])
     additions = set()
-    for entry in inventory.get('linuxscp_additions', []):
+    for entry in inventory.get('linscp_additions', []):
         names = entry.get('commands')
         if not isinstance(names, list) or not names or any(
                 not isinstance(name, str) or not name for name in names):
@@ -321,7 +321,7 @@ def matrix_report(inventory):
     rows = inventory['capabilities']
     counts = Counter(row['status'] for row in rows)
     commands = inventory['commands']
-    additions = inventory.get('linuxscp_additions', [])
+    additions = inventory.get('linscp_additions', [])
     features = inventory['features']
     lines = [
         '# Linux feature inventory', '',
@@ -427,7 +427,7 @@ def main():
     inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
     commands = inventory["commands"]
     entries = (list(commands.values()) + inventory["features"] +
-               inventory.get("linuxscp_additions", []))
+               inventory.get("linscp_additions", []))
     errors = []
     for entry in entries:
         if entry["status"] not in {"partial", "missing", "verified"} or not entry["notes"]:
@@ -459,7 +459,7 @@ def main():
     evidence = check_verification(inventory, entries + capabilities, errors)
     gaps = sum(entry["status"] != "verified" for entry in entries)
     capability_gaps = sum(row.get("status") != "verified" for row in capabilities)
-    additions = len(inventory.get("linuxscp_additions", []))
+    additions = len(inventory.get("linscp_additions", []))
     if evidence:
         summary = ", ".join(f"{name}: {count}"
                             for name, count in sorted(evidence["covered"].items()))

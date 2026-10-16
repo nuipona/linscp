@@ -15,7 +15,7 @@
 #include "PathUtil.h"
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 const char * const kAsciiFileMask =
     "*.txt;*.htm;*.html;*.php;*.php3;*.cgi;*.c;*.cpp;*.h;*.pas;*.bas;*.tex;"
@@ -305,4 +305,4 @@ bool MakeCRLFUploadCopy(const std::string & source, std::string & tempPath,
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp

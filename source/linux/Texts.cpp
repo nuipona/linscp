@@ -10,7 +10,7 @@
 /* from source/putty/utils/version.c (puttyexp.h) */
 extern "C" const char * get_putty_version(void);
 
-namespace linuxscp {
+namespace linscp {
 namespace Texts {
 
 const char * const ProductName = "LinSCP";
@@ -29,7 +29,7 @@ namespace {
 std::string Translate(const char * message,
     std::initializer_list<std::pair<const char *, std::string>> values)
 {
-    const char * selected = std::getenv("LINUXSCP_LANGUAGE");
+    const char * selected = std::getenv("LINSCP_LANGUAGE");
     if (!selected || !*selected) selected = std::getenv("LC_ALL");
     if (!selected || !*selected) selected = std::getenv("LC_MESSAGES");
     if (!selected || !*selected) selected = std::getenv("LANG");
@@ -87,14 +87,14 @@ std::string Usage()
     return Translate(
 "LinSCP {version} - secure file transfer client\n"
 "\n"
-"  linuxscp [options] [sftp://[user[:password]@]host[:port]/[path]]\n"
+"  linscp [options] [sftp://[user[:password]@]host[:port]/[path]]\n"
 "\n"
 "Options:\n"
 "  -script=FILE      execute commands from FILE ('-' reads stdin)\n"
 "  -command=CMD      execute commands (separate several with ';')\n"
 "  -literal          with -command, treat %...% in paths as literal text\n"
 "  -hostkey=KEY      pin the host key (fingerprint or '*' for this connection)\n"
-"  -password=PWD     password to use (prefer the LINUXSCP_PASSWORD variable)\n"
+"  -password=PWD     password to use (prefer the LINSCP_PASSWORD variable)\n"
 "  -privatekey=FILE  private key file for public key authentication\n"
 "  -username=NAME    user name to authenticate with\n"
 "  -port=NUMBER      port to connect to (default 22)\n"
@@ -437,4 +437,4 @@ std::string TerminalOpening()
 }
 
 } // namespace Texts
-} // namespace linuxscp
+} // namespace linscp

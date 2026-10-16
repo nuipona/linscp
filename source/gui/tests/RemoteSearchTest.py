@@ -8,7 +8,7 @@ import unittest
 
 GUI_DIR = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(GUI_DIR))
-import linuxscp_gui as gui  # noqa: E402
+import linscp_gui as gui  # noqa: E402
 
 
 class FakeTab:

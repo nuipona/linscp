@@ -11,7 +11,7 @@ import unittest
 
 GUI_DIR = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(GUI_DIR))
-import linuxscp_gui as gui  # noqa: E402
+import linscp_gui as gui  # noqa: E402
 
 
 class DesktopUriTests(unittest.TestCase):
@@ -20,16 +20,16 @@ class DesktopUriTests(unittest.TestCase):
         # older .deb must never override this GUI's sibling prefix/bin.
         with tempfile.TemporaryDirectory(prefix="linscp-prefix-") as temp:
             prefix = pathlib.Path(temp)
-            module_dir = prefix / "share" / "linuxscp" / "gui"
+            module_dir = prefix / "share" / "linscp" / "gui"
             module_dir.mkdir(parents=True)
-            binary = prefix / "bin" / "linuxscp"
+            binary = prefix / "bin" / "linscp"
             binary.parent.mkdir()
             binary.write_text("#!/bin/sh\necho prefix-binary\n")
             binary.chmod(0o755)
             old_base = gui.BASE_DIR
             gui.BASE_DIR = str(module_dir)
             try:
-                self.assertEqual(gui.find_linuxscp_binary(), str(binary))
+                self.assertEqual(gui.find_linscp_binary(), str(binary))
             finally:
                 gui.BASE_DIR = old_base
 

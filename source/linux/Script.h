@@ -4,8 +4,8 @@
  * working.
  */
 
-#ifndef LINUXSCP_SCRIPT_H
-#define LINUXSCP_SCRIPT_H
+#ifndef LINSCP_SCRIPT_H
+#define LINSCP_SCRIPT_H
 
 #include <string>
 #include <utility>
@@ -20,7 +20,7 @@
 #include "TextMode.h"
 #include "TransferPresets.h"
 
-namespace linuxscp {
+namespace linscp {
 
 /*
  * Upstream's TResumeSupport, as the persistent 'option resume' setting:
@@ -512,6 +512,6 @@ private:
     bool mServerLoop;
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_SCRIPT_H */
+#endif /* LINSCP_SCRIPT_H */

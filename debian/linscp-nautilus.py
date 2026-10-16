@@ -25,15 +25,15 @@ if Nautilus is not None:
         def __init__(self):
             super().__init__()
 
-        def _get_linuxscp_bin(self):
+        def _get_linscp_bin(self):
             for candidate in [
-                "/usr/bin/linuxscp",
-                "/usr/local/bin/linuxscp",
-                os.path.expanduser("~/.local/bin/linuxscp"),
+                "/usr/bin/linscp",
+                "/usr/local/bin/linscp",
+                os.path.expanduser("~/.local/bin/linscp"),
             ]:
                 if os.path.isfile(candidate):
                     return candidate
-            return "linuxscp"
+            return "linscp"
 
         def menu_activate_cb(self, menu, files):
             paths = []
@@ -44,7 +44,7 @@ if Nautilus is not None:
                     paths.append(path)
             if not paths:
                 return
-            bin_path = self._get_linuxscp_bin()
+            bin_path = self._get_linscp_bin()
             # Use -literal to prevent %...% expansion of filenames.
             for path in paths:
                 cmd = [bin_path, "-literal",

@@ -1,20 +1,20 @@
-.TH LINUXSCP 1 "2026-10-16" "LinSCP 1.0" "LinSCP"
+.TH LINSCP 1 "2026-10-16" "LinSCP 1.0" "LinSCP"
 .SH NAME
-linuxscp \- secure file transfer client for the command line
+linscp \- secure file transfer client for the command line
 .SH SYNOPSIS
-.B linuxscp
+.B linscp
 .RI [ options ]
 .RI [ sftp:// [ user [: password ]@] host [: port ]/ path ]
 .br
-.B linuxscp
+.B linscp
 .B \-batch
 .BI \-script= file
 .br
-.B linuxscp
+.B linscp
 .B \-batch
 .BI \-command= commands
 .SH DESCRIPTION
-.B linuxscp
+.B linscp
 is the console file transfer client of LinSCP. It connects to an SFTP or an
 SCP server over SSH, and transfers files to and from the local file system,
 either from a script, from a command line, or interactively.
@@ -83,7 +83,7 @@ User name to authenticate with.
 .TP
 .BI \-password= password
 Password to authenticate with. The
-.B LINUXSCP_PASSWORD
+.B LINSCP_PASSWORD
 environment variable is used when this option is not given, which keeps the
 password out of the command line.
 .TP
@@ -216,7 +216,7 @@ password is optional in the URL; percent-encode reserved characters in URL
 credentials and paths. Prefer
 .B \-password=
 or
-.B LINUXSCP_PASSWORD
+.B LINSCP_PASSWORD
 so that the password is not written into a script file.
 .PP
 An
@@ -260,9 +260,9 @@ rather than spliced onto bytes nobody can position.
 A site can be given a name and stored, so that
 .B open
 can be followed by a name instead of a URL. Sessions are kept in
-.I $XDG_CONFIG_HOME/linuxscp/sessions.ini
+.I $XDG_CONFIG_HOME/linscp/sessions.ini
 (or
-.IR $HOME/.config/linuxscp/sessions.ini ),
+.IR $HOME/.config/linscp/sessions.ini ),
 which is the same file the graphical interface reads and writes. Create one
 with
 .BR savesession ,
@@ -550,7 +550,7 @@ Download
 .I file
 and open it in a text editor, then upload it again when the editor exits. The
 editor is taken from the
-.B LINUXSCP_EDITOR
+.B LINSCP_EDITOR
 or
 .B EDITOR
 variable, from
@@ -582,7 +582,7 @@ this session cannot release a lock it did not take.
 Read one WebDAV dead property of
 .IR file .
 The property lives in this client's own namespace
-.RI ( urn:linuxscp:properties ),
+.RI ( urn:linscp:properties ),
 so a protected
 .B DAV:
 property is never the target. A property the server does not have prints
@@ -683,7 +683,7 @@ When it was the active preset, transfers go back to their own settings.
 .B presets
 List the transfer presets of the user configuration with their settings.
 Presets live in
-.I $XDG_CONFIG_HOME/linuxscp/transfer-presets.ini
+.I $XDG_CONFIG_HOME/linscp/transfer-presets.ini
 and apply to get/put and their aliases: by name through
 .BR "option preset" ,
 by name with the site through
@@ -758,7 +758,7 @@ Open an interactive shell on the connected server in a terminal window,
 using the system
 .B ssh
 client. The terminal program is taken from the
-.B LINUXSCP_TERMINAL
+.B LINSCP_TERMINAL
 variable (for example
 .BR "xterm -e"
 or
@@ -835,7 +835,7 @@ The keys held by a running ssh-agent are offered automatically when
 .B SSH_AUTH_SOCK
 is set, which is the simplest way to authenticate with an OpenSSH key.
 .TP
-.B LINUXSCP_PASSWORD
+.B LINSCP_PASSWORD
 Password to use when
 .B \-password=
 is not given.
@@ -846,7 +846,7 @@ Upload everything in the current directory and list the result:
 .PP
 .RS
 .nf
-linuxscp \-batch \-command="open sftp://user@example.com/var/www \\
+linscp \-batch \-command="open sftp://user@example.com/var/www \\
   \-hostkey=SHA256:abcdef... ; put * . ; ls ; exit"
 .fi
 .RE
@@ -860,7 +860,7 @@ open sftp://user@example.com/var/www \-hostkey=*
 get *.html /var/www/html
 exit
 EOF
-linuxscp \-batch \-script=sync.txt
+linscp \-batch \-script=sync.txt
 .fi
 .RE
 .PP
@@ -868,7 +868,7 @@ Preview what a synchronization would do, then run it:
 .PP
 .RS
 .nf
-linuxscp \-batch \-command="open sftp://user@example.com/var/www \-hostkey=* ; \\
+linscp \-batch \-command="open sftp://user@example.com/var/www \-hostkey=* ; \\
   synchronize local \-criteria=time \-filemask=*.html \-preview ; \\
   synchronize local \-criteria=time \-filemask=*.html ; exit"
 .fi
@@ -878,7 +878,7 @@ Keep two directories in step, deleting what the other side removed:
 .PP
 .RS
 .nf
-linuxscp \-batch \-command="open webserver ; \\
+linscp \-batch \-command="open webserver ; \\
   synchronize both \-delete /srv/site /var/www ; exit"
 .fi
 .RE
@@ -887,9 +887,9 @@ Store a site, then edit a file on it:
 .PP
 .RS
 .nf
-linuxscp \-batch \-command="savesession webserver \-protocol=sftp \\
+linscp \-batch \-command="savesession webserver \-protocol=sftp \\
   \-host=example.com \-username=user \-remotedir=/var/www ; exit"
-linuxscp \-batch \-command="open webserver ; edit index.html ; exit"
+linscp \-batch \-command="open webserver ; edit index.html ; exit"
 .fi
 .RE
 .PP
@@ -897,7 +897,7 @@ Start the graphical interface:
 .PP
 .RS
 .nf
-linuxscp \-gui
+linscp \-gui
 .fi
 .RE
 .SH LIMITATIONS

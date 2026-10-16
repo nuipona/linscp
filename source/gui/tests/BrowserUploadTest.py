@@ -17,7 +17,7 @@ from http.server import ThreadingHTTPServer
 
 GUI_DIR = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(GUI_DIR))
-import linuxscp_gui as gui  # noqa: E402
+import linscp_gui as gui  # noqa: E402
 
 
 class FakeTasks:
@@ -55,16 +55,16 @@ class BrowserUploadTests(unittest.TestCase):
         self.assertEqual(gui.ui_language({"LANG": "es_MX.UTF-8"}), "es")
         self.assertEqual(gui.ui_language({"LC_ALL": "C", "LANG": "es"}), "en")
         self.assertEqual(gui.ui_language({"LC_ALL": "", "LC_MESSAGES": "es"}), "es")
-        self.assertEqual(gui.ui_language({"LINUXSCP_LANGUAGE": "en", "LANG": "es"}), "en")
+        self.assertEqual(gui.ui_language({"LINSCP_LANGUAGE": "en", "LANG": "es"}), "en")
         self.assertEqual(gui.ui_language({"LANG": "xx"}), "en")
-        with mock.patch.dict(os.environ, {"LINUXSCP_LANGUAGE": "es", "LC_ALL": "es_ES.UTF-8"}):
+        with mock.patch.dict(os.environ, {"LINSCP_LANGUAGE": "es", "LC_ALL": "es_ES.UTF-8"}):
             kwargs = gui.popen_kwargs()
-            self.assertEqual(kwargs["env"]["LINUXSCP_LANGUAGE"], "en")
-            self.assertEqual(os.environ["LINUXSCP_LANGUAGE"], "es")
+            self.assertEqual(kwargs["env"]["LINSCP_LANGUAGE"], "en")
+            self.assertEqual(os.environ["LINSCP_LANGUAGE"], "es")
             self.assertEqual(kwargs["encoding"], "utf-8")
 
     def test_served_page_has_safe_locale_and_token_data(self):
-        class QuietHandler(gui.LinuxScpGuiHandler):
+        class QuietHandler(gui.LinScpGuiHandler):
             def log_message(self, *args):
                 pass
         server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
@@ -73,7 +73,7 @@ class BrowserUploadTests(unittest.TestCase):
         try:
             token = '</script><script>alert("injection")</script>'
             with mock.patch.object(gui, "API_TOKEN", token), \
-                 mock.patch.dict(os.environ, {"LINUXSCP_LANGUAGE": "es"}):
+                 mock.patch.dict(os.environ, {"LINSCP_LANGUAGE": "es"}):
                 conn = http.client.HTTPConnection("127.0.0.1", server.server_port)
                 try:
                     conn.request("GET", "/")
@@ -133,13 +133,13 @@ class BrowserUploadTests(unittest.TestCase):
         self.assertEqual(pathlib.Path(kwargs["cleanup_path"]).read_bytes(), b"abc")
 
     def test_gui_queue_uses_literal_commands_for_percent_filenames(self):
-        # Unlike run_linuxscp, the background queue builds a fresh command
+        # Unlike run_linscp, the background queue builds a fresh command
         # line. Do not let it expand a dropped %TIMESTAMP% as a script token.
         task = types.SimpleNamespace(
             kind="Upload", command='put /tmp/file "/remote/%TIMESTAMP%.txt"',
             session={}, source="file", status="Queued")
         manager = gui.TaskManager.__new__(gui.TaskManager)
-        with mock.patch.object(gui, "core_command_line", return_value=["linuxscp"]), \
+        with mock.patch.object(gui, "core_command_line", return_value=["linscp"]), \
              mock.patch.object(gui, "session_url", return_value="sftp://host/"), \
              mock.patch.object(gui, "add_log"), \
              mock.patch.object(gui.subprocess, "Popen",
@@ -175,7 +175,7 @@ class BrowserUploadTests(unittest.TestCase):
             remote_dir = "/default"
             session = {"protocol": "sftp"}
 
-        class QuietHandler(gui.LinuxScpGuiHandler):
+        class QuietHandler(gui.LinScpGuiHandler):
             def log_message(self, *_args):
                 pass
 

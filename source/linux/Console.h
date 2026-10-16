@@ -6,14 +6,14 @@
  * session log file can capture what the server sent.
  */
 
-#ifndef LINUXSCP_CONSOLE_H
-#define LINUXSCP_CONSOLE_H
+#ifndef LINSCP_CONSOLE_H
+#define LINSCP_CONSOLE_H
 
 #include <cstdint>
 #include <cstdio>
 #include <string>
 
-namespace linuxscp {
+namespace linscp {
 
 class Console
 {
@@ -85,6 +85,6 @@ private:
     unsigned long long mLastPermille;
 };
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_CONSOLE_H */
+#endif /* LINSCP_CONSOLE_H */

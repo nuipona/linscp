@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A throwaway SFTP + exec server for exercising linuxscp live.
+"""A throwaway SFTP + exec server for exercising linscp live.
 
 Runs one SSH server on 127.0.0.1:12765, user 'testuser', password 'testpass'.
 The SFTP "home" is ROOT (the server process chdir()s there, so relative paths

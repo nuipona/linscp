@@ -8,7 +8,7 @@
 #include <cstring>
 #include <ctime>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -470,10 +470,10 @@ std::string FormatFileClock(unsigned long time)
     return std::string(buffer);
 }
 
-} // namespace linuxscp
+} // namespace linscp
 
 /* Permission parsing, shared by 'chmod' and by '-permissions='. */
-namespace linuxscp {
+namespace linscp {
 
 /*
  * A symbolic permission expression, in the style of chmod(1): a comma
@@ -704,4 +704,4 @@ bool ParsePermissions(const std::string & text, unsigned long current, bool isDi
     return ParseSymbolicPermissions(text, current, isDirectory, result, error);
 }
 
-} // namespace linuxscp
+} // namespace linscp

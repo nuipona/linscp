@@ -175,7 +175,7 @@ class LiveDavTests(unittest.TestCase):
                 "-log=" + str(self.config / "session.log"),
                 "-command=open dav://%s:%s@127.0.0.1:%d/ %s ; %s" %
                 (user, secret, self.port, " ".join(open_args), commands)]
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.run(argv, capture_output=True, text=True,
                               timeout=timeout, env=env)
 
@@ -185,7 +185,7 @@ class LiveDavTests(unittest.TestCase):
                 "-log=" + str(self.config / "session.log"),
                 "-command=open dav://%s:%s@127.0.0.1:%d/ %s ; %s" %
                 (user, secret, self.port, " ".join(open_args), commands)]
-        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
         return subprocess.Popen(argv, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, env=env)
 
@@ -253,7 +253,7 @@ class LiveDavTests(unittest.TestCase):
                 (USER, PASSWORD, self.port, target, target, source, target)]
         result = subprocess.run(argv, capture_output=True, text=True,
                                 timeout=30, env=dict(os.environ,
-                                                     LINUXSCP_CONFIG_DIR=str(self.config)))
+                                                     LINSCP_CONFIG_DIR=str(self.config)))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("DROPPED", result.stdout)
         received = self.root / "received-drop.bin"

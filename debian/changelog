@@ -1,4 +1,4 @@
-linuxscp (1.0-2) unstable; urgency=medium
+linscp (1.0-2) unstable; urgency=medium
 
   * Linux only: the Windows port is gone. The console client, the GUI and
     the test suites no longer carry a second platform's code paths, and the
@@ -6,19 +6,19 @@ linuxscp (1.0-2) unstable; urgency=medium
   * SFTP always uses the bundled PuTTY core; there is no curl fallback for
     it, and the curl-backed protocols say so when the installed curl lacks
     the protocol rather than naming a platform.
-  * Install the graphical client properly: /usr/bin/linuxscp-gui is now a
-    launcher, and the Python modules (linuxscp_gui.py, linscp_crypto.py) and
-    the web client are installed under /usr/share/linuxscp/gui. The previous
+  * Install the graphical client properly: /usr/bin/linscp-gui is now a
+    launcher, and the Python modules (linscp_gui.py, linscp_crypto.py) and
+    the web client are installed under /usr/share/linscp/gui. The previous
     package copied the server script alone into /usr/bin, where it could not
     import its own crypto module, so the packaged GUI did not start.
   * Recommend curl, which every protocol except SFTP needs at run time.
 
  -- nuipona <nuipona@users.noreply.github.com>  Thu, 15 Oct 2026 13:40:00 -0800
 
-linuxscp (1.0-1) unstable; urgency=medium
+linscp (1.0-1) unstable; urgency=medium
 
-  * Native POSIX port of the LinuxSCP command-line client.
-  * Builds linuxscp(1) from the shared PuTTY core, the vendored upstream
+  * Native POSIX port of the LinSCP command-line client.
+  * Builds linscp(1) from the shared PuTTY core, the vendored upstream
     PuTTY 0.85 POSIX platform layer and the front end in source/linux.
   * SFTP sessions: connect, host key checking, ssh-agent, public key and
     password authentication, and the open/cd/pwd/ls/lcd/lpwd/get/put/rm/

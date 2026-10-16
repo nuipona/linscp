@@ -13,14 +13,14 @@
  * compiled as C and includes ssh/sftp.h directly.
  */
 
-#ifndef LINUXSCP_PUTTYCOMPAT_H
-#define LINUXSCP_PUTTYCOMPAT_H
+#ifndef LINSCP_PUTTYCOMPAT_H
+#define LINSCP_PUTTYCOMPAT_H
 
 #include <string>
 
 extern "C" {
 
-#define new linuxscp_c_member_new
+#define new linscp_c_member_new
 #include "putty.h"
 #include "ssh.h"
 #include "storage.h"
@@ -33,12 +33,12 @@ extern "C" {
  * host, port and key type exists and equals 'key', 0 when nothing is
  * cached, and -1 when the cached key differs.
  */
-int linuxscp_check_cached_host_key(const char * hostname, int port,
+int linscp_check_cached_host_key(const char * hostname, int port,
     const char * keytype, const char * key);
 
 } /* extern "C" */
 
-namespace linuxscp {
+namespace linscp {
 
 /*
  * Makes a private key file usable by the SSH core, which reads PuTTY key
@@ -66,6 +66,6 @@ bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
     std::string & error,
     const std::string & suppliedPassphrase = std::string());
 
-} /* namespace linuxscp */
+} /* namespace linscp */
 
-#endif /* LINUXSCP_PUTTYCOMPAT_H */
+#endif /* LINSCP_PUTTYCOMPAT_H */

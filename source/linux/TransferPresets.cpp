@@ -10,7 +10,7 @@
 #include <fstream>
 #include <sstream>
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -710,4 +710,4 @@ bool TransferPresetStore::IsValidName(const std::string & name)
     return true;
 }
 
-} // namespace linuxscp
+} // namespace linscp

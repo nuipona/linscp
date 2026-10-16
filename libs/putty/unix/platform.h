@@ -504,7 +504,7 @@ char **cmdline_arg_remainder(CmdlineArg *argp);
 
 /*
  * ----------------------------------------------------------------------
- * LinuxSCP POSIX compatibility shims  [linuxscp-compat]
+ * LinSCP POSIX compatibility shims  [linscp-compat]
  *
  * The shared PuTTY core in source/putty/ is the WinSCP fork of PuTTY
  * 0.85, which upstream is built for Windows with MPEXT defined ("one
@@ -545,17 +545,17 @@ typedef long LPARAM;
  * the same thread, and the core relies on that (random_ref() holds the
  * section while noise_get_heavy() re-enters it through its callback).
  * The wrappers are implemented in source/linux/PuttyGlue.cpp; call
- * linuxscp_platform_init() before anything can take a section.
+ * linscp_platform_init() before anything can take a section.
  */
 typedef pthread_mutex_t CRITICAL_SECTION;
-void linuxscp_platform_init(void);
-void linuxscp_critical_section_init(CRITICAL_SECTION *cs);
-void linuxscp_critical_section_enter(CRITICAL_SECTION *cs);
-void linuxscp_critical_section_leave(CRITICAL_SECTION *cs);
-#define InitializeCriticalSection(cs)  linuxscp_critical_section_init(cs)
+void linscp_platform_init(void);
+void linscp_critical_section_init(CRITICAL_SECTION *cs);
+void linscp_critical_section_enter(CRITICAL_SECTION *cs);
+void linscp_critical_section_leave(CRITICAL_SECTION *cs);
+#define InitializeCriticalSection(cs)  linscp_critical_section_init(cs)
 #define DeleteCriticalSection(cs)      pthread_mutex_destroy(cs)
-#define EnterCriticalSection(cs)       linuxscp_critical_section_enter(cs)
-#define LeaveCriticalSection(cs)       linuxscp_critical_section_leave(cs)
+#define EnterCriticalSection(cs)       linscp_critical_section_enter(cs)
+#define LeaveCriticalSection(cs)       linscp_critical_section_leave(cs)
 
 /*
  * Each SSH session in the Windows build owns a `struct callback_set`
@@ -563,9 +563,9 @@ void linuxscp_critical_section_leave(CRITICAL_SECTION *cs);
  * accessors, which the front end implements. source/linux/PuttyGlue.cpp
  * provides them for this port.
  */
-struct callback_set *linuxscp_posix_callback_set(void);
-#define DEFAULT_CALLBACK_SET linuxscp_posix_callback_set()
+struct callback_set *linscp_posix_callback_set(void);
+#define DEFAULT_CALLBACK_SET linscp_posix_callback_set()
 
-/* [end linuxscp-compat] */
+/* [end linscp-compat] */
 
 #endif /* PUTTY_UNIX_PLATFORM_H */

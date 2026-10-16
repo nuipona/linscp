@@ -18,7 +18,7 @@
 
 #include "HashUtil.h"
 
-namespace linuxscp {
+namespace linscp {
 namespace s3sig {
 
 namespace {
@@ -343,4 +343,4 @@ SignedRequest Sign(const std::string & method, const std::string & uri,
 }
 
 } // namespace s3sig
-} // namespace linuxscp
+} // namespace linscp

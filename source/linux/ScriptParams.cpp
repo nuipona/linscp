@@ -7,7 +7,7 @@
 
 #include "Platform.h"
 
-namespace linuxscp {
+namespace linscp {
 
 namespace {
 
@@ -673,4 +673,4 @@ bool ExpandScriptParameters(const std::string & line, std::string & expanded,
         error);
 }
 
-} // namespace linuxscp
+} // namespace linscp

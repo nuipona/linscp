@@ -2,9 +2,9 @@
 # LinSCP graphical Commander interface launcher.
 #
 # Runs the Python server that serves the browser client. It works both
-# from a source tree, where linuxscp_gui.py sits next to this script, and
+# from a source tree, where linscp_gui.py sits next to this script, and
 # from the installed package, where the Python modules live in
-# /usr/share/linuxscp/gui.
+# /usr/share/linscp/gui.
 set -e
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -14,15 +14,15 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PYTHONDONTWRITEBYTECODE=1
 export PYTHONDONTWRITEBYTECODE
 
-for candidate in "$here/linuxscp_gui.py" \
-                 "$here/../share/linuxscp/gui/linuxscp_gui.py" \
-                 /usr/share/linuxscp/gui/linuxscp_gui.py; do
+for candidate in "$here/linscp_gui.py" \
+                 "$here/../share/linscp/gui/linscp_gui.py" \
+                 /usr/share/linscp/gui/linscp_gui.py; do
     if [ -f "$candidate" ]; then
         exec python3 "$candidate" "$@"
     fi
 done
 
-echo "linuxscp-gui: cannot find linuxscp_gui.py (looked next to $0 and in" \
-     "/usr/share/linuxscp/gui). Install the linuxscp package, or run" \
-     "python3 source/gui/linuxscp_gui.py from a source tree." >&2
+echo "linscp-gui: cannot find linscp_gui.py (looked next to $0 and in" \
+     "/usr/share/linscp/gui). Install the linscp package, or run" \
+     "python3 source/gui/linscp_gui.py from a source tree." >&2
 exit 1

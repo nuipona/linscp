@@ -10,8 +10,8 @@
  * by PuttyGlue.cpp, which forwards to the open Session.
  */
 
-#ifndef LINUXSCP_SFTPCLIENT_H
-#define LINUXSCP_SFTPCLIENT_H
+#ifndef LINSCP_SFTPCLIENT_H
+#define LINSCP_SFTPCLIENT_H
 
 #include <stddef.h>
 
@@ -131,4 +131,4 @@ int lscp_sftp_put_append(const char * localPath, const char * remotePath,
 } /* extern "C" */
 #endif
 
-#endif /* LINUXSCP_SFTPCLIENT_H */
+#endif /* LINSCP_SFTPCLIENT_H */

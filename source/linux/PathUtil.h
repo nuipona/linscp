@@ -9,14 +9,14 @@
  * session's.
  */
 
-#ifndef LINUXSCP_PATHUTIL_H
-#define LINUXSCP_PATHUTIL_H
+#ifndef LINSCP_PATHUTIL_H
+#define LINSCP_PATHUTIL_H
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace linuxscp {
+namespace linscp {
 
 /* Splits a script/command line into words. Handles single quotes, double
  * quotes and backslash escapes; the quotes themselves are not kept. */
@@ -77,6 +77,6 @@ bool ParseSymbolicPermissions(const std::string & text, unsigned long current,
 bool ParsePermissions(const std::string & text, unsigned long current,
     bool isDirectory, unsigned long & result, std::string & error);
 
-} // namespace linuxscp
+} // namespace linscp
 
-#endif /* LINUXSCP_PATHUTIL_H */
+#endif /* LINSCP_PATHUTIL_H */

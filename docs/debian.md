@@ -4,7 +4,7 @@ This is the operator reference for the Debian build of LinSCP: the console
 client, its options and commands, protocols, authentication, packaging and
 troubleshooting. For an overview, see the top-level [readme.md](../readme.md).
 
-The client `linuxscp` is built from the platform-neutral PuTTY core
+The client `linscp` is built from the platform-neutral PuTTY core
 (`source/putty`), a POSIX platform layer from upstream PuTTY 0.85
 (`libs/putty/unix`, `libs/putty/charset`) and the LinSCP front end
 (`source/linux`).
@@ -18,7 +18,7 @@ The client `linuxscp` is built from the platform-neutral PuTTY core
 | POSIX threads | the core's critical sections (`-pthread`) |
 | `dpkg-dev` | only to build the `.deb` package |
 | `curl` (run time) | FTP transfers, FTPS, `dav://`/`webdav://` and `s3://` |
-| `python3` (run time) | the graphical client, `linuxscp-gui` |
+| `python3` (run time) | the graphical client, `linscp-gui` |
 
 ```sh
 sudo apt install build-essential dpkg-dev curl python3
@@ -27,7 +27,7 @@ sudo apt install build-essential dpkg-dev curl python3
 ## Building
 
 ```sh
-make -C source/linux            # -> source/linux/build/linuxscp
+make -C source/linux            # -> source/linux/build/linscp
 make -C source/linux check      # unit tests
 make -C source/linux check-live # script and live-server suites
 make -C source/linux clean
@@ -45,7 +45,7 @@ with CTest. It is the second job in CI:
 ```sh
 cmake -S . -B build && cmake --build build -j
 ctest --test-dir build --output-on-failure
-cmake --install build --prefix /opt/linuxscp  # relocatable private prefix
+cmake --install build --prefix /opt/linscp  # relocatable private prefix
 ```
 
 Useful overrides:
@@ -61,8 +61,8 @@ make -C source/linux BUILD=build-asan OPT=-O0 \
 
 ```sh
 dpkg-buildpackage -b -us -uc
-# -> ../linuxscp_1.0-2_amd64.deb
-sudo dpkg -i ../linuxscp_1.0-2_amd64.deb
+# -> ../linscp_1.0-2_amd64.deb
+sudo dpkg -i ../linscp_1.0-2_amd64.deb
 ```
 
 `debian/rules` does not use debhelper. The build is one plain Makefile, so the
@@ -71,16 +71,16 @@ install these paths:
 
 | Path | What |
 | --- | --- |
-| `/usr/bin/linuxscp` | the console client |
-| `/usr/bin/linuxscp-gui` | the graphical client launcher |
-| `/usr/share/linuxscp/gui/` | the GUI's Python modules and web client |
-| `/usr/share/man/man1/linuxscp.1.gz` | the manual page |
-| `/usr/share/applications/linuxscp.desktop` | the desktop entry, with `sftp://`, `ftp://` and `ftps://` handlers |
-| `/usr/share/pixmaps/linuxscp.png`, `/usr/share/icons/hicolor/scalable/apps/linuxscp.svg` | the icons |
-| `/usr/share/doc/linuxscp/` | the copyright, the licence and this document as `README.Debian` |
+| `/usr/bin/linscp` | the console client |
+| `/usr/bin/linscp-gui` | the graphical client launcher |
+| `/usr/share/linscp/gui/` | the GUI's Python modules and web client |
+| `/usr/share/man/man1/linscp.1.gz` | the manual page |
+| `/usr/share/applications/linscp.desktop` | the desktop entry, with `sftp://`, `ftp://` and `ftps://` handlers |
+| `/usr/share/pixmaps/linscp.png`, `/usr/share/icons/hicolor/scalable/apps/linscp.svg` | the icons |
+| `/usr/share/doc/linscp/` | the copyright, the licence and this document as `README.Debian` |
 
-`linuxscp -gui` and the desktop entry both start `linuxscp-gui`, which runs
-the GUI's Python modules under `/usr/share/linuxscp/gui/`.
+`linscp -gui` and the desktop entry both start `linscp-gui`, which runs
+the GUI's Python modules under `/usr/share/linscp/gui/`.
 
 The CI `debian-package` job builds the package, checks that the main paths
 above are present, installs it, and starts the installed GUI. A launcher that
@@ -93,9 +93,9 @@ publishing a package.
 ## Using the client
 
 ```sh
-linuxscp [options] [sftp://[user[:password]@]host[:port]/[path]]
-linuxscp -batch -script=script.txt
-linuxscp -batch -command="open sftp://user@example.com/; cd /data; ls; get * /tmp"
+linscp [options] [sftp://[user[:password]@]host[:port]/[path]]
+linscp -batch -script=script.txt
+linscp -batch -command="open sftp://user@example.com/; cd /data; ls; get * /tmp"
 ```
 
 ### Options
@@ -108,7 +108,7 @@ linuxscp -batch -command="open sftp://user@example.com/; cd /data; ls; get * /tm
 | `-hostkey=<fingerprint>` | pin the host key; `*` accepts any key for this connection only |
 | `-privatekey=<file>` | private key for public key authentication (`.ppk` or OpenSSH format) |
 | `-username=<name>` | user name |
-| `-password=<password>` | password; prefer `LINUXSCP_PASSWORD`, which keeps it out of the command line |
+| `-password=<password>` | password; prefer `LINSCP_PASSWORD`, which keeps it out of the command line |
 | `-port=<number>` | port (default 22) |
 | `-timeout=<secs>` | connection timeout (default 15) |
 | `-log=<file>` | write the session log to a file |
@@ -216,7 +216,7 @@ non-zero exit status. `echo` prints a message to the script output.
 
 `terminal` opens an interactive shell on the server, as the "Open Terminal"
 button of WinSCP does. It starts the system `ssh` client in a terminal window
-on the desktop. The program is taken from `LINUXSCP_TERMINAL` (`<program>
+on the desktop. The program is taken from `LINSCP_TERMINAL` (`<program>
 [args]`, for example `xterm -e`), or else the first installed program from:
 `x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal`,
 `mate-terminal`, `lxterminal`, `terminator`, `alacritty`, `kitty`, `foot`,
@@ -226,8 +226,8 @@ sessions. The graphical client's "Terminal" button runs the same command.
 `call` (and `!`) runs a command over a one-shot SSH exec channel, using a second
 connection, so the SFTP session stays open.
 
-The manual page `linuxscp(1)` has the same reference. Its source is
-[linuxscp.1](linuxscp.1).
+The manual page `linscp(1)` has the same reference. Its source is
+[linscp.1](linscp.1).
 
 ## Sites and protocols
 
@@ -236,7 +236,7 @@ open sftp://user@example.com:2222/var/data -hostkey=<fingerprint>
 ```
 
 The password is optional in the URL. Prefer `-password=` or
-`LINUXSCP_PASSWORD`, so that it does not end up in a script file.
+`LINSCP_PASSWORD`, so that it does not end up in a script file.
 
 **SSH.** `sftp://` uses the bundled PuTTY SFTP client. `scp://` (and `ssh://`)
 uses `source/linux/ScpClient.cpp`: it runs the server's login shell for
@@ -271,9 +271,9 @@ Stored sessions live in `sessions.ini`, in folders with `sessions folders`,
 `sessions [folder/]` and `rmsession -folder`. The graphical client reads and
 writes the same files.
 
-## Graphical client (`linuxscp-gui`)
+## Graphical client (`linscp-gui`)
 
-`linuxscp-gui` and `linuxscp -gui` start a dark, WinSCP-style Commander in the
+`linscp-gui` and `linscp -gui` start a dark, WinSCP-style Commander in the
 browser:
 
 * A dual-pane explorer, with the local filesystem on the left and the server on
@@ -285,7 +285,7 @@ browser:
 * Drag-and-drop of files and folders from a file manager into the remote pane.
   Relative paths and empty directories are kept, and unsafe paths are rejected.
   Local-pane drops and other desktops are not yet verified.
-* A desktop entry and URL scheme handlers, from `linuxscp.desktop`.
+* A desktop entry and URL scheme handlers, from `linscp.desktop`.
 
 ## Authentication
 
@@ -297,7 +297,7 @@ browser:
   session closes. An encrypted key asks for its passphrase in an interactive
   run. In `-batch` mode the connection fails and says to run interactively or
   pass `-passphrase=` to `open`; for scripts, load the key into the agent.
-* **Password**: `-password=` or `LINUXSCP_PASSWORD`. Interactive runs ask for
+* **Password**: `-password=` or `LINSCP_PASSWORD`. Interactive runs ask for
   one when it is missing. `-batch` runs fail instead of asking.
 * **Stored password**: `savesession <name> -password=...` stores it encrypted,
   as `lscp1$...`, in `sessions.ini`, with the key in `sessions.key` next to it.
@@ -346,7 +346,7 @@ and the S3 version-aware operations. S3 and WebDAV are partial. See the
 | --- | --- |
 | `No supported authentication methods available` | the server refused every credential. Check `ssh-add -l` and the server's `authorized_keys` |
 | `is encrypted; supply -passphrase=<passphrase>` | an encrypted key was used without a passphrase in `-batch` mode. Pass `-passphrase=` to `open`, or load the key into the agent |
-| a transfer hangs | `LSCP_TRACE=1 linuxscp ...` prints the first 32 bytes of each SFTP receive, which shows whether protocol data is arriving |
+| a transfer hangs | `LSCP_TRACE=1 linscp ...` prints the first 32 bytes of each SFTP receive, which shows whether protocol data is arriving |
 | you need the connection events | `-verbose` prints SSH event messages; `-log=<file>` writes the session to a file |
 
 ## Verification

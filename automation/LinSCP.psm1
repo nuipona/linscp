@@ -7,7 +7,7 @@
 
 .DESCRIPTION
     Provides cmdlets for automating LinSCP from PowerShell on Linux.
-    The module wraps the linuxscp command-line client, providing
+    The module wraps the linscp command-line client, providing
     structured PowerShell objects for session management, file transfer,
     directory listing and synchronization.
 
@@ -27,14 +27,14 @@ $Script:Sessions = @{}
 function Find-LinScpBinary {
     <#
     .SYNOPSIS
-        Locates the linuxscp binary on PATH.
+        Locates the linscp binary on PATH.
     #>
     if ($Script:LinScpBin) { return $Script:LinScpBin }
     $candidates = @(
-        "linuxscp",
-        "/usr/bin/linuxscp",
-        "/usr/local/bin/linuxscp",
-        (Join-Path $env:HOME ".local/bin/linuxscp")
+        "linscp",
+        "/usr/bin/linscp",
+        "/usr/local/bin/linscp",
+        (Join-Path $env:HOME ".local/bin/linscp")
     )
     foreach ($c in $candidates) {
         if (Get-Command $c -ErrorAction SilentlyContinue) {
@@ -46,13 +46,13 @@ function Find-LinScpBinary {
             return $Script:LinScpBin
         }
     }
-    throw "linuxscp binary not found. Install LinSCP or add it to PATH."
+    throw "linscp binary not found. Install LinSCP or add it to PATH."
 }
 
 function Invoke-LinScp {
     <#
     .SYNOPSIS
-        Runs a linuxscp command and returns structured output.
+        Runs a linscp command and returns structured output.
     #>
     param(
         [string[]]$Arguments,
