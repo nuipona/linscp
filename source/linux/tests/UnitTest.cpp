@@ -457,7 +457,7 @@ void TestTerminalCommandLine()
 
     /* A PuTTY key file cannot be read by the ssh client. */
     const std::vector<std::string> ppk = BuildSshArguments("user", "host", 22,
-        "C:/keys/private.PPK");
+        "/keys/private.PPK");
     CHECK_EQ(std::to_string(ppk.size()), "2");
     CHECK_EQ(ppk[0], "-t");
 }

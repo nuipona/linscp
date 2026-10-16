@@ -682,11 +682,16 @@ Public License instead of this License.  But first, please read
 
   B. Attribution and Third-party Notices
 
-This program carries the copyright notices of the authors whose work it is
-built from. The GNU General Public License requires those notices to be kept
-intact, so they remain in the source files, typically as:
+This program started as a fork of WinSCP. The WinSCP source it was forked
+from, with the copyright notices that go with it, is kept in the git history
+of this repository, in the commits before "Make LinuxSCP a Debian-only
+application" (2026-10-12). The GNU General Public License requires those
+notices to be kept, and they read:
 
     Copyright (c) 2000-2026 Martin Prikryl
+
+The files in the current tree are LinSCP's own work, apart from the PuTTY
+components named below, and contain no copied WinSCP source code.
 
 Third-party components are covered by their own licences: the SSH and SFTP
 core under source/putty and the POSIX platform layer under libs/putty are
@@ -696,9 +701,10 @@ libs/putty/LICENCE). See the files shipped with each component.
 The names, marks and logos of those projects are the property of their owners.
 Nothing in this licence grant allows you to use them to promote or endorse
 derivatives of this program. The application name, logo, icon set and
-descriptive text of this fork are its own: the artwork in /logo is original
-work created for this project and is not licensed under the GNU General Public
-License - you may not redistribute it with another program.
+descriptive text of this fork are its own: the artwork in /logo, and its copies
+in debian/ and source/gui/web/, is original work created for this project and
+is not licensed under the GNU General Public License - you may not redistribute
+it with another program.
 
 
   C. Privacy

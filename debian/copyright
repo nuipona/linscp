@@ -3,7 +3,7 @@ Upstream-Name: LinSCP
 Source: https://github.com/nuipona/linscp
 
 Files: source/putty/* libs/putty/*
-Copyright: 1997-2025 Simon Tatham and the PuTTY contributors
+Copyright: 1997-2026 Simon Tatham and the PuTTY contributors
 License: MIT
  The PuTTY distribution as a whole is copyright Simon Tatham and
  contributors, and is licensed under the MIT licence:
@@ -26,7 +26,8 @@ License: MIT
  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  DEALINGS IN THE SOFTWARE.
 
-Files: logo/*
+Files: logo/* debian/linuxscp.png debian/linuxscp.svg source/gui/web/favicon.png
+ source/gui/web/icon.svg
 Copyright: 2026 LinSCP contributors
 License: LicenseRef-LinSCP-Logo
  This original artwork is not licensed under the GNU General Public License and
@@ -34,8 +35,10 @@ License: LicenseRef-LinSCP-Logo
  source tree does not grant permission to use the artwork independently.
 
 Files: *
-Copyright: 2000-2026 Martin Prikryl and the WinSCP contributors
-           2026 the LinSCP contributors
+Copyright: 2026 the LinSCP contributors
+           2000-2026 Martin Prikryl and the WinSCP contributors (the forked
+           history, kept in the git history of the repository; see license.txt
+           section B)
 License: GPL-3+
  This program is free software: you can redistribute it and/or modify it
  under the terms of the GNU General Public License as published by the Free

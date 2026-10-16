@@ -1,26 +1,24 @@
-# LinSCP on Debian/Linux
+# LinSCP on Debian
 
-This document covers the Debian build of LinSCP. It builds a single console
-client, `linuxscp`, from the platform-neutral PuTTY core (`source/putty`), a
-POSIX platform layer vendored from upstream PuTTY 0.85 (`libs/putty/unix`,
-`libs/putty/charset`) and the LinSCP front end in `source/linux`.
+This is the operator reference for the Debian build of LinSCP: the console
+client, its options and commands, protocols, authentication, packaging and
+troubleshooting. For an overview, see the top-level [readme.md](../readme.md).
 
-The whole repository is the Debian application, and Linux is the only
-platform it builds, ships and tests on; see the top-level
-[readme.md](../readme.md) for an overview.
+The client `linuxscp` is built from the platform-neutral PuTTY core
+(`source/putty`), a POSIX platform layer from upstream PuTTY 0.85
+(`libs/putty/unix`, `libs/putty/charset`) and the LinSCP front end
+(`source/linux`).
 
 ## Requirements
 
 | What | Why |
 | --- | --- |
-| GNU make | the build system in `source/linux/Makefile` |
+| GNU make | the build system, `source/linux/Makefile` |
 | a C and C++17 compiler (`gcc`/`g++` or `clang`) | the core is C, the front end is C++ |
 | POSIX threads | the core's critical sections (`-pthread`) |
 | `dpkg-dev` | only to build the `.deb` package |
-| `curl` (run time) | the protocols with no engine of their own: `ftp://`, `ftps://`, `dav://`/`webdav://`, `s3://` |
+| `curl` (run time) | FTP transfers, FTPS, `dav://`/`webdav://` and `s3://` |
 | `python3` (run time) | the graphical client, `linuxscp-gui` |
-
-On Debian:
 
 ```sh
 sudo apt install build-essential dpkg-dev curl python3
@@ -30,25 +28,19 @@ sudo apt install build-essential dpkg-dev curl python3
 
 ```sh
 make -C source/linux            # -> source/linux/build/linuxscp
-make -C source/linux check      # builds and runs the unit tests
-make -C source/linux check-live # script, live-server and GUI suites
+make -C source/linux check      # unit tests
+make -C source/linux check-live # script and live-server suites
 make -C source/linux clean
 ```
 
-The build is a single `make`; there is no `configure` step. Object files and
-the resulting binary go to `source/linux/build/`, which is git-ignored.
+There is no `configure` step. Build output goes to `source/linux/build/`, which
+is git-ignored. The Makefile stops on any host that is not Linux.
 
-`LiveCurlTest.py` is optional live evidence rather than a product dependency:
-install `pyftpdlib` and `pyOpenSSL` in the test Python environment for the FTP/
-FTPS cases. `LiveScpTest.py` needs no Python package but does need `sshd`,
-`ssh-keygen` and the server's own `scp` binary (`openssh-server`): it starts a
-throwaway daemon per test, on a port the kernel picks, with keys generated for
-the run. Missing test dependencies are reported as skips on the suite's
-evidence line, and a suite that ran nothing says so on that line rather than
-passing quietly.
+For the live suites, the Python packages and the `sshd` they need, see the
+[readme](../readme.md#building-and-testing).
 
-CMake builds the same client from the same sources and registers every test
-suite with CTest, which is what CI runs second:
+CMake builds the same client from the same sources and registers the suites
+with CTest. It is the second job in CI:
 
 ```sh
 cmake -S . -B build && cmake --build build -j
@@ -56,21 +48,16 @@ ctest --test-dir build --output-on-failure
 cmake --install build --prefix /opt/linuxscp  # relocatable private prefix
 ```
 
-Both builds are Linux-only and fail early on other hosts. The GUI launcher
-prefers its adjacent core binary in a nonstandard prefix, rather than assuming
-`/usr/bin/linuxscp` or a build-tree path; tests exercise this lookup and
-`linuxscp -gui` from a relocated directory.
-
 Useful overrides:
 
 ```sh
-make -C source/linux OPT=-O0 WARN=-Wall                       # debug-ish build
+make -C source/linux OPT=-O0 WARN=-Wall          # debug-friendly build
 make -C source/linux BUILD=build-asan OPT=-O0 \
      CFLAGS=-fsanitize=address CXXFLAGS=-fsanitize=address \
-     LDFLAGS=-fsanitize=address                               # ASan build
+     LDFLAGS=-fsanitize=address                  # AddressSanitizer build
 ```
 
-## Packaging a .deb
+## Packaging
 
 ```sh
 dpkg-buildpackage -b -us -uc
@@ -78,414 +65,294 @@ dpkg-buildpackage -b -us -uc
 sudo dpkg -i ../linuxscp_1.0-2_amd64.deb
 ```
 
-`debian/rules` deliberately does not use debhelper: the whole build is one
-plain Makefile, so the few targets are written out and the build dependency
-list stays at `dpkg-dev`. It builds the client, runs the unit tests as part of
-the package build, and installs
+`debian/rules` does not use debhelper. The build is one plain Makefile, so the
+rules call it directly, run the unit tests as part of the package build, and
+install these paths:
 
 | Path | What |
 | --- | --- |
 | `/usr/bin/linuxscp` | the console client |
-| `/usr/bin/linuxscp-gui` | the launcher of the graphical client |
-| `/usr/share/linuxscp/gui/` | the GUI's Python modules and its web client |
+| `/usr/bin/linuxscp-gui` | the graphical client launcher |
+| `/usr/share/linuxscp/gui/` | the GUI's Python modules and web client |
 | `/usr/share/man/man1/linuxscp.1.gz` | the manual page |
-| `/usr/share/applications/linuxscp.desktop` | the desktop entry, with the `sftp://`, `ftp://` and `ftps://` scheme handlers |
+| `/usr/share/applications/linuxscp.desktop` | the desktop entry, with `sftp://`, `ftp://` and `ftps://` handlers |
 | `/usr/share/pixmaps/linuxscp.png`, `/usr/share/icons/hicolor/scalable/apps/linuxscp.svg` | the icons |
 | `/usr/share/doc/linuxscp/` | the copyright, the licence and this document as `README.Debian` |
 
-`linuxscp -gui` and the desktop entry both start `/usr/bin/linuxscp-gui`,
-which runs `/usr/share/linuxscp/gui/linuxscp_gui.py` with `python3`; the same
-launcher also works from a source tree, where the Python file sits next to
-it. CI installs the built package and starts the GUI from the installed paths,
-so a launcher that cannot find its modules is a build failure rather than a
-surprise on the desktop.
+`linuxscp -gui` and the desktop entry both start `linuxscp-gui`, which runs
+the GUI's Python modules under `/usr/share/linuxscp/gui/`.
 
-`Depends` is generated by `dpkg-shlibdeps` from the linked libraries, so it
-tracks whatever the build host provides. `debian/changelog` carries the
-upstream version; update it and the `Maintainer` field before publishing the
-package anywhere.
+The CI `debian-package` job builds the package, checks that the main paths
+above are present, installs it, and starts the installed GUI. A launcher that
+cannot find its modules therefore fails the build.
+
+`Depends` is generated by `dpkg-shlibdeps`, so it follows the libraries of the
+build host. Update `debian/changelog` and the `Maintainer` field before
+publishing a package.
 
 ## Using the client
 
-```
-linuxscp [options]
+```sh
+linuxscp [options] [sftp://[user[:password]@]host[:port]/[path]]
 linuxscp -batch -script=script.txt
-linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
+linuxscp -batch -command="open sftp://user@example.com/; cd /data; ls; get * /tmp"
 ```
 
 ### Options
 
 | Option | Meaning |
 | --- | --- |
-| `-script=<file>` | read commands from a file, one per line |
-| `-command="<cmd1>;<cmd2>"` | run the given commands (`;` separated) |
-| `-hostkey=<fingerprint>` | pin the host key; `*` accepts any for this connection only |
+| `-script=<file>` | read commands from a file; `-` reads standard input |
+| `-command=<cmds>` | run commands; separate several with `;` |
+| `-literal` | with `-command`, do not expand `%...%` in paths; used by GUI-generated commands |
+| `-hostkey=<fingerprint>` | pin the host key; `*` accepts any key for this connection only |
 | `-privatekey=<file>` | private key for public key authentication (`.ppk` or OpenSSH format) |
 | `-username=<name>` | user name |
-| `-password=<password>` | password (also read from `LINUXSCP_PASSWORD`) |
-| `-port=<number>` | port number |
-| `-timeout=<secs>` | connection timeout |
+| `-password=<password>` | password; prefer `LINUXSCP_PASSWORD`, which keeps it out of the command line |
+| `-port=<number>` | port (default 22) |
+| `-timeout=<secs>` | connection timeout (default 15) |
 | `-log=<file>` | write the session log to a file |
 | `-xmllog=<file>` | write an XML action log of every command, message and transfer, with passwords masked |
-| `-parameter <value>...` | script parameters, for `%1%` .. `%9%` in the commands |
-| `-literal` | do not expand `%TIMESTAMP%`, `%1%` or `%NAME%` in `-command` input; used by GUI-generated commands containing literal filenames (requires `-command`) |
-| `-batch` | never ask a question; fail instead |
-| `-server` | read one command per line on stdin and answer with `LSCP-RESULT` (what the GUI drives) |
-| `-gui` | launch the graphical Commander desktop interface |
-| `-verbose` | print what the connection layer does |
-| `-version`, `-help` | print the version, print the usage |
+| `-parameter <value>...` | script parameters, for `%1%` to `%9%` |
+| `-batch` | never ask; fail instead |
+| `-server` | read one command per line on standard input and answer each with `LSCP-RESULT`; the GUI drives the client this way |
+| `-gui` | launch the graphical client |
+| `-verbose` | print SSH event log messages |
+| `-version`, `-help` | print the version, or the usage |
 
-With neither `-script` nor `-command` (but with a site URL), the client starts
-an interactive session and reads commands from the terminal. It insists on a
-terminal, so piping commands in is not supported; use `-script=-` for that.
+With neither `-script` nor `-command`, the client starts an interactive session
+and reads from the terminal. It needs a terminal, so use `-script=-` to feed
+commands through a pipe.
 
 ### Commands
 
-`open`, `close`, `cd`, `pwd`, `ls` (`-a`, `-l`, `-1`), `lls`, `lcd`, `lpwd`, `get`,
-`put`, `synchronize`, `keepuptodate`, `echo`, `rm`, `rmdir`, `mkdir`, `mv`, `cp`,
-`ln`/`symlink`, `chmod`, `stat`, `checksum`, `copyid`, `edit`, `session`,
-`savesession`, `rmsession`, `call` (`!`), `terminal`, `option`, `help`, `exit`.
-`lock`, `unlock` and `property` are the WebDAV extensions: an exclusive write
-lock whose token later uploads, deletes and moves of that path carry, and the
-dead properties of a file.
-`recv`/`mget`, `send`/`mput`, `dir`, `rename`, `del`, `md`, `sync`, `man`, `bye`,
-`quit` and `end` are the aliases upstream has, and `show` is recognised only to
-say that it is not supported.
+`open`, `close`, `session`, `sessions`, `savesession`, `rmsession`, `cd`, `pwd`,
+`ls` (`-a`, `-l`, `-1`), `lcd`, `lpwd`, `lls`, `get`, `put`, `synchronize`,
+`keepuptodate`, `edit`, `rm`, `rmdir`, `mkdir`, `mv`, `cp`, `ln`/`symlink`,
+`chmod`, `stat`, `checksum`, `copyid`, `presets`, `savepreset`, `rmspreset`,
+`option`, `echo`, `call` (`!`), `terminal`, `help`, `exit`.
+
+Upstream WinSCP aliases are also accepted: `recv`/`mget`, `send`/`mput`, `dir`,
+`rename`, `del`, `md`, `sync`, `man`, `bye`, `quit` and `end`. `show` is
+recognised only to refuse it: the connection runs the SFTP subsystem, so there
+is no shell to ask for settings.
+
+`lock`, `unlock` and `property` are WebDAV extensions. A lock is an exclusive
+write lock, and later uploads, deletes and moves of that path carry its token.
+`property` reads and writes dead properties.
 
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
-transfers every match. The exit status is non-zero if any command failed. When a
-transfer selects multiple source files, the destination is treated as a
-directory and created if it does not exist. `mkdir <path>` creates one remote
-directory; `mkdir -parents <path>` creates missing parent directories too
-(without failing when they already exist).
+transfers every match. The exit status is non-zero if any command failed. When
+a transfer selects several source files, the destination is treated as a
+directory and created if needed. `mkdir <path>` creates one remote directory;
+`mkdir -parents <path>` also creates missing parents.
 
-Directory transfers are recursive by default or with the `-r` switch. Both `get`
-and `put` support WinSCP switches:
-* `-r`: transfer directories recursively.
-* `-resume`: resume interrupted transfers at the target byte offset. The bytes
-  of a resume-capable transfer arrive in a `<name>.filepart` staging file and
-  move onto the destination only when the file is complete, so an interrupted
-  transfer never leaves a truncated file under the final name; a retry
-  continues the staging file and never splices the existing destination.
+`get` and `put` transfer directories recursively with `-r`, and accept these
+switches:
+
+* `-resume`: resume an interrupted transfer at the target byte offset. Bytes
+  arrive in a `<name>.filepart` staging file that becomes the destination only
+  when complete, so an interrupted transfer never leaves a truncated file under
+  the final name.
 * `-delete`: remove source files after a successful transfer.
 * `-neweronly` / `-noneweronly`: transfer only files newer than the target, or
-  ignore the dates again (`-noneweronly` is the default).
-* `-preservetime` / `-nopreservetime`: preserve source timestamps;
-  `-preservetime=all` preserves them for directories as well, which is what
-  makes a recursive transfer's folder dates match.
-* `-append`: add to the end of the destination instead of replacing it. Needs
-  the native SFTP transport and cannot be combined with `-resume`.
-* `-speed=<KB/s>`: limit the transfer to that many kilobytes per second, `0`
-  for no limit. Both native engines are paced between chunks, the curl paths
-  get `--limit-rate`.
-* `-resumesupport=on|off|<KB>`: whether an interrupted file is continued at an
-  offset, and from what size on; `option resume on|off|automatic` is the
-  default. `automatic` is upstream's setting: binary files of at least 100 KB
-  (the threshold in kilobytes with `-resumesupport=`) are staged through
-  `.filepart`, `on` stages every eligible transfer and `off` none.
+  ignore dates (the default).
+* `-preservetime` / `-nopreservetime`: keep source timestamps.
+  `-preservetime=all` also keeps directory timestamps.
+* `-append`: append to the destination instead of replacing it. It needs the
+  native SFTP transport and cannot be combined with `-resume`.
+* `-speed=<KB/s>`: limit the rate; `0` means no limit.
+* `-resumesupport=on|off|<KB>`: whether, and from what size, an interrupted file
+  is continued. `automatic` (the default, set with `option resume`) stages
+  binary files of at least 100 KB through `.filepart`; `on` stages every eligible
+  transfer and `off` none.
 * `-transfer=binary|ascii|automatic` and `-filemask=<masks>`: as for
   `synchronize`.
-An unknown switch, a value that is not one of the words above, or a switch the
-transport cannot honour - `-append` over curl, `-resume` over `scp://`, where
-the rcp protocol has no offset to continue from - is reported before anything
-is transferred, never ignored.
-When the destination is omitted, `get` defaults to the local working directory
-and `put` defaults to the remote working directory.
+
+An unknown switch, an invalid value, or a switch the transport cannot honour is
+reported before anything is transferred. For example, `-append` over curl and
+`-resume` over `scp://` are refused, because rcp has no offset to continue from.
+If the destination is omitted, `get` uses the local working directory and `put`
+uses the remote working directory.
 
 `chmod <mode> <file>... [-recursive]` takes an octal mode (`644`, `0700`) or a
-symbolic one (`u+x`, `a=r,go-w`, `u+s`, and `X` for the execute bit only where
-one is already set or for a directory); `-recursive` walks a remote tree and
-leaves symbolic links alone, so it cannot follow one out of the directory.
+symbolic one (`u+x`, `a=r,go-w`, `u+s`; `X` sets execute only where it is
+already set or for directories). `-recursive` walks a remote tree and does not
+follow symbolic links.
 
-`copyid [<keyfile>]` appends the public half of the session's private key, or of
-`<keyfile>`, to `~/.ssh/authorized_keys` on the server, creating `~/.ssh` as
-`0700` and the file as `0600`, and saying so when the key is already installed.
-It needs an `sftp://` or `scp://` session; the key file is read through the
-bundled PuTTY core.
+`copyid [<keyfile>]` appends the public half of the session's private key, or
+of `<keyfile>`, to `~/.ssh/authorized_keys` on the server. It creates `~/.ssh`
+as `0700` and the file as `0600`, and reports when the key is already
+installed. It needs an `sftp://` or `scp://` session.
 
-`synchronize local|remote|both [localdir [remotedir]]` compares directory
-trees and synchronizes newer and missing files in the specified direction.
+`synchronize local|remote|both [localdir [remotedir]]` compares directory trees
+and copies newer and missing files in the chosen direction. `keepuptodate` is
+covered under [Limits](#limits).
 
-A command name, an `option` name and the value of an option with a fixed
-vocabulary may be abbreviated to any prefix that identifies exactly one of
-them: `synch local` is `synchronize local`, `option bat cont` is
-`option batch continue`. An abbreviation that fits several names is refused
-with the list of what it could mean, because guessing would run a different
-command than the one that was typed.
+A command name, an `option` name, and a value from a fixed set may be
+abbreviated to any unique prefix: `synch local` is `synchronize local`, and
+`option bat cont` is `option batch continue`. An abbreviation that fits several
+names is refused with the candidates, so that a different command is never run
+by mistake.
 
-In a script or interactive line, `%1%` .. `%9%` are replaced by the values of
-`-parameter`, `%TIMESTAMP%` by the current local time (`%TIMESTAMP#yyyy-mm-dd%`
-with a format, `%TIMESTAMP-1D#yyyymmdd%` with a signed relative offset of
-seconds `S`, minutes `N`, hours `H`, days `D` or years `Y`, and a trailing `S`
-to snap to the start of that unit), and `%NAME%` by an environment variable,
-left in place when it is not set. None of it happens inside single quotes, and
-a timestamp placeholder with an offset but no format is an error rather than a
-path containing a percent sign. For literal filenames such as `%TIMESTAMP%`
-in `-command`, add `-literal` to suppress all expansion; the GUI does this for
-its generated commands. In `-script` input use single quotes around literal
-placeholders instead. `-server` input is not expanded either.
+In a script or an interactive line, `%1%` to `%9%` are replaced by `-parameter`
+values. `%TIMESTAMP%` is the local time; `%TIMESTAMP#yyyy-mm-dd%` sets a
+format, and `%TIMESTAMP-1D#yyyymmdd%` applies an offset (`S`, `N`, `H`, `D` or
+`Y` for seconds, minutes, hours, days or years), with a trailing `S` to snap to
+the start of that unit. `%NAME%` is replaced by an environment variable, and
+left in place if the variable is unset. Nothing is expanded inside single
+quotes. A timestamp with an offset but no format is an error. For literal text
+such as `%TIMESTAMP%` in `-command`, add `-literal`. Inside a script file, use
+single quotes instead. `-server` input is not expanded.
 
-Overwrite and delete confirmations are enabled by default. Interactive runs
-ask before replacing or removing data. In `-batch` or other non-interactive
-runs, an operation that needs confirmation fails without reading from stdin;
-put `option confirm off` in a trusted script to disable those checks.
-`option resume on|off|automatic` controls automatic transfer resumption
-(`automatic`, the default, continues binary files from 100 KB on, like
-upstream) across batch sessions. Scripts default to aborting after an error;
-`option batch on|off|abort|continue` configures script batch mode. `on`/`abort`
-stop subsequent commands, while `off`/`continue` proceed but preserve a nonzero
-exit status. `echo`
-prints messages for script output logging.
+Overwrite and delete confirmations are on by default. In an interactive run the
+client asks first. In `-batch` or any other non-interactive run, an operation
+that needs confirmation fails without reading standard input. Put
+`option confirm off` in a trusted script to skip the checks.
 
-`terminal` opens an interactive shell on the connected server, like the
-"Open Terminal" button of WinSCP: the client starts the system `ssh` client
-in a terminal window of the desktop that runs it. The terminal program is
-taken from `LINUXSCP_TERMINAL` (`<program> [args]`, for example `xterm -e` or
-`foot`), otherwise the first of `x-terminal-emulator`, `gnome-terminal`,
-`konsole`, `xfce4-terminal`, `mate-terminal`, `lxterminal`, `terminator`,
-`alacritty`, `kitty`, `foot`, `wezterm`, `urxvt` and `xterm` that is
-installed. It is available for SSH (`sftp://` and `scp://`) sessions only. The same
-feature is on the "Terminal" button of the graphical client, which asks the
-backend to run this command.
+Scripts stop at the first error by default. `option batch on|off|abort|continue`
+sets this: `on` and `abort` stop, while `off` and `continue` carry on and keep a
+non-zero exit status. `echo` prints a message to the script output.
 
-`call` (and `!`) run a command through a one-shot SSH `exec` channel, in a
-second connection, so the SFTP session stays open; `show` is rejected on
-purpose, because the connection runs the SFTP subsystem and there is no shell
-to ask for its settings.
+`terminal` opens an interactive shell on the server, as the "Open Terminal"
+button of WinSCP does. It starts the system `ssh` client in a terminal window
+on the desktop. The program is taken from `LINUXSCP_TERMINAL` (`<program>
+[args]`, for example `xterm -e`), or else the first installed program from:
+`x-terminal-emulator`, `gnome-terminal`, `konsole`, `xfce4-terminal`,
+`mate-terminal`, `lxterminal`, `terminator`, `alacritty`, `kitty`, `foot`,
+`wezterm`, `urxvt` and `xterm`. It works only for SSH (`sftp://` and `scp://`)
+sessions. The graphical client's "Terminal" button runs the same command.
 
-The same text is installed as the `linuxscp(1)` manual page; its source is
+`call` (and `!`) runs a command over a one-shot SSH exec channel, using a second
+connection, so the SFTP session stays open.
+
+The manual page `linuxscp(1)` has the same reference. Its source is
 [linuxscp.1](linuxscp.1).
 
-### Sites
+## Sites and protocols
+
+```sh
+open sftp://user@example.com:2222/var/data -hostkey=<fingerprint>
+```
+
+The password is optional in the URL. Prefer `-password=` or
+`LINUXSCP_PASSWORD`, so that it does not end up in a script file.
+
+**SSH.** `sftp://` uses the bundled PuTTY SFTP client. `scp://` (and `ssh://`)
+uses `source/linux/ScpClient.cpp`: it runs the server's login shell for
+listings, `stat`, `cd` and the directory and metadata commands, and the server's
+own `scp` for the bytes, over the rcp protocol. Each SCP command opens its own
+SSH connection. Every path is quoted for a POSIX shell, and a refusal is shown
+as the sentence the server printed.
+
+**Other protocols.** The support table is in the [readme](../readme.md#protocols).
+Plain `ftp://` lists and stats through a native engine, `FtpClient.cpp`, and
+sends transfers through curl. FTPS (`ftps://`, or `ftp://` with explicit TLS)
+is handled entirely by curl. WebDAV has PROPFIND listings, MOVE, COPY (with a
+streamed fallback when COPY is refused), locks and dead properties. Its URL
+paths are percent-encoded, so spaces, percent signs and query characters in
+file names are transferred literally. S3 uses SigV4 signing, object listing,
+stat and CRUD, CopyObject and multipart copy, and multipart uploads above
+16 MiB, which resume from a local sidecar.
+
+Proxies are set through `-rawsettings` on `open` or `savesession`, using
+upstream's names:
 
 ```
-open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
+open -rawsettings ProxyMethod=SOCKS5 ProxyHost=proxy ProxyPort=1080 ...
 ```
 
-Both SSH protocols are served by the client itself: `sftp://` through the
-bundled PuTTY SFTP client, and `scp://` (and its `ssh://` spelling) through
-`source/linux/ScpClient.cpp`, which drives the server's login shell for
-listings, `stat`, `cd` and the directory and metadata commands, and the
-server's own `scp` for the bytes of a transfer over the rcp protocol. Each SCP
-command is one SSH connection of its own, every path is quoted for a POSIX
-shell, a refusal arrives as the sentence the server printed, and a transfer
-cannot be continued because the protocol has no offset.
+`ProxyMethod` can be `SOCKS4`, `SOCKS5`, `HTTP`, `Telnet` or `Cmd`. The SSH
+protocols use the core's own proxy code. SOCKS and HTTP proxies apply to the
+curl-backed protocols as `--proxy`. A setting or proxy this build cannot use is
+refused by name, never dropped silently.
 
-In addition, LinSCP supports the standard URL schemes `ftp://`, `ftps://`,
-`dav://` / `webdav://`, and `s3://`, as well as bare `host[:port]`. These
-curl-backed paths do not establish full protocol support: WebDAV has PROPFIND
-listings and basic COPY/MOVE operations; S3 has SigV4, object CRUD, server-side
-copy, and multipart uploads for large files. Both remain partial
-implementations. WebDAV URL paths are percent-encoded
-so spaces, percent signs and URL query/fragment characters in filenames are
-transferred literally. See the [parity audit](upstream-parity.md) and
-[capability matrix](linux-feature-inventory.md).
-The password is
-optional here; prefer `-password=` or `LINUXSCP_PASSWORD` so that it does not
-end up in the script file.
+Stored sessions live in `sessions.ini`, in folders with `sessions folders`,
+`sessions [folder/]` and `rmsession -folder`. The graphical client reads and
+writes the same files.
 
-### Graphical Desktop Client (`linuxscp-gui`)
+## Graphical client (`linuxscp-gui`)
 
-LinSCP includes a standalone dark-themed, WinSCP-style Commander graphical interface:
-* Launch with `linuxscp-gui` or `linuxscp -gui`.
-* Dual-pane explorer with local filesystem on the left and remote server on the right.
-* Background transfer queue with live progress metrics and transfer speeds.
-* Remote search by filename mask or literal UTF-8 file content (bounded per file and per search).
-* Real-time console log and embedded interactive command-line terminal.
-* The remote pane accepts files and folders dropped from a file manager (where
-  the browser exposes file-entry APIs). It preserves their relative paths and
-  empty directories, rejects unsafe paths, and queues uploads with retryable
-  parent creation; local-pane drops and cross-desktop compatibility are not
-  yet established.
-* Desktop launcher and URL scheme handlers via `/usr/share/applications/linuxscp.desktop`.
+`linuxscp-gui` and `linuxscp -gui` start a dark, WinSCP-style Commander in the
+browser:
 
-### Compatibility limits
+* A dual-pane explorer, with the local filesystem on the left and the server on
+  the right.
+* A background transfer queue with progress and speed.
+* Remote search by file-name mask or literal UTF-8 content, with per-file and
+  per-search bounds.
+* A console log and an embedded command line.
+* Drag-and-drop of files and folders from a file manager into the remote pane.
+  Relative paths and empty directories are kept, and unsafe paths are rejected.
+  Local-pane drops and other desktops are not yet verified.
+* A desktop entry and URL scheme handlers, from `linuxscp.desktop`.
 
-`man`, `recv`/`mget`, `send`/`mput`, `dir`, `rename`, `del`, `md`, `sync`,
-`bye`, `quit` and `end` alias the commands upstream maps them to. `lls` lists
-local directory entries or a simple wildcard mask, in names-only format.
-
-What a transport cannot do is refused instead of approximated: `-append`
-requires native SFTP, and `-resume` with ASCII conversion is rejected. Resume
-uses each backend's range/continuation support; S3 multipart uploads restart
-from part one rather than resuming a saved upload ID. Transfer presets are
-supported; `-rawtransfersettings=` accepts settings implemented by this build
-and refuses unsupported names. `synchronize both -delete` consults the
-previous sync state before deleting; `-mirror` is rejected with `both`, and
-an unknown switch or an option value
-outside its vocabulary is reported before any file is read. A non-octal
-`-permissions=`, a malformed `-filemask` and a `%TIMESTAMP%` placeholder with
-an offset but no format are errors for the same reason. This is deliberate:
-an ignored filter or setting would silently change what a script transfers or
-deletes.
-
-`keepuptodate` follows upstream's direction: it reflects changes from the
-local directory onto the remote one. A recursive inotify watch wakes it on
-local changes; the configured interval triggers a full safety rescan, and
-timer polling is used if the watch cannot be set up. The command runs in the foreground until Ctrl-C (or `-count=` passes
-complete), and a non-interactive script must give `-count=`. Queue priorities and WinSCP's `.NET` assembly are not implemented.
-S3 signing and DAV `PROPFIND` are present but incomplete; see the pinned audit
-for the full list.
-
-### Authentication
+## Authentication
 
 * **ssh-agent** (recommended): with `SSH_AUTH_SOCK` set, the keys in the agent
   are offered automatically.
-* **Private key file**: `-privatekey=` accepts a PuTTY `.ppk` file as well as
-  OpenSSH (`id_rsa`, `id_ed25519`, old PEM) and ssh.com private keys. A key in
-  a foreign format is imported by the PuTTY core and used as a temporary
-  `.ppk` for the connection, which is removed when the session closes. An
-  encrypted key asks for its passphrase interactively; in `-batch` mode an
-  encrypted key fails with "run interactively to enter its passphrase", so
-  load such keys into the agent instead.
-* **Password**: `-password=` or `LINUXSCP_PASSWORD`. In interactive mode the
-  client asks; in `-batch` mode it fails rather than prompting.
-* **Stored password**: `savesession <name> -password=...` writes it encrypted
-  as `lscp1$...` under `sessions.key` next to `sessions.ini` (created on
-  first use, readable by this account only), never in the clear; a
-  plaintext entry from before that is rewritten encrypted on the next save.
-  Without the key file, `open <name>` says the stored password cannot be
-  used and continues without it (a key or an agent may still be enough),
-  and an unrelated re-save keeps the unreadable value instead of
-  destroying it. The graphical client reads and writes the same format.
+* **Private key file**: `-privatekey=` takes a PuTTY `.ppk` file, an OpenSSH key
+  (`id_rsa`, `id_ed25519`, PEM) or an ssh.com key. A key in another format is
+  imported by the core into a temporary `.ppk`, which is removed when the
+  session closes. An encrypted key asks for its passphrase in an interactive
+  run. In `-batch` mode the connection fails and says to run interactively or
+  pass `-passphrase=` to `open`; for scripts, load the key into the agent.
+* **Password**: `-password=` or `LINUXSCP_PASSWORD`. Interactive runs ask for
+  one when it is missing. `-batch` runs fail instead of asking.
+* **Stored password**: `savesession <name> -password=...` stores it encrypted,
+  as `lscp1$...`, in `sessions.ini`, with the key in `sessions.key` next to it.
+  The key file is created on first use and readable by this account only. A
+  plaintext password from an older version is rewritten encrypted on the next
+  save. Without the key file, `open <name>` says the password cannot be used and
+  carries on without it. An unrelated re-save keeps the unreadable value rather
+  than destroying it. The graphical client uses the same format.
 
-### Host keys
+## Host keys
 
-`-hostkey=` compares the fingerprint the server presents with the one you
-gave. `*` accepts any key for that connection only, is meant for throwaway
-targets, and does not add the key to the persistent cache. With no
-`-hostkey=`, an unknown key is accepted only when the client can ask you; in
-`-batch` mode the connection fails.
+`-hostkey=` compares the fingerprint the server presents with the one given.
+`*` accepts any key for that connection only: it suits throwaway targets, and
+the key is not added to the persistent cache. With no `-hostkey=`, an unknown
+key is accepted only when the client can ask you. In `-batch` mode the
+connection fails, and the key is printed so that it can be pinned.
 
-## What is verified
+## Limits
 
-`make -C source/linux clean all check` builds the client and runs the unit
-tests in `source/linux/tests/UnitTest.cpp` (the total is printed by the test runner), covering command-line
-and command-sequence splitting, path handling, file masks, output formatting,
-strict site URL parsing, and local filesystem access. The Debian binary package
-also builds with `dpkg-buildpackage -b -us -uc`; its contents and extracted
-binary were checked.
+Unsupported things are refused, not approximated. Examples:
 
-A live end-to-end run against an in-process Paramiko SFTP server passed with
-ssh-agent authentication. It covered listing, directory creation, multi-source
-and wildcard uploads/downloads, empty-file and 2 MiB round trips, and `stat`,
-`chmod`, `mv`, `rm` and `rmdir`. The same server then carried the transfer
-and key features: `-append` in both directions (a byte-exact concatenation),
-`-speed=` (120 KiB at `-speed=40` took 3.02 s against 0.07 s unlimited, with
-identical content), `-resumesupport=1024` leaving a small partial file to the
-overwrite question while `-resumesupport=64` resumed it to a byte-identical
-file, `-preservetime` both ways and `-preservetime=all` stamping the local
-directory with the remote directory time, `-permissions=600` on upload,
-`chmod` in octal, symbolic (`u+x`, `a=r,go-w`, `u=g`) and `-recursive` forms,
-and `copyid` from an OpenSSH `.pub` file and from a PEM private key (the
-installed line has that key's own fingerprint), with a second run reporting
-the key as already installed. `chmod` and the timestamp checks depend on the
-test server answering `SETSTAT`, which paramiko delivers to `chattr`, not to
-`setstat`; it also creates the `.ssh` directory and the `authorized_keys`
-file that `copyid` writes. The OpenSSH recipe below was not run here
-because `sshd` is not installed. Password authentication, pinned/mismatched
-host keys, and behavior across different OpenSSH server versions still need
-separate integration tests; the recipe's server offers public-key
-authentication only.
+* `-append` needs native SFTP. `-resume` cannot be combined with ASCII conversion.
+* `-rawtransfersettings=` accepts only settings this build implements.
+* `synchronize both -delete` consults the previous sync state before it deletes.
+  `-mirror` is refused with `both`.
+* An unknown switch, an invalid `-permissions=`, a malformed `-filemask` and a
+  `%TIMESTAMP%` placeholder with an offset but no format are all errors, since
+  an ignored filter would change what a script transfers or deletes.
 
-### Reproducing the live test
+Resume depends on each backend. S3 uploads above 16 MiB save their upload ID and
+completed parts in a local sidecar and resume from there.
 
-Install `openssh-server` and run the server commands with `sudo` (the
-client-side commands run as your normal user):
+`keepuptodate` follows upstream and copies local changes to the remote side. A
+recursive inotify watch triggers it, and `-interval=` adds a full rescan. If the
+watch cannot be set up, the client falls back to timer polling. It runs in the
+foreground until Ctrl-C, or until `-count=` passes complete, so a
+non-interactive script must give `-count=`.
 
-```sh
-mkdir -p /tmp/sshtest && cd /tmp/sshtest
-ssh-keygen -q -t ed25519 -f id_client -N ""
-cp id_client.pub authorized_keys && chmod 600 authorized_keys
-printf 'hello from LinSCP\n' > hello.txt
-: > empty.txt
-dd if=/dev/urandom of=large.bin bs=1M count=2 status=none
-ssh-keygen -q -t rsa -b 2048 -f host_key -N ""
-cat > sshd_config <<'EOF'
-Port 2222
-ListenAddress 127.0.0.1
-HostKey /tmp/sshtest/host_key
-PidFile /tmp/sshtest/sshd.pid
-AuthorizedKeysFile /tmp/sshtest/authorized_keys
-PasswordAuthentication no
-ChallengeResponseAuthentication no
-PubkeyAuthentication yes
-Subsystem sftp /usr/lib/openssh/sftp-server
-LogLevel DEBUG1
-EOF
-sudo install -d -m 0755 /run/sshd
-sudo /usr/sbin/sshd -t -f /tmp/sshtest/sshd_config
-sudo /usr/sbin/sshd -f /tmp/sshtest/sshd_config
-
-eval "$(ssh-agent -s)" && ssh-add ./id_client
-cat > script.txt <<'EOF'
-option confirm off
-open sftp://localhost:2222/tmp/sshtest -hostkey=*
-pwd
-ls
-put hello.txt .
-get hello.txt downloaded.txt
-put empty.txt .
-get empty.txt empty.download
-put large.bin .
-get large.bin large.download
-rm hello.txt empty.txt large.bin
-exit
-EOF
-../../source/linux/build/linuxscp -batch -script=script.txt
-cmp hello.txt downloaded.txt && cmp empty.txt empty.download && cmp large.bin large.download
-sudo kill "$(cat /tmp/sshtest/sshd.pid)"
-ssh-agent -k
-```
+Not implemented: queue priorities, the .NET assembly API, GSSAPI, SSH tunnels,
+and the S3 version-aware operations. S3 and WebDAV are partial. See the
+[parity audit](upstream-parity.md) for the full list.
 
 ## Troubleshooting
 
 | Symptom | What to do |
 | --- | --- |
-| `-verbose` prints nothing at all | the client is blocked before it registers with the event loop; check `LSCP_TRACE=1` |
-| `No supported authentication methods` | the server refused every credential; check the agent (`ssh-add -l`) and `authorized_keys` |
-| `Unable to use key file (OpenSSH ...)` | the core needs a `.ppk`; use the agent instead |
-| `Permission denied (publickey)` with an agent key | the public key is not in the server's `AuthorizedKeysFile` |
-| transfers hang | `LSCP_TRACE=1 linuxscp ...` dumps the first 32 bytes of every received chunk, which shows immediately whether protocol data or console output is arriving |
+| `No supported authentication methods available` | the server refused every credential. Check `ssh-add -l` and the server's `authorized_keys` |
+| `is encrypted; supply -passphrase=<passphrase>` | an encrypted key was used without a passphrase in `-batch` mode. Pass `-passphrase=` to `open`, or load the key into the agent |
+| a transfer hangs | `LSCP_TRACE=1 linuxscp ...` prints the first 32 bytes of each SFTP receive, which shows whether protocol data is arriving |
+| you need the connection events | `-verbose` prints SSH event messages; `-log=<file>` writes the session to a file |
 
-`-log=<file>` records the session, and `-verbose` prints the connection
-layer's events to standard output as they happen.
+## Verification
 
-## Current capabilities and limitations
-
-LinSCP does not provide full WinSCP parity. See
-[the pinned upstream audit](upstream-parity.md) for remaining work. Current
-implementation includes:
-* Native POSIX SFTP and native SCP over the bundled PuTTY core - for SCP the
-  remote-shell directory engine and the rcp transfer protocol upstream drives -
-  plus curl-backed transfers for FTP/FTPS, WebDAV and S3 (protocol/build
-  dependent; WebDAV and S3 are incomplete).
-* Binary, ASCII and automatic transfers with WinSCP file masks (`-filemask=`,
-  `option include`/`exclude`, `option failonnomatch`).
-* Resuming interrupted file transfers (`-resume`, `-resumesupport=`,
-  `option resume on|off|automatic`), appending to a destination (`-append`), bandwidth
-  limiting (`-speed=`) and timestamp preservation (`-preservetime`,
-  `-preservetime=all`).
-* Recursive directory downloads, uploads, and synchronization (`synchronize`,
-  `keepuptodate`) with `-criteria=`, `-preview`, `-mirror`, `-delete`,
-  `-nonrecursive`, `-interval=` and `-count=`.
-* Remote file operations: `chmod` (octal and symbolic, `-recursive`), `cp`,
-  `mv`, `ln`, `rm`, `rmdir`, `mkdir`, `stat`, `checksum`, `edit`, `call`, and
-  `copyid` to install an authorized key.
-* Reconnection of a dropped session (`option reconnecttime`).
-* Scripting: `option`, unambiguous command and option abbreviations,
-  `-parameter` with `%1%`..`%9%`, `%TIMESTAMP%` and `%ENVIRONMENT%`
-  expansion, and an XML action log (`-xmllog=`).
-* Stored sessions shared with the GUI (`session`, `savesession`, `rmsession`,
-  export and import), including the encrypted stored-password format both
-  clients read.
-* Proxy sessions under upstream's setting names (`open -rawsettings
-  ProxyMethod=SOCKS4|SOCKS5|HTTP|Telnet|Cmd ProxyHost= ProxyPort=
-  ProxyUsername= ProxyPassword= ProxyTelnetCommand= ProxyLocalCommand=
-  ProxyDNS= ProxyLocalhost= ProxyExcludeList=`), stored with a site by
-  `savesession -rawsettings` and encrypted like a session password; both SSH
-  protocols go through the PuTTY core's own proxy support, SOCKS and HTTP
-  proxies reach the curl-backed protocols as `--proxy`, and a proxy or setting
-  this build cannot use is refused rather than ignored.
-* Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
-* Native Debian `.deb` packaging with standard menu launchers and icons.
+Automated tests are the evidence for each feature. The
+[readme](../readme.md#building-and-testing) lists the commands. Each suite
+prints an evidence line that reports its passes, failures and skipped cases.
+[`upstream-parity.md`](upstream-parity.md) explains how the evidence is recorded
+and checked.
