@@ -1,0 +1,18 @@
+[
+  {
+    "name": "Open Terminal",
+    "command": "terminal"
+  },
+  {
+    "name": "Edit Remote",
+    "command": "edit {file}"
+  },
+  {
+    "name": "Checksum",
+    "command": "checksum sha-256 {file}"
+  },
+  {
+    "name": "Change Permissions",
+    "command": "chmod 644 {file}"
+  }
+]

@@ -343,6 +343,9 @@ private:
     bool LockRemote(const std::vector<std::string> & args);
     bool UnlockRemote(const std::vector<std::string> & args);
     bool DavPropertyCommand(const std::vector<std::string> & args);
+    /* WebDAV ETag preconditions: 'etag FILE -match=ETAG|-nomatch=ETAG|-clear'
+     * sets or clears If-Match/If-None-Match for subsequent writes. */
+    bool EtagCommand(const std::vector<std::string> & args);
     /* 'call'/'!': runs one command on the server through a second SSH
      * connection that executes it instead of the SFTP subsystem. */
     bool CallRemote(const std::vector<std::string> & args, const char * name);

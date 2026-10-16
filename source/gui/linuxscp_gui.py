@@ -48,6 +48,8 @@ import subprocess
 import tempfile
 import threading
 import urllib.parse
+import hashlib
+import hmac
 from fnmatch import fnmatch
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
@@ -64,6 +66,14 @@ REQUIRE_TOKEN = True
 ALLOWED_HOSTS = set(["localhost", "127.0.0.1", "::1"])
 ALLOW_ANY_HOST = False
 
+# --- Multi-user account and CSRF protection ---
+# When --accounts-file is given, the GUI authenticates users with
+# PBKDF2-hashed passwords and issues per-session CSRF tokens.
+ACCOUNTS_FILE = None     # path to accounts.ini, or None for single-user
+SESSION_SECS = 3600      # login session lifetime in seconds
+# Per-run CSRF token, distinct from API_TOKEN, bound to the session.
+CSRF_TOKEN = ""
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
 if not os.path.isdir(WEB_DIR):
@@ -73,6 +83,120 @@ if not os.path.isdir(WEB_DIR):
         if os.path.isdir(candidate):
             WEB_DIR = candidate
             break
+
+
+# ---- Multi-user account support (PBKDF2 password hashing) ---------------
+
+def _hash_password(password, salt=None):
+    """Hash a password with PBKDF2-HMAC-SHA256.  Returns (hash_hex, salt_hex)."""
+    if salt is None:
+        salt = secrets.token_bytes(16)
+    elif isinstance(salt, str):
+        salt = bytes.fromhex(salt)
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                              salt, iterations=300000, dklen=32)
+    return dk.hex(), salt.hex()
+
+
+def _verify_password(password, stored_hash, stored_salt):
+    """Verify a password against the stored PBKDF2 hash."""
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                              bytes.fromhex(stored_salt),
+                              iterations=300000, dklen=32)
+    return hmac.compare_digest(dk.hex(), stored_hash)
+
+
+def _read_accounts():
+    """Parse accounts.ini into {username: {hash, salt, home_dir}}."""
+    if not ACCOUNTS_FILE or not os.path.isfile(ACCOUNTS_FILE):
+        return {}
+    accounts = {}
+    current = None
+    with open(ACCOUNTS_FILE, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                current = line[1:-1]
+                accounts[current] = {}
+            elif current and "=" in line:
+                key, val = line.split("=", 1)
+                accounts[current][key.strip()] = val.strip()
+    return accounts
+
+
+def _write_account(username, password, home_dir=""):
+    """Create or update a user account in accounts.ini."""
+    hash_hex, salt_hex = _hash_password(password)
+    accounts = _read_accounts()
+    if username in accounts:
+        accounts[username]["hash"] = hash_hex
+        accounts[username]["salt"] = salt_hex
+        if home_dir:
+            accounts[username]["home_dir"] = home_dir
+    else:
+        accounts[username] = {"hash": hash_hex, "salt": salt_hex,
+                              "home_dir": home_dir}
+    # Write back
+    path = ACCOUNTS_FILE
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        for user, data in accounts.items():
+            f.write("[%s]\n" % user)
+            for key, val in data.items():
+                f.write("%s=%s\n" % (key, val))
+
+
+def _authenticate_user(username, password):
+    """Returns True if the username/password pair is valid."""
+    accounts = _read_accounts()
+    acct = accounts.get(username)
+    if not acct:
+        return False
+    return _verify_password(password, acct.get("hash", ""), acct.get("salt", ""))
+
+
+# Session store: {session_id: {username, created, home_dir}}
+_LOGIN_SESSIONS = {}
+_LOGIN_LOCK = threading.Lock()
+
+
+def _create_login_session(username):
+    """Issue a login session and return its session_id."""
+    sid = secrets.token_hex(32)
+    accounts = _read_accounts()
+    home_dir = accounts.get(username, {}).get("home_dir", "")
+    with _LOGIN_LOCK:
+        _LOGIN_SESSIONS[sid] = {
+            "username": username,
+            "created": time.time(),
+            "home_dir": home_dir,
+        }
+    return sid
+
+
+def _validate_login_session(sid):
+    """Returns the username if the session is valid, else None."""
+    if not sid:
+        return None
+    with _LOGIN_LOCK:
+        sess = _LOGIN_SESSIONS.get(sid)
+    if not sess:
+        return None
+    if time.time() - sess["created"] > SESSION_SECS:
+        with _LOGIN_LOCK:
+            _LOGIN_SESSIONS.pop(sid, None)
+        return None
+    return sess.get("username")
+
+
+def _extract_login_cookie(handler):
+    """Extract the login session ID from the Cookie header."""
+    cookie = handler.headers.get("Cookie") or ""
+    for part in cookie.split(";"):
+        part = part.strip()
+        if part.startswith("LSCP_SID="):
+            return part[len("LSCP_SID="):]
+    return ""
 
 
 def _default_user():
@@ -1371,13 +1495,18 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
         return ""
 
     def guarded(self):
-        """Check the Host and the token of a /api/ request.
+        """Check the Host, the token and (optionally) the login session
+        of a /api/ request.
 
         Returns True when the request may go through. The Host check is what
         stops a DNS-rebinding page from using this server: such a page is
         served from another host name, so it arrives with a Host header this
         server does not answer to, even though the browser thinks it is
         talking to itself.
+
+        When ACCOUNTS_FILE is set, the request must also carry a valid login
+        cookie (LSCP_SID). POST requests must include the X-LSCP-CSRF header
+        matching the CSRF token to prevent cross-site request forgery.
         """
         if not ALLOW_ANY_HOST and self._request_host() not in ALLOWED_HOSTS:
             self.send_json({"success": False,
@@ -1391,6 +1520,27 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                             "error": "This API needs this run's token in an "
                                      "X-LSCP-Token header."}, status=401)
             return False
+        # Multi-user account check: when ACCOUNTS_FILE is configured,
+        # every /api/ request (except /api/login itself) must carry a
+        # valid login session cookie.
+        if ACCOUNTS_FILE:
+            path = self.path.split("?")[0]
+            if path != "/api/login":
+                sid = _extract_login_cookie(self)
+                username = _validate_login_session(sid)
+                if not username:
+                    self.send_json({"success": False,
+                                    "error": "Login required.",
+                                    "login_required": True}, status=401)
+                    return False
+                # CSRF protection: POST requests must carry the token.
+                if self.command == "POST":
+                    csrf = self.headers.get("X-LSCP-CSRF") or ""
+                    if not csrf or csrf != CSRF_TOKEN:
+                        self.send_json({"success": False,
+                                        "error": "CSRF token missing or "
+                                                 "invalid."}, status=403)
+                        return False
         return True
 
     def serve_client(self):
@@ -1460,6 +1610,17 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
 
         if path in ("/", "/index.html"):
             return self.serve_client()
+
+        # Login status: returns the current username and CSRF token.
+        if path == "/api/login" and ACCOUNTS_FILE:
+            sid = _extract_login_cookie(self)
+            username = _validate_login_session(sid)
+            self.send_json({
+                "logged_in": username is not None,
+                "username": username or "",
+                "csrf_token": CSRF_TOKEN,
+            })
+            return
 
         if path.startswith("/api/") and not self.guarded():
             return
@@ -1581,6 +1742,39 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        # Login endpoint is exempt from the auth guard.
+        if path == "/api/login" and ACCOUNTS_FILE:
+            body = self.read_body_json()
+            username = body.get("username", "")
+            password = body.get("password", "")
+            if _authenticate_user(username, password):
+                sid = _create_login_session(username)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie",
+                    "LSCP_SID=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d"
+                    % (sid, SESSION_SECS))
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": True, "username": username,
+                    "csrf_token": CSRF_TOKEN}).encode("utf-8"))
+            else:
+                self.send_json({"success": False,
+                                "error": "Invalid username or password."},
+                               status=401)
+            return
+        if path == "/api/logout" and ACCOUNTS_FILE:
+            sid = _extract_login_cookie(self)
+            if sid:
+                with _LOGIN_LOCK:
+                    _LOGIN_SESSIONS.pop(sid, None)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie",
+                "LSCP_SID=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": True}).encode("utf-8"))
+            return
         if path.startswith("/api/") and not self.guarded():
             return
         if path == "/api/transfer/drop":
@@ -2353,7 +2547,87 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                             "stdout": stdout, "stderr": stderr})
             return
 
+        # --- Custom commands (Explorer-style) ---
+        if path == "/api/custom-commands":
+            body = self.read_body_json()
+            action = body.get("action", "list")
+            cmds = _read_custom_commands()
+            if action == "list":
+                self.send_json({"success": True, "commands": cmds})
+            elif action == "save":
+                name = body.get("name", "").strip()
+                command = body.get("command", "").strip()
+                if not name or not command:
+                    self.send_json({"success": False,
+                                    "error": "Name and command are required."})
+                    return
+                cmds = [c for c in cmds if c.get("name") != name]
+                cmds.append({"name": name, "command": command})
+                _write_custom_commands(cmds)
+                self.send_json({"success": True})
+            elif action == "delete":
+                name = body.get("name", "").strip()
+                cmds = [c for c in cmds if c.get("name") != name]
+                _write_custom_commands(cmds)
+                self.send_json({"success": True})
+            elif action == "run":
+                name = body.get("name", "").strip()
+                filenames = body.get("filenames", [])
+                cmd = next((c for c in cmds if c.get("name") == name), None)
+                if not cmd:
+                    self.send_json({"success": False,
+                                    "error": "Unknown command '%s'." % name})
+                    return
+                # Safe filename substitution: {file} is replaced with each
+                # selected filename, shell-interpolation-safe (single-quoted).
+                results = []
+                for fn in filenames:
+                    # Validate: no path traversal
+                    if ".." in fn or fn.startswith("/"):
+                        results.append({"file": fn, "success": False,
+                                        "error": "Path traversal rejected."})
+                        continue
+                    safe_fn = "'" + fn.replace("'", "'\\''") + "'"
+                    actual_cmd = cmd["command"].replace("{file}", safe_fn)
+                    code, stdout, stderr = run_linuxscp(actual_cmd)
+                    results.append({"file": fn, "success": code == 0,
+                                    "stdout": stdout, "stderr": stderr})
+                self.send_json({"success": True, "results": results})
+            else:
+                self.send_json({"success": False,
+                                "error": "Unknown action '%s'." % action})
+            return
+
         self.send_json({"error": "Not Found"}, status=404)
+
+
+# ---------------------------------------------------------------------------
+# Custom commands (persisted command templates for Explorer-style UI)
+# ---------------------------------------------------------------------------
+
+def _custom_commands_path():
+    root = os.environ.get("LINUXSCP_CONFIG")
+    if not root:
+        root = os.path.join(os.path.expanduser("~"), ".config", "LinuxSCP")
+    return os.path.join(root, "custom-commands.json")
+
+
+def _read_custom_commands():
+    path = _custom_commands_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_custom_commands(commands):
+    path = _custom_commands_path()
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(commands, f, indent=2)
 
 
 # ---------------------------------------------------------------------------
@@ -2726,6 +3000,7 @@ def upload_remote_text(tab, remote_path, content, base_mtime=None):
 
 def main():
     global PORT, HOST, API_TOKEN, REQUIRE_TOKEN, ALLOWED_HOSTS, ALLOW_ANY_HOST
+    global ACCOUNTS_FILE, CSRF_TOKEN
     port = PORT
     host = HOST
     fixed_token = None
@@ -2752,6 +3027,15 @@ def main():
                 ALLOWED_HOSTS.add(value)
         elif arg == "--allow-any-host":
             ALLOW_ANY_HOST = True
+        elif arg.startswith("--accounts-file="):
+            ACCOUNTS_FILE = arg.split("=", 1)[1].strip()
+        elif arg == "--add-account":
+            # Interactive: create a user account and exit.
+            user = input("Username: ").strip()
+            pw = getpass.getpass("Password: ")
+            _write_account(user, pw)
+            print("Account '%s' created." % user)
+            return 0
         elif arg in ("-h", "--help"):
             print(__doc__)
             print("Options:")
@@ -2762,6 +3046,8 @@ def main():
             print("  --no-auth              accept API calls without a token")
             print("  --allow-host=NAME      also answer requests addressed to NAME")
             print("  --allow-any-host       answer requests for any host name")
+            print("  --accounts-file=FILE   enable multi-user accounts (PBKDF2)")
+            print("  --add-account          create a user account interactively")
             print("  --print-token          write the token to the terminal")
             return 0
     startup_session = None
@@ -2772,6 +3058,7 @@ def main():
             print("Cannot open desktop site URL: %s" % exc, file=sys.stderr)
             return 2
     API_TOKEN = fixed_token or secrets.token_hex(32)
+    CSRF_TOKEN = secrets.token_hex(32)
 
     server_address = (host, port)
     try:

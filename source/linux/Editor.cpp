@@ -581,4 +581,236 @@ bool RemoteEditor::Edit(const std::string & remotePath, const EditOptions & opti
     return true;
 }
 
+/* ---- Non-UTF-8 encoding support -----------------------------------------
+ *
+ * The CLI 'edit' command can transcode files that are not in UTF-8.
+ * The conversion uses iconv, which is part of glibc and musl (the C
+ * libraries on every Linux distribution LinSCP targets).  Every byte
+ * that cannot be represented in the target encoding produces an error
+ * rather than a silent replacement, so a file is never overwritten
+ * with corrupted bytes.
+ */
+
+bool HasUtf8Bom(const std::string & data)
+{
+    return data.size() >= 3 &&
+        static_cast<unsigned char>(data[0]) == 0xEF &&
+        static_cast<unsigned char>(data[1]) == 0xBB &&
+        static_cast<unsigned char>(data[2]) == 0xBF;
+}
+
+bool IsValidUtf8(const std::string & data)
+{
+    size_t i = 0;
+    /* Skip BOM */
+    if (data.size() >= 3 &&
+        static_cast<unsigned char>(data[0]) == 0xEF &&
+        static_cast<unsigned char>(data[1]) == 0xBB &&
+        static_cast<unsigned char>(data[2]) == 0xBF)
+    {
+        i = 3;
+    }
+    while (i < data.size())
+    {
+        unsigned char c = static_cast<unsigned char>(data[i]);
+        unsigned int extra = 0;
+        if (c <= 0x7F)
+        {
+            i++;
+            continue;
+        }
+        else if ((c & 0xE0) == 0xC0) { extra = 1; }
+        else if ((c & 0xF0) == 0xE0) { extra = 2; }
+        else if ((c & 0xF8) == 0xF0) { extra = 3; }
+        else
+        {
+            return false;
+        }
+        /* Check the first byte's range */
+        if (extra == 1 && c < 0xC2) return false;
+        if (extra == 3 && c > 0xF4) return false;
+        if (i + extra >= data.size()) return false;
+        for (unsigned int j = 1; j <= extra; j++)
+        {
+            unsigned char b = static_cast<unsigned char>(data[i + j]);
+            if ((b & 0xC0) != 0x80) return false;
+        }
+        /* Check for overlong encodings */
+        if (extra == 2)
+        {
+            unsigned char c2 = static_cast<unsigned char>(data[i + 1]);
+            if (c == 0xE0 && c2 < 0xA0) return false;
+            if (c == 0xED && c2 > 0x9F) return false;
+        }
+        if (extra == 3)
+        {
+            unsigned char c2 = static_cast<unsigned char>(data[i + 1]);
+            if (c == 0xF0 && c2 < 0x90) return false;
+            if (c == 0xF4 && c2 > 0x8F) return false;
+        }
+        i += 1 + extra;
+    }
+    return true;
+}
+
+/* iconv-based conversion: converts between any two encodings that the
+ * platform's iconv recognizes.  Returns empty on error. */
+namespace {
+
+#include <iconv.h>
+
+std::string IconvConvert(const std::string & data,
+    const char * fromEnc, const char * toEnc, std::string & error)
+{
+    iconv_t cd = iconv_open(toEnc, fromEnc);
+    if (cd == reinterpret_cast<iconv_t>(-1))
+    {
+        error = std::string("iconv does not support conversion from '") +
+            fromEnc + "' to '" + toEnc + "'.";
+        return std::string();
+    }
+    std::string result;
+    result.reserve(data.size() * 2);
+    char * inBuf = const_cast<char *>(data.data());
+    size_t inLeft = data.size();
+    char outBuf[4096];
+    while (inLeft > 0)
+    {
+        char * outPtr = outBuf;
+        size_t outLeft = sizeof(outBuf);
+        size_t rc = iconv(cd, &inBuf, &inLeft, &outPtr, &outLeft);
+        if (outPtr > outBuf)
+        {
+            result.append(outBuf, outPtr - outBuf);
+        }
+        if (rc == static_cast<size_t>(-1))
+        {
+            if (errno == E2BIG)
+            {
+                /* Output buffer full; continue. */
+                continue;
+            }
+            if (errno == EILSEQ)
+            {
+                error = "Invalid byte sequence for encoding '" +
+                    std::string(fromEnc) + "'.";
+                iconv_close(cd);
+                return std::string();
+            }
+            if (errno == EINVAL)
+            {
+                error = "Incomplete byte sequence at end of input for encoding '" +
+                    std::string(fromEnc) + "'.";
+                iconv_close(cd);
+                return std::string();
+            }
+            error = std::string("iconv conversion failed: ") + strerror(errno);
+            iconv_close(cd);
+            return std::string();
+        }
+    }
+    /* Flush any shift-state reset sequence. */
+    char * outPtr = outBuf;
+    size_t outLeft = sizeof(outBuf);
+    iconv(cd, NULL, NULL, &outPtr, &outLeft);
+    if (outPtr > outBuf)
+    {
+        result.append(outBuf, outPtr - outBuf);
+    }
+    iconv_close(cd);
+    return result;
+}
+
+} // namespace
+
+std::string ConvertToUtf8(const std::string & data,
+    const std::string & fromEncoding, std::string & error)
+{
+    return IconvConvert(data, fromEncoding.c_str(), "UTF-8", error);
+}
+
+std::string ConvertFromUtf8(const std::string & data,
+    const std::string & toEncoding, std::string & error)
+{
+    return IconvConvert(data, "UTF-8", toEncoding.c_str(), error);
+}
+
+std::string ReadWithEncoding(const std::string & localPath,
+    const std::string & encoding, std::string & detectedEncoding,
+    std::string & error)
+{
+    detectedEncoding.clear();
+    FILE * file = fopen(localPath.c_str(), "rb");
+    if (!file)
+    {
+        error = std::string("Cannot open '") + localPath + "': " +
+            strerror(errno);
+        return std::string();
+    }
+    std::string data;
+    char buf[65536];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), file)) > 0)
+    {
+        data.append(buf, n);
+    }
+    fclose(file);
+
+    /* UTF-8 mode or auto-detect */
+    if (encoding.empty() || encoding == "utf-8")
+    {
+        detectedEncoding = "utf-8";
+        if (HasUtf8Bom(data))
+        {
+            /* Strip the BOM for the editor. */
+            return data.substr(3);
+        }
+        return data;
+    }
+
+    /* Convert from the given encoding. */
+    detectedEncoding = encoding;
+    std::string converted = ConvertToUtf8(data, encoding, error);
+    if (converted.empty() && !error.empty())
+    {
+        return std::string();
+    }
+    return converted;
+}
+
+bool WriteWithEncoding(const std::string & localPath,
+    const std::string & text, const std::string & encoding,
+    std::string & error)
+{
+    std::string output;
+    if (encoding.empty() || encoding == "utf-8")
+    {
+        output = text;
+    }
+    else
+    {
+        output = ConvertFromUtf8(text, encoding, error);
+        if (output.empty() && !error.empty())
+        {
+            return false;
+        }
+    }
+
+    FILE * file = fopen(localPath.c_str(), "wb");
+    if (!file)
+    {
+        error = std::string("Cannot write '") + localPath + "': " +
+            strerror(errno);
+        return false;
+    }
+    size_t written = fwrite(output.data(), 1, output.size(), file);
+    fclose(file);
+    if (written != output.size())
+    {
+        error = std::string("Short write to '") + localPath + "'.";
+        return false;
+    }
+    return true;
+}
+
 } // namespace linuxscp

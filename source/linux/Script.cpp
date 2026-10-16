@@ -299,7 +299,7 @@ const char * const kCommandNames[] = {
     "!", "ascii", "attr", "binary", "bye", "call", "cd", "checksum", "chmod",
     "close", "copyid", "cp", "del", "delsession", "dir", "echo", "edit",
     "end", "exit", "get", "help", "keepuptodate", "lcd", "lls", "ln",
-    "lock", "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv",
+    "etag", "lock", "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv",
     "open", "option", "presets", "property", "pwd", "put", "quit", "recv",
     "rename", "rm", "rmdir", "rmsession", "rmspreset", "send", "session",
     "sessions", "stat", "savepreset", "savesession", "show", "symlink",
@@ -6763,6 +6763,154 @@ bool Script::DavPropertyCommand(const std::vector<std::string> & args)
 }
 
 /*
+ * WebDAV ETag preconditions: 'etag <file> -match=ETAG' sets an If-Match
+ * precondition (write only if the server's ETag matches); 'etag <file>
+ * -nomatch=ETAG' sets If-None-Match (write only if the ETag differs);
+ * 'etag <file> -get' retrieves and prints the current ETag;
+ * 'etag <file> -clear' removes any precondition for that path.
+ *
+ * This is a LinSCP extension. Upstream's WebDAV backend has no ETag-based
+ * conditional writes. The preconditions protect against lost-update when
+ * two clients edit the same file independently of session lock tokens.
+ */
+bool Script::EtagCommand(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    std::vector<std::string> paths;
+    std::string matchEtag;
+    std::string nomatchEtag;
+    bool getGiven = false;
+    bool clearGiven = false;
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        const std::string lower = ToLower(args[i]);
+        if (StartsWith(lower, "-match="))
+        {
+            matchEtag = args[i].substr(strlen("-match="));
+        }
+        else if (StartsWith(lower, "-nomatch="))
+        {
+            nomatchEtag = args[i].substr(strlen("-nomatch="));
+        }
+        else if (lower == "-get")
+        {
+            getGiven = true;
+        }
+        else if (lower == "-clear")
+        {
+            clearGiven = true;
+        }
+        else if (args[i].size() > 1 && args[i][0] == '-')
+        {
+            Console::Instance().Error(Texts::WrongArguments("etag",
+                "Unknown switch '" + args[i] + "'."));
+            mErrors++;
+            return false;
+        }
+        else
+        {
+            paths.push_back(args[i]);
+        }
+    }
+    if (paths.size() != 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("etag",
+            "Syntax: etag <file> -match=ETAG | -nomatch=ETAG | -get | -clear"));
+        mErrors++;
+        return false;
+    }
+    const int actions = (matchEtag.empty() ? 0 : 1) +
+        (nomatchEtag.empty() ? 0 : 1) + (getGiven ? 1 : 0) + (clearGiven ? 1 : 0);
+    if (actions != 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("etag",
+            "Give exactly one of -match=ETAG, -nomatch=ETAG, -get or -clear."));
+        mErrors++;
+        return false;
+    }
+
+    const std::string path = ResolveRemotePath(mRemoteDirectory, paths[0]);
+    std::string error;
+
+    if (getGiven)
+    {
+        /* Retrieve the current ETag from the server. */
+        if (!UseNativeSftp(mSession.Options().protocol) &&
+            !IsMultiProtocol(mSession.Options().protocol))
+        {
+            /* Only the DAV backends carry ETags.  SFTP has none; curl
+             * backends carry them in the listing but not as a precondition. */
+            if (IsDavProtocol(mSession.Options().protocol))
+            {
+                std::string etag;
+                if (!ProtocolClient::DavGetEtag(mSession.Options(), path,
+                    etag, error))
+                {
+                    Console::Instance().Error(Texts::RemoteError("get the ETag of",
+                        path, error));
+                    mErrors++;
+                    return false;
+                }
+                if (etag.empty())
+                {
+                    Console::Instance().WriteLine("No ETag (path does not exist).");
+                }
+                else
+                {
+                    Console::Instance().WriteLine(etag);
+                }
+            }
+            else
+            {
+                /* For curl-backed protocols, the ETag comes from a HEAD
+                 * response if available; the stat is the closest thing. */
+                LscpAttrs attrs = {};
+                if (RemoteStat(path, &attrs, error) == LSCP_SFTP_STAT_NOTEXISTS)
+                {
+                    Console::Instance().WriteLine("No ETag (path does not exist).");
+                }
+                else
+                {
+                    Console::Instance().WriteLine("(ETag not available for " +
+                        mSession.Options().protocol + " protocol.)");
+                }
+            }
+        }
+        else
+        {
+            Console::Instance().WriteLine("(ETag not available for SFTP protocol.)");
+        }
+        return true;
+    }
+
+    if (clearGiven)
+    {
+        mSession.Options().davEtags.erase(path);
+        Console::Instance().WriteLine("Cleared ETag precondition on " + path + ".");
+        return true;
+    }
+
+    /* Set the precondition. */
+    SessionOptions::EtagPrecondition ep;
+    ep.ifMatch = matchEtag;
+    ep.ifNoneMatch = nomatchEtag;
+    mSession.Options().davEtags[path] = ep;
+    if (!matchEtag.empty())
+    {
+        Console::Instance().WriteLine("If-Match: " + matchEtag + " on " + path + ".");
+    }
+    else
+    {
+        Console::Instance().WriteLine("If-None-Match: " + nomatchEtag + " on " +
+            path + ".");
+    }
+    return true;
+}
+
+/*
  * One remote file's checksum, as lowercase hexadecimal. The server computes
  * it when the backend can ask it to; otherwise the file is downloaded to a
  * temporary file and hashed here, which is the same fallback the 'checksum'
@@ -8348,6 +8496,11 @@ bool Script::ExecuteCommand(const std::string & line)
     if (command == "property")
     {
         DavPropertyCommand(args);
+        return true;
+    }
+    if (command == "etag")
+    {
+        EtagCommand(args);
         return true;
     }
     if (command == "call")

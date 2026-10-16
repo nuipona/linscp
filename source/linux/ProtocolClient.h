@@ -94,6 +94,16 @@ public:
         const std::string & name, std::string & value, bool & found, std::string & error);
 
     /*
+     * WebDAV ETag preconditions: retrieve the current ETag of a resource
+     * and apply If-Match/If-None-Match conditional write headers.
+     * Returns false when the path does not exist (etag is empty) or when
+     * the server does not answer PROPFIND.
+     */
+    static bool DavGetEtag(const SessionOptions & options,
+        const std::string & remotePath, std::string & etag,
+        std::string & error);
+
+    /*
      * Ask the endpoint whether it is there at all, by listing a directory.
      * The curl-backed protocols have no connection of their own, so without
      * this an 'open' of a misspelled host or a dead port would report

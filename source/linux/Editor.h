@@ -80,6 +80,30 @@ bool LooksLikeText(const char * data, size_t length);
 std::string NormalizeEditedText(const std::string & originalBytes,
     const std::string & editedBytes, const std::string & eolPolicy);
 
+/*
+ * Non-UTF-8 encoding support: an explicit contract for legacy encodings
+ * (ISO-8859-1, Windows-1252, EUC-JP, Shift-JIS, etc.) through iconv.
+ * The browser editor still requires UTF-8, but the CLI can convert
+ * files on the fly before sending them to the editor and after saving.
+ */
+
+/* True when 'data' starts with a UTF-8 BOM (EF BB BF). */
+bool HasUtf8Bom(const std::string & data);
+
+/* True when 'data' is valid UTF-8 (may contain a BOM). */
+bool IsValidUtf8(const std::string & data);
+
+/* Converts 'data' from 'fromEncoding' to UTF-8 via iconv. Returns the
+ * converted bytes, or an empty string with 'error' set on failure.
+ * Supported when the platform provides iconv (glibc, musl). */
+std::string ConvertToUtf8(const std::string & data,
+    const std::string & fromEncoding, std::string & error);
+
+/* Converts 'data' from UTF-8 to 'toEncoding' via iconv. Returns the
+ * converted bytes, or an empty string with 'error' set on failure. */
+std::string ConvertFromUtf8(const std::string & data,
+    const std::string & toEncoding, std::string & error);
+
 /* The command line of the editor to run: the configured one, or the
  * first of the environment variables and installed editors. Empty with
  * 'error' set when none was found; an unknown configured program is an

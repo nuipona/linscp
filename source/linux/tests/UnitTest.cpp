@@ -32,6 +32,8 @@
 #include "S3SigV4.h"
 #include "SyncPlanner.h"
 #include "ProtocolClient.h"
+#include "SshTunnel.h"
+#include "Editor.h"
 
 namespace {
 
@@ -3155,6 +3157,229 @@ void TestLocalization()
     else unsetenv("LINUXSCP_LANGUAGE");
 }
 
+void TestNonUnixListingFormats()
+{
+    /* DOS/IIS listing lines */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseDosListingLine(
+            "03-25-23  11:22AM       <DIR>          dirname", entry));
+        CHECK_EQ(entry.name, std::string("dirname"));
+        CHECK_TRUE(entry.isDir);
+        CHECK_TRUE(entry.typeKnown);
+        CHECK_TRUE(entry.timeKnown);
+    }
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseDosListingLine(
+            "07-14-22  04:00PM             12345    filename.txt", entry));
+        CHECK_EQ(entry.name, std::string("filename.txt"));
+        CHECK_FALSE(entry.isDir);
+        CHECK_TRUE(entry.typeKnown);
+        CHECK_EQ(entry.size, 12345ULL);
+    }
+    /* DOS line should not match Unix. */
+    {
+        ListingEntry entry;
+        CHECK_FALSE(ParseUnixListingLine(
+            "03-25-23  11:22AM       <DIR>          dirname", entry));
+    }
+    /* VMS listing lines */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "FILE.TXT;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)",
+            entry));
+        CHECK_EQ(entry.name, std::string("FILE.TXT"));
+        CHECK_FALSE(entry.isDir);
+        CHECK_TRUE(entry.typeKnown);
+        CHECK_EQ(entry.size, 25ULL);
+    }
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "SUBDIR.DIR;1     3  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)",
+            entry));
+        CHECK_EQ(entry.name, std::string("SUBDIR"));
+        CHECK_TRUE(entry.isDir);
+        CHECK_TRUE(entry.typeKnown);
+    }
+    /* ParseAnyListingLine tries all formats */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseAnyListingLine(
+            "-rw-r--r-- 1 user group 12345 Jun 25 11:22 test.txt", entry));
+        CHECK_EQ(entry.name, std::string("test.txt"));
+    }
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseAnyListingLine(
+            "03-25-23  11:22AM       <DIR>          dirname", entry));
+        CHECK_EQ(entry.name, std::string("dirname"));
+        CHECK_TRUE(entry.isDir);
+    }
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseAnyListingLine(
+            "FILE.TXT;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)",
+            entry));
+        CHECK_EQ(entry.name, std::string("FILE.TXT"));
+    }
+    /* LooksLikeDosListing and LooksLikeVmsListing */
+    CHECK_TRUE(LooksLikeDosListing("03-25-23  11:22AM       <DIR>          dir"));
+    CHECK_FALSE(LooksLikeDosListing("-rw-r--r-- 1 user group 12345 Jun 25 test"));
+    CHECK_TRUE(LooksLikeVmsListing(
+        "FILE.TXT;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)"));
+    CHECK_FALSE(LooksLikeVmsListing("-rw-r--r-- 1 user group 12345 Jun 25 test"));
+}
+
+void TestEncodingHelpers()
+{
+    /* UTF-8 BOM detection */
+    {
+        std::string bom = "\xEF\xBB\xBFhello";
+        CHECK_TRUE(HasUtf8Bom(bom));
+    }
+    {
+        std::string noBom = "hello";
+        CHECK_FALSE(HasUtf8Bom(noBom));
+    }
+    /* UTF-8 validation */
+    CHECK_TRUE(IsValidUtf8("hello world"));
+    CHECK_TRUE(IsValidUtf8("日本語テスト"));
+    CHECK_TRUE(IsValidUtf8(std::string("\xEF\xBB\xBF") + "with BOM"));
+    CHECK_TRUE(IsValidUtf8(""));
+    /* Invalid UTF-8 sequences */
+    CHECK_FALSE(IsValidUtf8(std::string("\xC0\x80")));       /* overlong */
+    CHECK_FALSE(IsValidUtf8(std::string("\x80")));           /* continuation */
+    CHECK_FALSE(IsValidUtf8(std::string("\xFE")));           /* invalid lead */
+    /* ConvertToUtf8 / ConvertFromUtf8 round-trip (ISO-8859-1) */
+    {
+        std::string error;
+        std::string latin1 = "caf\xE9";  /* café in ISO-8859-1 */
+        std::string utf8 = ConvertToUtf8(latin1, "ISO-8859-1", error);
+        CHECK_TRUE(error.empty());
+        CHECK_TRUE(!utf8.empty());
+        /* The é character should be C3 A9 in UTF-8 */
+        CHECK_TRUE(utf8.find("\xC3\xA9") != std::string::npos);
+        /* Convert back */
+        std::string back = ConvertFromUtf8(utf8, "ISO-8859-1", error);
+        CHECK_TRUE(error.empty());
+        CHECK_EQ(back, latin1);
+    }
+    /* Invalid encoding name */
+    {
+        std::string error;
+        std::string result = ConvertToUtf8("test", "INVALID-ENC", error);
+        CHECK_TRUE(!error.empty());
+    }
+}
+
+void TestSshTunnelParsing()
+{
+    /* Local tunnel */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("8080:localhost:80", TunnelType::Local,
+            tunnel, error));
+        CHECK_EQ(tunnel.bindPort, 8080);
+        CHECK_EQ(tunnel.remoteHost, std::string("localhost"));
+        CHECK_EQ(tunnel.remotePort, 80);
+    }
+    /* Local tunnel with bind address */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("0.0.0.0:8080:localhost:80", TunnelType::Local,
+            tunnel, error));
+        CHECK_EQ(tunnel.bindAddress, std::string("0.0.0.0"));
+        CHECK_EQ(tunnel.bindPort, 8080);
+    }
+    /* Dynamic tunnel */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("1080", TunnelType::Dynamic,
+            tunnel, error));
+        CHECK_EQ(tunnel.bindPort, 1080);
+    }
+    /* Dynamic tunnel with bind address */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("0.0.0.0:1080", TunnelType::Dynamic,
+            tunnel, error));
+        CHECK_EQ(tunnel.bindAddress, std::string("0.0.0.0"));
+        CHECK_EQ(tunnel.bindPort, 1080);
+    }
+    /* Remote tunnel */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("9090:localhost:9090", TunnelType::Remote,
+            tunnel, error));
+        CHECK_EQ(tunnel.bindPort, 9090);
+        CHECK_EQ(tunnel.remoteHost, std::string("localhost"));
+        CHECK_EQ(tunnel.remotePort, 9090);
+    }
+    /* Invalid: empty */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_FALSE(ParseTunnelSpec("", TunnelType::Local, tunnel, error));
+    }
+    /* Invalid: port out of range */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_FALSE(ParseTunnelSpec("99999:localhost:80", TunnelType::Local,
+            tunnel, error));
+    }
+    /* SSH flags */
+    {
+        SshTunnel tunnel;
+        tunnel.type = TunnelType::Local;
+        tunnel.bindPort = 8080;
+        tunnel.remoteHost = "localhost";
+        tunnel.remotePort = 80;
+        CHECK_EQ(TunnelSshFlags(tunnel), std::string("-L 8080:localhost:80"));
+    }
+    {
+        SshTunnel tunnel;
+        tunnel.type = TunnelType::Dynamic;
+        tunnel.bindAddress = "0.0.0.0";
+        tunnel.bindPort = 1080;
+        CHECK_EQ(TunnelSshFlags(tunnel), std::string("-D 0.0.0.0:1080"));
+    }
+    /* GSSAPI detection: always available when NO_GSSAPI is not defined */
+    {
+        /* In the test build, GSSAPI is compiled out (NO_GSSAPI), so
+         * IsGssapiSupported should return false. */
+        std::string error;
+        CHECK_FALSE(IsGssapiSupported());
+        CHECK_FALSE(ApplyGssapiSetting("1", error));
+        CHECK_TRUE(error.find("GSSAPI") != std::string::npos);
+    }
+}
+
+void TestDavEtagHelpers()
+{
+    /* DavGetEtag: the function is a static method on ProtocolClient, tested
+     * with live DAV tests.  Here we test the precondition helpers on the
+     * session. */
+    SessionOptions options;
+    options.davEtags["/test.txt"].ifMatch = "\"abc123\"";
+    CHECK_EQ(options.davEtags["/test.txt"].ifMatch, std::string("\"abc123\""));
+    CHECK_TRUE(options.davEtags["/test.txt"].ifNoneMatch.empty());
+    options.davEtags["/other.txt"].ifNoneMatch = "\"xyz789\"";
+    CHECK_EQ(options.davEtags["/other.txt"].ifNoneMatch, std::string("\"xyz789\""));
+    /* Clear by erasing */
+    options.davEtags.erase("/test.txt");
+    CHECK_TRUE(options.davEtags.find("/test.txt") == options.davEtags.end());
+    CHECK_FALSE(options.davEtags.find("/other.txt") == options.davEtags.end());
+}
+
 int main()
 {
     TestLocalization();
@@ -3196,6 +3421,10 @@ int main()
     TestScriptParameterExpansion();
     TestTimestampFormatting();
     TestRelativeTime();
+    TestNonUnixListingFormats();
+    TestEncodingHelpers();
+    TestSshTunnelParsing();
+    TestDavEtagHelpers();
 
     if (gFailures != 0)
     {

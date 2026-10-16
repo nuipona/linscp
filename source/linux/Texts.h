@@ -54,6 +54,41 @@ std::string LocalError(const std::string & operation, const std::string & path,
 std::string UnknownCommand(const std::string & command);
 std::string WrongArguments(const std::string & command, const std::string & hint);
 
+/* --- Additional translatable strings for command help and status --- */
+std::string SessionOpened(const std::string & host);
+std::string SessionClosed(const std::string & name);
+std::string DirectoryCreated(const std::string & path);
+std::string FileRemoved(const std::string & path);
+std::string FileMoved(const std::string & from, const std::string & to);
+std::string PermissionsChanged(const std::string & path, const std::string & mode);
+std::string ChecksumResult(const std::string & algorithm,
+    const std::string & hash, const std::string & path);
+std::string LockAcquired(const std::string & path);
+std::string LockReleased(const std::string & path);
+std::string PropertySet(const std::string & name, const std::string & path);
+std::string PropertyNotSet(const std::string & name, const std::string & path);
+std::string PropertyValue(const std::string & name, const std::string & value);
+std::string EtagSet(const std::string & type, const std::string & etag,
+    const std::string & path);
+std::string EtagCleared(const std::string & path);
+std::string NoEtag(const std::string & path);
+std::string EtagNotAvailable(const std::string & protocol);
+std::string SyncPlanHeader(int count);
+std::string SyncDirection(const std::string & direction);
+std::string KeepUpToDateStarting(int interval);
+std::string KeepUpToDatePass(int pass);
+std::string EditingFile(const std::string & path);
+std::string EditConflict(const std::string & path);
+std::string CopyIdInstalled(const std::string & path);
+std::string CopyIdAlreadyInstalled();
+std::string LinkCreated(const std::string & target, const std::string & link);
+std::string SessionListed(int index, const std::string & name);
+std::string PresetListed(const std::string & name);
+std::string PresetSaved(const std::string & name);
+std::string PresetRemoved(const std::string & name);
+std::string OptionSet(const std::string & name, const std::string & value);
+std::string TerminalOpening();
+
 } // namespace Texts
 } // namespace linuxscp
 

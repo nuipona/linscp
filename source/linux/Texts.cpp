@@ -273,5 +273,162 @@ std::string WrongArguments(const std::string & command, const std::string & hint
     return Translate("Wrong arguments of '{command}' command. {hint}", {{"command", command}, {"hint", hint}});
 }
 
+std::string SessionOpened(const std::string & host)
+{
+    return Translate("Session '{host}' opened.", {{"host", host}});
+}
+
+std::string SessionClosed(const std::string & name)
+{
+    return Translate("Session '{name}' closed.", {{"name", name}});
+}
+
+std::string DirectoryCreated(const std::string & path)
+{
+    return Translate("Directory '{path}' created.", {{"path", path}});
+}
+
+std::string FileRemoved(const std::string & path)
+{
+    return Translate("Removed '{path}'.", {{"path", path}});
+}
+
+std::string FileMoved(const std::string & from, const std::string & to)
+{
+    return Translate("Moved '{from}' to '{to}'.", {{"from", from}, {"to", to}});
+}
+
+std::string PermissionsChanged(const std::string & path, const std::string & mode)
+{
+    return Translate("Permissions of '{path}' changed to {mode}.", {{"path", path}, {"mode", mode}});
+}
+
+std::string ChecksumResult(const std::string & algorithm,
+    const std::string & hash, const std::string & path)
+{
+    return Translate("{algorithm} checksum of '{path}': {hash}", {{"algorithm", algorithm}, {"path", path}, {"hash", hash}});
+}
+
+std::string LockAcquired(const std::string & path)
+{
+    return Translate("Lock acquired on '{path}'.", {{"path", path}});
+}
+
+std::string LockReleased(const std::string & path)
+{
+    return Translate("Lock released on '{path}'.", {{"path", path}});
+}
+
+std::string PropertySet(const std::string & name, const std::string & path)
+{
+    return Translate("Set {name} on {path}.", {{"name", name}, {"path", path}});
+}
+
+std::string PropertyNotSet(const std::string & name, const std::string & path)
+{
+    return Translate("{name} is not set on {path}.", {{"name", name}, {"path", path}});
+}
+
+std::string PropertyValue(const std::string & name, const std::string & value)
+{
+    return Translate("{name}={value}", {{"name", name}, {"value", value}});
+}
+
+std::string EtagSet(const std::string & type, const std::string & etag,
+    const std::string & path)
+{
+    return Translate("{type}: {etag} on {path}.", {{"type", type}, {"etag", etag}, {"path", path}});
+}
+
+std::string EtagCleared(const std::string & path)
+{
+    return Translate("Cleared ETag precondition on {path}.", {{"path", path}});
+}
+
+std::string NoEtag(const std::string & path)
+{
+    return Translate("No ETag (path does not exist).");
+}
+
+std::string EtagNotAvailable(const std::string & protocol)
+{
+    return Translate("(ETag not available for {protocol} protocol.)", {{"protocol", protocol}});
+}
+
+std::string SyncPlanHeader(int count)
+{
+    return Translate("{count} differences found.", {{"count", std::to_string(count)}});
+}
+
+std::string SyncDirection(const std::string & direction)
+{
+    return Translate("Synchronizing {direction}...", {{"direction", direction}});
+}
+
+std::string KeepUpToDateStarting(int interval)
+{
+    return Translate("Watching for changes (interval: {interval}s)...", {{"interval", std::to_string(interval)}});
+}
+
+std::string KeepUpToDatePass(int pass)
+{
+    return Translate("Pass {pass}...", {{"pass", std::to_string(pass)}});
+}
+
+std::string EditingFile(const std::string & path)
+{
+    return Translate("Editing '{path}'...", {{"path", path}});
+}
+
+std::string EditConflict(const std::string & path)
+{
+    return Translate("'{path}' was modified on the server since it was opened.", {{"path", path}});
+}
+
+std::string CopyIdInstalled(const std::string & path)
+{
+    return Translate("Public key installed in '{path}'.", {{"path", path}});
+}
+
+std::string CopyIdAlreadyInstalled()
+{
+    return Translate("The key is already installed.");
+}
+
+std::string LinkCreated(const std::string & target, const std::string & link)
+{
+    return Translate("Symbolic link created: {link} -> {target}.", {{"target", target}, {"link", link}});
+}
+
+std::string SessionListed(int index, const std::string & name)
+{
+    return Translate("  {index} {name}", {{"index", std::to_string(index)}, {"name", name}});
+}
+
+std::string PresetListed(const std::string & name)
+{
+    return Translate("  {name}", {{"name", name}});
+}
+
+std::string PresetSaved(const std::string & name)
+{
+    return Translate("Preset '{name}' saved.", {{"name", name}});
+}
+
+std::string PresetRemoved(const std::string & name)
+{
+    return Translate("Preset '{name}' removed.", {{"name", name}});
+}
+
+std::string OptionSet(const std::string & name, const std::string & value)
+{
+    return Translate("Option {name} set to '{value}'.", {{"name", name}, {"value", value}});
+}
+
+std::string TerminalOpening()
+{
+    return Translate("Opening terminal...");
+}
+
 } // namespace Texts
 } // namespace linuxscp
