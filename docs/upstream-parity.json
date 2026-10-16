@@ -16,13 +16,13 @@
     "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite",
     "date": "2026-10-16",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 987 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
+     "unit": "source/linux/tests/UnitTest.cpp - 1097 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings and the FTP engine and TLS policy settings (defaults, every spelling each value takes, the names refused, and the URL spellings ftps:// and ftpes://), the host-key pin spellings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log. It checks -literal command input (including GUI filenames with percent placeholders), mkdir -parents argument validation and the adjacent -gui launcher plus Makefile/CMake source-tree launchers.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader). Recursive directory copy and multiple source files into an existing destination directory are tested over SFTP; the test server refuses the optional copy-data extension, so these prove the streamed fallback rather than the native extension. A second server mode implements copy-data and verifies the native extension path as well as exact copied bytes. The server can also refuse check-file-name, which proves the download-and-hash fallback for sha-256, sha-1, md5 and crc32, or implement the extension, which proves the native sha-256 digest and that the client does not fall back after a valid reply. It also proves that synchronize remote with a path exclusion ('-filemask=|skip/') leaves an excluded file untouched despite -delete and does not upload files from the excluded subtree. Recursive symbolic chmod is checked over a nested tree, including exact directory and file modes. copyid installs a generated OpenSSH public key into the test SFTP home, verifies the 0700/0600 permissions and proves that repeating the command does not duplicate the key.",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, filename and full-text search controls/results, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored), and browser file/folder drop enumeration with nested paths and explicit empty directories.",
      "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl. It also covers -parents mkdir and literal remote names containing spaces, percent signs, question marks and hashes through DAV PROPFIND/GET/PUT/MOVE/COPY.",
-     "live-curl": "source/linux/tests/LiveCurlTest.py - throwaway pyftpdlib FTP and implicit FTPS servers verify authenticated downloads/uploads, including FTP .filepart completion; when OpenSSH sshd is available, the SCP case verifies authenticated direct upload/download and rejects unsafe upload resume rather than staging a remote .filepart.",
+     "live-curl": "source/linux/tests/LiveCurlTest.py - throwaway pyftpdlib FTP, implicit FTPS and explicit-TLS (AUTH TLS) servers verify authenticated downloads/uploads and FTP .filepart completion; a recording handler proves which commands the session sent, so the suite checks that a listing is MLSD with LIST absent, that FtpUseMlsd=0 and a server refusing MLSD both fall back to LIST, that FtpUseMlsd=2 fails instead of listing without facts (and never sends LIST), and that FtpPasvMode=0 opens the data connection with PORT. The explicit-TLS case walks the TLS policy in one session: ftpes:// and Ftps=3 on an ftp:// URL, a refused handshake when the certificate is not accepted, CaCertificateFile, a PinnedPublicKey that matches, one that does not, MaxTlsVersion=1.1 refused against MinTlsVersion=1.2 accepted, and a host-key fingerprint refused with the setting to use instead. A saved site is stored and reopened by name to prove the FTP/TLS policy travels with it. When OpenSSH sshd is available, the SCP case pins the host key by its SHA-256 fingerprint from -hostkey (and refuses a wrong one), verifies authenticated direct upload/download and rejects unsafe upload resume rather than staging a remote .filepart.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server.",
      "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet.",
      "gui-browser-upload": "source/gui/tests/BrowserUploadTest.py - rejects missing run tokens and invalid/traversal paths, stages exact bytes from HTTP to a private file, queues nested uploads and explicit empty directories with retry-safe parent creation, verifies that background tasks use -literal for percent-sign filenames, and removes partial staging on an incomplete upload. ClientTest.js exercises browser file/folder traversal, batches, and target selection.",
@@ -418,7 +418,7 @@
   {
    "name": "FTP/FTPS",
    "status": "partial",
-   "notes": "curl transport and listing parser; no full upstream MLSD, TLS configuration, active/passive and server compatibility validation."
+   "notes": "Plain FTP directory and metadata commands run on a native engine (MLSD/MLST with the LIST fallback, active/passive and FtpForcePasvIp, SITE CHMOD, mkdir/rmdir/rename/delete); transfers and every TLS session stay on curl, whose FTPS policy now follows upstream's names (Ftps implicit or explicit, TLS version bounds, client certificate, CA file or directory, public-key pin). Still missing: server-to-server compatibility validation and the rest of upstream's listing dialects."
   },
   {
    "name": "WebDAV",
@@ -768,36 +768,78 @@
   {
    "id": "ftp.listings-and-mlsd",
    "area": "FTP/FTPS",
-   "status": "partial",
-   "notes": "A text listing parser extracts names, dates, sizes and permissions when a server supplies them.",
-   "gap": "Implement and verify MLSD/MLST and non-Unix listing dialects instead of relying on ls -l parsing.",
+   "status": "verified",
+   "notes": "Plain FTP is served by the native FTP engine, which asks for MLSD where the server advertises it: size, type, time and permissions come from the protocol instead of from an ls -l line each server formats its own way. MLST answers stat, a server that refuses MLSD falls back to LIST, FtpUseMlsd=0 asks for LIST from the start, and FtpUseMlsd=2 (require) fails the listing rather than returning one without the machine-readable facts. The ls -l parser is shared with the curl backend, which serves the LIST replies and every transfer.",
    "source": [
-    "source/linux/ProtocolClient.cpp"
-   ]
+    "source/linux/FtpClient.cpp",
+    "source/linux/ListingParse.cpp",
+    "source/linux/Session.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestFtpAndTlsSettings"
+    ],
+    "live-curl": [
+     "test_ftp_listing_uses_mlsd_and_stat_uses_mlst",
+     "test_ftp_use_mlsd_off_falls_back_to_list",
+     "test_ftp_mlsd_refusal_falls_back_to_list",
+     "test_ftp_mlsd_required_without_server_support_is_refused"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit",
+     "live-curl"
+    ]
+   }
   },
   {
    "id": "ftp.active-passive",
    "area": "FTP/FTPS",
-   "status": "missing",
-   "notes": "No explicit active/passive connection policy or tests.",
-   "gap": "Expose and verify FTP active/passive settings against controlled servers."
+   "status": "verified",
+   "notes": "FtpPasvMode picks the data connection the native engine opens: passive by default, EPSV first with PASV as the fallback, and FtpPasvMode=0 opens it from the client instead, binding a listener and telling the server where it is with PORT or EPRT. FtpForcePasvIp decides whose address a PASV reply may use - 0 the control connection's, 1 (the default) the reply's unless it is unroutable, 2 the reply verbatim - and FtpAccount answers a server that asks for an account name on top of the credentials.",
+   "source": [
+    "source/linux/FtpClient.cpp",
+    "source/linux/Session.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestFtpAndTlsSettings"
+    ],
+    "live-curl": [
+     "test_ftp_active_mode_opens_the_data_connection_backwards",
+     "test_ftp_listing_uses_mlsd_and_stat_uses_mlst"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit",
+     "live-curl"
+    ]
+   }
   },
   {
    "id": "ftp.tls-policy",
    "area": "FTP/FTPS",
-   "status": "partial",
-   "notes": "FTPS uses curl TLS defaults and hostkey=* disables certificate checks.",
-   "gap": "Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit mode in addition to the implicit smoke case.",
+   "status": "verified",
+   "notes": "FTPS stays on curl, the TLS client of this build, and upstream's setting names drive it: ftps:// (Ftps=1) is implicit TLS on port 990, ftpes:// (Ftps=2 or 3 on an ftp:// URL) is explicit TLS through --ssl-reqd, MinTlsVersion and MaxTlsVersion become --tlsv1.x and --tls-max, TlsCertificateFile and TlsCertificateKeyFile become --cert and --key, CaCertificateFile and CaCertificateDir become --cacert and --capath, and PinnedPublicKey becomes --pinnedpubkey. A policy curl cannot honour, or one given to a protocol without TLS, is refused before the connection rather than dropped; hostkey='*' is the only value that turns certificate validation off.",
    "source": [
-    "source/linux/ProtocolClient.cpp"
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Session.cpp",
+    "source/linux/SessionStore.cpp"
    ],
    "checks": {
+    "unit": [
+     "TestFtpAndTlsSettings"
+    ],
     "live-curl": [
+     "test_explicit_ftps_session_and_tls_policy",
      "test_ftps_authenticated_download_and_upload"
     ]
    },
    "verified_on": {
     "linux": [
+     "unit",
      "live-curl"
     ]
    }
@@ -1412,21 +1454,30 @@
   {
    "id": "sessions.rawsettings",
    "area": "Sessions/configuration",
-   "status": "partial",
-   "notes": "Only implemented upstream proxy raw settings are accepted; unknown settings fail by name.",
-   "gap": "Port and test additional upstream session configuration options.",
+   "status": "verified",
+   "notes": "'open' and 'savesession' take '-rawsettings' with upstream's names: the proxy settings (ProxyMethod, ProxyHost, ProxyPort, ProxyUsername, ProxyPassword, ProxyTelnetCommand, ProxyLocalCommand, ProxyDNS, ProxyLocalhost, ProxyExcludeList), the FTP engine's policy (FtpPasvMode, FtpForcePasvIp, FtpUseMlsd, FtpAccount) and the TLS policy (Ftps, MinTlsVersion, MaxTlsVersion, TlsCertificateFile, TlsCertificateKeyFile, CaCertificateFile, CaCertificateDir, PinnedPublicKey). A name or value outside that set is refused by name before any connection, so a setting is never stored and then dropped at open time, and 'savesession' writes what it applied under the keys a saved site reads back.",
    "source": [
     "source/linux/Session.cpp",
-    "source/linux/Script.cpp"
+    "source/linux/Script.cpp",
+    "source/linux/SessionStore.cpp"
    ],
    "checks": {
     "script": [
-     "test_rawsettings_refuse_a_setting_this_build_would_drop"
+     "test_rawsettings_refuse_a_setting_this_build_would_drop",
+     "test_rawsettings_validate_their_values"
+    ],
+    "unit": [
+     "TestFtpAndTlsSettings"
+    ],
+    "live-curl": [
+     "test_saved_session_keeps_ftp_and_tls_settings"
     ]
    },
    "verified_on": {
     "linux": [
-     "script"
+     "live-curl",
+     "script",
+     "unit"
     ]
    }
   },
@@ -1481,12 +1532,28 @@
   {
    "id": "security.curl-pins-and-tls",
    "area": "Security/authentication",
-   "status": "partial",
-   "notes": "curl can pin SSH MD5 host keys; TLS uses curl certificate validation.",
-   "gap": "Provide SHA256 host-key equivalence and certificate pinning with live SCP/FTPS tests.",
+   "status": "verified",
+   "notes": "'-hostkey=' accepts the fingerprint spellings people paste - a SHA-256 digest in hex with optional ':' separators, OpenSSH's SHA256:base64 and curl's sha256//base64 - and converts between them, so the SSH protocols pin the host key with --hostpubsha256, or with --hostpubmd5 for a 32-hex MD5 digest. A TLS session keeps chain validation (the system store, or CaCertificateFile and CaCertificateDir) and pins the server's public key with --pinnedpubkey; a value that is not a pin curl can compare is refused with the setting to use instead, and '*' is the only value that disables the checks.",
    "source": [
-    "source/linux/ProtocolClient.cpp"
-   ]
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Session.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestHostKeyPinConversion",
+     "TestFtpAndTlsSettings"
+    ],
+    "live-curl": [
+     "test_explicit_ftps_session_and_tls_policy",
+     "test_scp_authenticated_download_upload_and_resume_policy"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit",
+     "live-curl"
+    ]
+   }
   },
   {
    "id": "security.proxy-isolation",

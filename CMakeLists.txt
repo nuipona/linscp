@@ -47,6 +47,8 @@ set(FRONTEND source/linux)
 set(FRONTEND_SOURCES
   ${FRONTEND}/Session.cpp
   ${FRONTEND}/SessionStore.cpp
+  ${FRONTEND}/ListingParse.cpp
+  ${FRONTEND}/FtpClient.cpp
   ${FRONTEND}/TransferPresets.cpp
   ${FRONTEND}/SyncPlanner.cpp
   ${FRONTEND}/Editor.cpp

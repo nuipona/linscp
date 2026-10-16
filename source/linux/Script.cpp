@@ -627,18 +627,20 @@ bool CollectRawSettings(const std::vector<std::string> & args, size_t & index,
 }
 
 /*
- * Applies collected settings to a proxy configuration. The first setting
- * this build does not apply stops it and is named, because a session that
- * silently ignores a proxy setting connects somewhere else than the user
- * asked for.
+ * Applies collected settings to a session: the proxy names it has always
+ * taken, plus the FTP and TLS policy of this build (FtpPasvMode,
+ * FtpUseMlsd, Ftps, MinTlsVersion, TlsCertificateFile, ...). The first
+ * setting this build does not apply stops it and is named, because a
+ * session that silently ignores a setting connects somewhere else than
+ * the user asked for.
  */
 bool ApplyRawSettings(const std::vector<RawSetting> & settings,
-    ProxySettings & proxy, std::string & error)
+    SessionOptions & options, std::string & error)
 {
     for (size_t i = 0; i < settings.size(); i++)
     {
-        if (!ApplyProxyRawSetting(settings[i].first, settings[i].second,
-                proxy, error))
+        if (!ApplySessionRawSetting(settings[i].first, settings[i].second,
+                options, error))
         {
             return false;
         }
@@ -671,7 +673,7 @@ bool ApplyOpenSwitches(const OpenSwitches & switches, SessionOptions & options,
     {
         options.privateKeyFile = switches.privateKeyFile;
     }
-    return ApplyRawSettings(switches.rawSettings, options.proxy, error);
+    return ApplyRawSettings(switches.rawSettings, options, error);
 }
 
 } // namespace
@@ -5579,12 +5581,20 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
     if (!rawSettings.empty())
     {
         std::string rawError;
-        if (!ApplyRawSettings(rawSettings, session.proxy, rawError))
+        /* The settings land on a session built from what is being stored,
+         * so the ones this build applies join the site and the rest is
+         * refused by name - never stored and dropped at open time. */
+        SessionOptions scratch = SessionStore::ToSessionOptions(session,
+            SessionOptions());
+        if (!ApplyRawSettings(rawSettings, scratch, rawError))
         {
             console.Error(Texts::WrongArguments("savesession", rawError));
             mErrors++;
             return false;
         }
+        session.proxy = scratch.proxy;
+        session.ftp = scratch.ftp;
+        session.tls = scratch.tls;
         /* What the switch states replaces the stored value, so a
          * ciphertext nobody could read does not survive it. */
         session.proxyPasswordRaw.clear();
@@ -7487,12 +7497,17 @@ const struct ScriptCommandHelpEntry
             "        [-privatekey=FILE] [-rawsettings NAME=VALUE...]\n"
             "  Connects to a site given as a URL or a stored session name;\n"
             "  the switches apply to a stored site as well as to a URL.\n"
-            "  -rawsettings sets session settings by upstream's names: the\n"
-            "  proxy ones this build applies are ProxyMethod=None|SOCKS4|\n"
-            "  SOCKS5|HTTP|Telnet|Cmd, ProxyHost, ProxyPort, ProxyUsername,\n"
+            "  -rawsettings sets session settings by upstream's names. This\n"
+            "  build applies the proxy ones (ProxyMethod=None|SOCKS4|SOCKS5|\n"
+            "  HTTP|Telnet|Cmd, ProxyHost, ProxyPort, ProxyUsername,\n"
             "  ProxyPassword, ProxyTelnetCommand, ProxyLocalCommand,\n"
-            "  ProxyDNS=0|1|2, ProxyLocalhost=0|1 and ProxyExcludeList;\n"
-            "  any other setting is refused rather than dropped." },
+            "  ProxyDNS=0|1|2, ProxyLocalhost=0|1, ProxyExcludeList), the FTP\n"
+            "  engine's policy (FtpPasvMode=0|1, FtpForcePasvIp=0|1|2,\n"
+            "  FtpUseMlsd=0|1|2, FtpAccount) and the TLS policy (Ftps=0|1|2|3,\n"
+            "  MinTlsVersion, MaxTlsVersion, TlsCertificateFile,\n"
+            "  TlsCertificateKeyFile, CaCertificateFile, CaCertificateDir,\n"
+            "  PinnedPublicKey); any other setting is refused rather than\n"
+            "  dropped." },
         { "option", "option [ <name> [ <value> ] ]\n"
             "  Shows or changes a setting: echo, batch, confirm, resume,\n"
             "  transfer, include, exclude, failonnomatch, synchdelete,\n"
@@ -7536,8 +7551,9 @@ const struct ScriptCommandHelpEntry
             "  describe, under <name>; -preset=NAME also stores the\n"
             "  transfer preset the site should load (-preset= clears it),\n"
             "  and -rawsettings NAME=VALUE... stores session settings with\n"
-            "  it (the proxy ones 'open -rawsettings' applies; a proxy\n"
-            "  password is encrypted like a session password)." },
+            "  it (the ones 'open -rawsettings' applies: proxy, FTP engine\n"
+            "  and TLS policy; a proxy password is encrypted like a session\n"
+            "  password)." },
         { "show", "show\n"
             "  Not available in this build: the connection runs the SFTP\n"
             "  subsystem, so remote shell commands cannot be shown." },

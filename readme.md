@@ -99,7 +99,7 @@ remain open gaps.
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 and its [Linux capability matrix](docs/linux-feature-inventory.md) for the
 pinned upstream baseline, named test evidence, limitations and remaining gaps.
-The matrix currently has 84 scoped capabilities across 15 areas; it is not
+The matrix currently has 87 scoped capabilities across 15 areas; it is not
 an exhaustive behavioral parity certification. Refresh it after changing
 `docs/upstream-parity.json` with
 `python3 tools/check_upstream_parity.py --write-report`.

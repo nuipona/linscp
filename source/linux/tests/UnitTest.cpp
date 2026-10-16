@@ -2597,6 +2597,206 @@ void TestRelativeTime()
 
 } // namespace
 
+/*
+ * The FTP and TLS session settings: upstream's names and vocabulary, the
+ * defaults a connection would use without them, and the refusals that stop
+ * a setting from being silently dropped.
+ */
+void TestFtpAndTlsSettings()
+{
+    SessionOptions options;
+    CHECK_TRUE(options.ftp.passiveMode);
+    CHECK_TRUE(options.ftp.forcePasvIp == 1);
+    CHECK_TRUE(options.ftp.useMlsd == 1);
+    CHECK_TRUE(options.tls.ftpsMode == 0);
+
+    std::string error;
+
+    CHECK_TRUE(ApplySessionRawSetting("FtpPasvMode", "0", options, error));
+    CHECK_FALSE(options.ftp.passiveMode);
+    CHECK_TRUE(ApplySessionRawSetting("FtpPasvMode", "on", options, error));
+    CHECK_TRUE(options.ftp.passiveMode);
+    CHECK_FALSE(ApplySessionRawSetting("FtpPasvMode", "maybe", options, error));
+    CHECK_TRUE(error.find("FtpPasvMode") != std::string::npos);
+
+    CHECK_TRUE(ApplySessionRawSetting("FtpUseMlsd", "2", options, error));
+    CHECK_TRUE(options.ftp.useMlsd == 2);
+    CHECK_TRUE(ApplySessionRawSetting("FtpUseMlsd", "auto", options, error));
+    CHECK_TRUE(options.ftp.useMlsd == 1);
+    CHECK_TRUE(ApplySessionRawSetting("FtpForcePasvIp", "0", options, error));
+    CHECK_TRUE(options.ftp.forcePasvIp == 0);
+    CHECK_FALSE(ApplySessionRawSetting("FtpForcePasvIp", "3", options, error));
+    CHECK_TRUE(ApplySessionRawSetting("FtpAccount", "billing", options, error));
+    CHECK_EQ(options.ftp.account, std::string("billing"));
+
+    /* Ftps is upstream's TFtps, by number and by name. */
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "1", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 1);
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "explicit", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 2);
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "explicittls", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 3);
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "none", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 0);
+    CHECK_FALSE(ApplySessionRawSetting("Ftps", "sometimes", options, error));
+    CHECK_TRUE(error.find("Ftps") != std::string::npos);
+
+    /* TLS versions, in the forms people write them. */
+    const struct { const char * text; int version; } versions[] = {
+        { "1.2", 12 }, { "tls1.2", 12 }, { "TLSv1.3", 13 },
+        { "12", 12 }, { "13", 13 }, { "default", 0 }
+    };
+    for (size_t i = 0; i < sizeof(versions) / sizeof(versions[0]); i++)
+    {
+        SessionOptions scratch;
+        CHECK_TRUE(ApplySessionRawSetting("MinTlsVersion", versions[i].text,
+            scratch, error));
+        CHECK_TRUE(scratch.tls.minVersion == versions[i].version);
+    }
+    CHECK_FALSE(ApplySessionRawSetting("MinTlsVersion", "1.4", options, error));
+    CHECK_FALSE(ApplySessionRawSetting("MaxTlsVersion", "ssl3", options, error));
+
+    CHECK_TRUE(ApplySessionRawSetting("TlsCertificateFile", "/tmp/c.pem",
+        options, error));
+    CHECK_EQ(options.tls.clientCertificate, std::string("/tmp/c.pem"));
+    CHECK_TRUE(ApplySessionRawSetting("CaCertificateFile", "/tmp/ca.pem",
+        options, error));
+    CHECK_EQ(options.tls.caFile, std::string("/tmp/ca.pem"));
+    CHECK_TRUE(ApplySessionRawSetting("PinnedPublicKey",
+        "sha256//QrZwbj4VrkV2e93XOdjwfQs7i9h3wJB3Fk0BU07xc5A=", options, error));
+    CHECK_EQ(options.tls.pinnedPublicKey,
+        std::string("sha256//QrZwbj4VrkV2e93XOdjwfQs7i9h3wJB3Fk0BU07xc5A="));
+
+    /* The proxy names keep working through the same door. */
+    CHECK_TRUE(ApplySessionRawSetting("ProxyMethod", "SOCKS5", options, error));
+    CHECK_TRUE(options.proxy.method == ProxyMethod::Socks5);
+    CHECK_TRUE(ApplySessionRawSetting("ProxyHost", "proxy.example", options,
+        error));
+    CHECK_EQ(options.proxy.host, std::string("proxy.example"));
+
+    /* An unknown name is refused and the accepted ones are listed. */
+    CHECK_FALSE(ApplySessionRawSetting("NoSuchSetting", "1", options, error));
+    CHECK_TRUE(error.find("NoSuchSetting") != std::string::npos);
+    CHECK_TRUE(error.find("FtpPasvMode") != std::string::npos);
+    CHECK_TRUE(IsSessionRawSettingName("ftp_use_mlsd") == false);
+    CHECK_TRUE(IsSessionRawSettingName("FtpUseMlsd"));
+    CHECK_TRUE(IsSessionRawSettingName("ProxyMethod"));
+    CHECK_FALSE(IsSessionRawSettingName("SshHostKey"));
+
+    /* Where a setting lands in a connection. */
+    SessionOptions ftps;
+    ftps.protocol = "ftp";
+    ftps.tls.ftpsMode = 1;
+    CHECK_TRUE(SessionUsesImplicitTls(ftps));
+    CHECK_TRUE(SessionUsesTls(ftps));
+    ftps.tls.ftpsMode = 3;
+    CHECK_FALSE(SessionUsesImplicitTls(ftps));
+    CHECK_TRUE(SessionUsesTls(ftps));
+    ftps.tls.ftpsMode = 0;
+    CHECK_FALSE(SessionUsesTls(ftps));
+    CHECK_TRUE(SessionDefaultPort("ftp", 0) == 21);
+    CHECK_TRUE(SessionDefaultPort("ftp", 1) == 990);
+    CHECK_TRUE(SessionDefaultPort("ftps", 0) == 990);
+    CHECK_TRUE(SessionDefaultPort("sftp", 0) == 22);
+
+    /* The validations: what would send the session somewhere it did not
+     * ask to go is refused before a connection is made. */
+    SessionOptions plain;
+    plain.protocol = "ftp";
+    CHECK_TRUE(ValidateSessionSettings(plain, error));
+
+    SessionOptions tlsOptions;
+    tlsOptions.protocol = "ftps";
+    tlsOptions.tls.minVersion = 13;
+    tlsOptions.tls.maxVersion = 12;
+    CHECK_FALSE(ValidateSessionSettings(tlsOptions, error));
+    CHECK_TRUE(error.find("MinTlsVersion") != std::string::npos);
+
+    SessionOptions fingerprint;
+    fingerprint.protocol = "ftps";
+    fingerprint.hostKey = "1f2e3d4c5b6a79887766554433221100ffeeddccbbaa99887766554433221100";
+    CHECK_FALSE(ValidateSessionSettings(fingerprint, error));
+    CHECK_TRUE(error.find("fingerprint") != std::string::npos);
+    fingerprint.hostKey = "*";
+    CHECK_TRUE(ValidateSessionSettings(fingerprint, error));
+
+    SessionOptions misplaced;
+    misplaced.protocol = "sftp";
+    misplaced.tls.caFile = "/tmp/ca.pem";
+    CHECK_FALSE(ValidateSessionSettings(misplaced, error));
+    misplaced = SessionOptions();
+    misplaced.protocol = "sftp";
+    misplaced.tls.ftpsMode = 1;
+    CHECK_FALSE(ValidateSessionSettings(misplaced, error));
+
+    /* An ftpes:// URL is FTP with explicit TLS, and its port stays 21. */
+    SessionOptions explicitUrl;
+    CHECK_TRUE(ParseSiteUrl("ftpes://alice@example.com/pub", explicitUrl, error));
+    CHECK_EQ(explicitUrl.protocol, std::string("ftp"));
+    CHECK_TRUE(explicitUrl.tls.ftpsMode == 3);
+    CHECK_TRUE(explicitUrl.portNumber == 21);
+    SessionOptions implicitUrl;
+    CHECK_TRUE(ParseSiteUrl("ftps://alice@example.com/", implicitUrl, error));
+    CHECK_EQ(implicitUrl.protocol, std::string("ftps"));
+    CHECK_TRUE(implicitUrl.tls.ftpsMode == 1);
+    CHECK_TRUE(implicitUrl.portNumber == 990);
+    SessionOptions plainUrl;
+    CHECK_TRUE(ParseSiteUrl("ftp://alice@example.com/", plainUrl, error));
+    CHECK_TRUE(plainUrl.tls.ftpsMode == 0);
+    CHECK_TRUE(plainUrl.portNumber == 21);
+
+    /* A TLS mode set before the URL survives it, which is what makes
+     * 'open ftp://host -rawsettings Ftps=1' an implicit-TLS session on
+     * the port implicit TLS uses. */
+    SessionOptions switched;
+    switched.protocol = "ftp";
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "1", switched, error));
+    CHECK_TRUE(ParseSiteUrl("ftp://alice@example.com/", switched, error));
+    CHECK_TRUE(switched.tls.ftpsMode == 1);
+    CHECK_TRUE(switched.portNumber == 990);
+    CHECK_TRUE(SessionUsesImplicitTls(switched));
+}
+
+/*
+ * The SHA-256 host key pin a '-hostkey=' value becomes for curl. The
+ * conversion has to accept the forms people paste (hex, OpenSSH's
+ * SHA256:base64, curl's sha256//base64) and refuse anything else, because
+ * a pin that is silently not applied is worse than no pin.
+ */
+void TestHostKeyPinConversion()
+{
+    std::string pin;
+    const std::string digest =
+        "1f2e3d4c5b6a79887766554433221100ffeeddccbbaa99887766554433221100";
+    /* The same 32 bytes in the spelling curl compares against. */
+    const std::string base64 = "Hy49TFtqeYh3ZlVEMyIRAP/u3cy7qpmId2ZVRDMiEQA";
+
+    CHECK_TRUE(HostKeySha256(digest, pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("1f:2e:3d:4c:5b:6a:79:88:77:66:55:44:33:22:11:00:"
+        "ff:ee:dd:cc:bb:aa:99:88:77:66:55:44:33:22:11:00", pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("1F2E3D4C5B6A79887766554433221100FFEEDDCCBBAA99887766554433"
+        "221100", pin));
+    CHECK_EQ(pin, base64);
+
+    /* OpenSSH prints the fingerprint without padding, curl may pass it
+     * with padding: both name the same pin. */
+    CHECK_TRUE(HostKeySha256("SHA256:" + base64, pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("SHA256:" + base64 + "=", pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("sha256//" + base64 + "=", pin));
+    CHECK_EQ(pin, base64);
+
+    CHECK_FALSE(HostKeySha256("", pin));
+    CHECK_FALSE(HostKeySha256("not a fingerprint", pin));
+    CHECK_FALSE(HostKeySha256("SHA256:", pin));
+    /* An MD5 pin is a real pin, just not one this conversion produces. */
+    CHECK_FALSE(HostKeySha256("MD5:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", pin));
+    CHECK_FALSE(HostKeySha256("aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", pin));
+}
+
 int main()
 {
     TestSplitCommandLine();
@@ -2623,6 +2823,8 @@ int main()
     TestSyncPlanOrder();
     TestSyncStateFile();
     TestProxySettings();
+    TestFtpAndTlsSettings();
+    TestHostKeyPinConversion();
     TestSessionStore();
     TestS3SigV4();
     TestEditorHelpers();

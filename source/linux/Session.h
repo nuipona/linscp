@@ -99,12 +99,54 @@ bool IsProxyRawSettingName(const std::string & name);
  * local proxy is there. Returns false with 'error' saying what is missing.
  */
 bool ValidateProxySettings(const ProxySettings & proxy, std::string & error);
+
 /*
  * Whether a curl-backed protocol can use this proxy. SOCKS and HTTP proxies
  * are curl options; a telnet or local command is not, and connecting
  * without the proxy the session asked for is worse than refusing.
  */
 bool ProxyUsableByCurl(const ProxySettings & proxy, std::string & error);
+
+/*
+ * The FTP engine's settings, under upstream's session-setting names:
+ * 'FtpPasvMode' (true = passive), 'FtpForcePasvIp' (which address a PASV
+ * reply may name), 'FtpUseMlsd' (whether MLSD is used and what happens
+ * when the server refuses it) and 'FtpAccount' (the ACCT name of an
+ * account that needs one). The two auto switches are upstream's
+ * TAutoSwitch: 0 = off, 1 = automatic, 2 = on.
+ */
+struct FtpSettings
+{
+    bool passiveMode;
+    int forcePasvIp;
+    int useMlsd;
+    std::string account;
+
+    FtpSettings() : passiveMode(true), forcePasvIp(1), useMlsd(1) {}
+};
+
+/*
+ * TLS policy of the protocols curl serves over TLS (FTPS and HTTPS/DAV).
+ * 'ftpsMode' is upstream's TFtps: 0 none, 1 implicit, 2 explicit SSL,
+ * 3 explicit TLS; an 'ftps://' URL means implicit, an 'ftpes://' URL
+ * explicit TLS. The versions are upstream's numbers (10..13); 0 keeps
+ * the library default. The certificate, key and authority files are what
+ * a TLS-library-less client can verify with: curl takes files, so
+ * 'pinnedPublicKey' is a PEM/DER file or a 'sha256//BASE64' pin.
+ */
+struct TlsSettings
+{
+    int ftpsMode;
+    int minVersion;
+    int maxVersion;
+    std::string clientCertificate;
+    std::string clientKey;
+    std::string caFile;
+    std::string caDirectory;
+    std::string pinnedPublicKey;
+
+    TlsSettings() : ftpsMode(0), minVersion(0), maxVersion(0) {}
+};
 
 struct SessionOptions
 {
@@ -122,10 +164,49 @@ struct SessionOptions
     bool verbose;
     /* The proxy this session connects through, if any. */
     ProxySettings proxy;
+    /* The FTP engine's policy and the TLS policy of the curl protocols. */
+    FtpSettings ftp;
+    TlsSettings tls;
 
     SessionOptions();
 };
 
+/*
+ * Applies one 'name=value' pair of '-rawsettings'. The names are
+ * upstream's session setting names; this build applies the proxy, FTP and
+ * TLS ones and refuses every other name instead of accepting a setting it
+ * would drop. Returns false with 'error' explaining the refusal.
+ */
+bool ApplySessionRawSetting(const std::string & name, const std::string & value,
+    SessionOptions & options, std::string & error);
+/* The setting names '-rawsettings' accepts, for error messages and help. */
+std::vector<std::string> SessionRawSettingNames();
+/* True when 'name' is a raw setting this build applies. */
+bool IsSessionRawSettingName(const std::string & name);
+/*
+ * Checks the settings of a session before it is made: the proxy, the TLS
+ * policy (a certificate fingerprint cannot be checked by this build, and
+ * saying so beats connecting without verification) and the FTP settings.
+ */
+bool ValidateSessionSettings(const SessionOptions & options, std::string & error);
+/* True when the session talks to the FTP server over implicit TLS, which
+ * is what an 'ftps://' URL or 'Ftps=1' asks for. */
+bool SessionUsesImplicitTls(const SessionOptions & options);
+/* True when this session's connection is protected by TLS: ftps://,
+ * ftp:// with a TLS mode set, https://, webdav:// or s3://. */
+bool SessionUsesTls(const SessionOptions & options);
+/* The port the session uses when its URL did not give one, honouring the
+ * TLS mode: 990 for implicit FTPS, 21 for FTP and explicit FTPS. */
+int SessionDefaultPort(const std::string & protocol, int ftpsMode);
+/*
+ * The SHA-256 host key pin of a '-hostkey=' value, as curl's
+ * '--hostpubsha256' wants it (unpadded base64). Accepts the hex digest with
+ * optional ':' separators, OpenSSH's 'SHA256:base64' and curl's own
+ * 'sha256//base64' - all of them the digest of the same host key, so the
+ * conversion decodes and does not re-hash. Returns false for a value that
+ * is neither.
+ */
+bool HostKeySha256(const std::string & hostKey, std::string & base64);
 /* Parses 'sftp://[user[:password]@]host[:port]/[path]' (the password may
  * also be given by -password= or LINUXSCP_PASSWORD). */
 bool ParseSiteUrl(const std::string & url, SessionOptions & options,

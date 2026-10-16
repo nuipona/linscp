@@ -1,4 +1,6 @@
 #include "ProtocolClient.h"
+#include "FtpClient.h"
+#include "ListingParse.h"
 #include "S3Client.h"
 #include "S3SigV4.h"
 #include "LocalFs.h"
@@ -276,73 +278,14 @@ std::string CurlErrorWithoutProgress(const std::string & text)
     return result;
 }
 
-/* Splits an 'ls -l'-style line into exactly 9 fields (the 9th keeps any
- * spaces of the file name). Returns false for bare-name listings. */
-bool SplitLongListing(const std::string & line, std::vector<std::string> & fields)
-{
-    fields.clear();
-    std::istringstream stream(line);
-    std::string field;
-    while (fields.size() < 8 && (stream >> field))
-    {
-        fields.push_back(field);
-    }
-    if (fields.size() < 8)
-    {
-        return false;
-    }
-    std::string rest;
-    std::getline(stream, rest);
-    size_t first = rest.find_first_not_of(" \t");
-    if (first == std::string::npos)
-    {
-        return false;
-    }
-    fields.push_back(rest.substr(first));
-    return true;
-}
-
-bool LooksLikePermissions(const std::string & text)
-{
-    if (text.size() != 10)
-    {
-        return false;
-    }
-    const char types[] = "-dlbcps";
-    if (strchr(types, text[0]) == NULL)
-    {
-        return false;
-    }
-    for (size_t i = 1; i < 10; i++)
-    {
-        if (strchr("rwxstST-", text[i]) == NULL)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-unsigned long PermissionsFromString(const std::string & text)
-{
-    unsigned long mode = text[0] == 'd' ? 0040000UL : 0100000UL;
-    static const unsigned long bits[9] = {
-        0400, 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001
-    };
-    for (size_t i = 0; i < 9 && i + 1 < text.size(); i++)
-    {
-        char c = text[i + 1];
-        if (c == 'r' || c == 'w' || c == 'x' || c == 's' || c == 't')
-        {
-            mode |= bits[i];
-        }
-    }
-    return mode;
-}
-
 std::string BuildUrl(const SessionOptions & options, const std::string & remotePath)
 {
     std::string proto = ToLower(options.protocol);
+    if (proto == "ftp" && SessionUsesImplicitTls(options))
+    {
+        /* 'Ftps=1' turns a plain FTP session into an implicit-TLS one. */
+        proto = "ftps";
+    }
     if (proto == "dav")
     {
         /* Plain WebDAV, with the port 80 default ParseSiteUrl gives it. */
@@ -392,6 +335,66 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
 bool IsSshCurlProtocol(const std::string & proto)
 {
     return proto == "sftp" || proto == "scp";
+}
+
+/* The TLS policy of the session as curl arguments. Nothing is added for a
+ * plain session, and a policy curl cannot express is refused before the
+ * connection (see ValidateSessionSettings), never silently dropped. */
+void AddTlsCurlArgs(const SessionOptions & options, std::vector<std::string> & args)
+{
+    const std::string proto = ToLower(options.protocol);
+    const bool ftpFamily = proto == "ftp" || proto == "ftps";
+    if (!SessionUsesTls(options))
+    {
+        return;
+    }
+
+    /* An explicit-TLS FTP session is curl's 'ftps' scheme in explicit
+     * mode, which is what --ssl-reqd asks for on an ftp:// URL. */
+    if (ftpFamily && !SessionUsesImplicitTls(options) &&
+        options.tls.ftpsMode != 0)
+    {
+        args.push_back("--ssl-reqd");
+    }
+
+    static const char * const kVersionFlags[4] = {
+        "--tlsv1.0", "--tlsv1.1", "--tlsv1.2", "--tlsv1.3"
+    };
+    static const char * const kMaxValues[4] = { "1.0", "1.1", "1.2", "1.3" };
+    if (options.tls.minVersion >= 10 && options.tls.minVersion <= 13)
+    {
+        args.push_back(kVersionFlags[options.tls.minVersion - 10]);
+    }
+    if (options.tls.maxVersion >= 10 && options.tls.maxVersion <= 13)
+    {
+        args.push_back("--tls-max");
+        args.push_back(kMaxValues[options.tls.maxVersion - 10]);
+    }
+    if (!options.tls.clientCertificate.empty())
+    {
+        args.push_back("--cert");
+        args.push_back(options.tls.clientCertificate);
+    }
+    if (!options.tls.clientKey.empty())
+    {
+        args.push_back("--key");
+        args.push_back(options.tls.clientKey);
+    }
+    if (!options.tls.caFile.empty())
+    {
+        args.push_back("--cacert");
+        args.push_back(options.tls.caFile);
+    }
+    if (!options.tls.caDirectory.empty())
+    {
+        args.push_back("--capath");
+        args.push_back(options.tls.caDirectory);
+    }
+    if (!options.tls.pinnedPublicKey.empty())
+    {
+        args.push_back("--pinnedpubkey");
+        args.push_back(options.tls.pinnedPublicKey);
+    }
 }
 
 void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string> & args,
@@ -451,31 +454,51 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     }
     else if (!options.hostKey.empty() && IsSshCurlProtocol(ToLower(options.protocol)))
     {
-        /* curl pins SSH host keys by MD5 fingerprint (--hostpubmd5).
-         * A SHA256 pin cannot be expressed for curl; host verification
-         * then falls back to the OpenSSH known_hosts file, exactly as
-         * with the system ssh/sftp clients. */
-        std::string md5;
-        for (size_t i = 0; i < options.hostKey.size(); i++)
+        /* curl pins SSH host keys by fingerprint: SHA-256 hex or base64
+         * for --hostpubsha256, MD5 hex for --hostpubmd5. A value that is
+         * neither keeps the OpenSSH known_hosts file as the check, which
+         * is what the system ssh/sftp clients use too. */
+        std::string sha256;
+        if (HostKeySha256(options.hostKey, sha256))
         {
-            if (options.hostKey[i] != ':')
+            args.push_back("--hostpubsha256");
+            args.push_back(sha256);
+        }
+        else
+        {
+            std::string md5;
+            for (size_t i = 0; i < options.hostKey.size(); i++)
             {
-                md5 += options.hostKey[i];
+                if (options.hostKey[i] != ':')
+                {
+                    md5 += options.hostKey[i];
+                }
+            }
+            bool hex = md5.size() == 32;
+            for (size_t i = 0; hex && i < md5.size(); i++)
+            {
+                char c = md5[i];
+                hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F');
+            }
+            if (hex)
+            {
+                args.push_back("--hostpubmd5");
+                args.push_back(md5);
             }
         }
-        bool hex = md5.size() == 32;
-        for (size_t i = 0; hex && i < md5.size(); i++)
-        {
-            char c = md5[i];
-            hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
-                (c >= 'A' && c <= 'F');
-        }
-        if (hex)
-        {
-            args.push_back("--hostpubmd5");
-            args.push_back(md5);
-        }
     }
+
+    /* 'FtpPasvMode=0' means an active data connection: curl sends PORT
+     * instead of PASV/EPSV, reusing the control connection's address. */
+    const std::string ftpProto = ToLower(options.protocol);
+    if ((ftpProto == "ftp" || ftpProto == "ftps") && !options.ftp.passiveMode)
+    {
+        args.push_back("-P");
+        args.push_back("-");
+    }
+
+    AddTlsCurlArgs(options, args);
 
     if (!options.privateKeyFile.empty())
     {
@@ -560,21 +583,6 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     }
 }
 
-struct ListingEntry
-{
-    std::string name;
-    std::string longname;
-    /* False for a names-only listing, where neither the type nor the
-     * size of the entry is known. */
-    bool typeKnown;
-    bool isDir;
-    unsigned long permissions;
-    unsigned long long size;
-    /* Set when the listing carried a usable date column. */
-    bool timeKnown;
-    unsigned long mtime;
-};
-
 /*
  * Runs one directory listing and parses it. Both the long 'ls -l' format
  * (what FTP servers and curl's own SFTP engine produce) and a names-only
@@ -651,33 +659,9 @@ bool FetchListing(const SessionOptions & options, const std::string & remotePath
         }
 
         ListingEntry entry;
-        entry.typeKnown = false;
-        entry.isDir = false;
-        entry.permissions = 0100644;
-        entry.size = 0;
-        entry.timeKnown = false;
-        entry.mtime = 0;
         entry.longname = line;
 
-        std::vector<std::string> fields;
-        if (SplitLongListing(line, fields) && LooksLikePermissions(fields[0]))
-        {
-            entry.name = fields[8];
-            entry.typeKnown = true;
-            entry.isDir = fields[0][0] == 'd';
-            entry.permissions = PermissionsFromString(fields[0]);
-            try
-            {
-                entry.size = std::stoull(fields[4]);
-            }
-            catch (...)
-            {
-                entry.size = 0;
-            }
-            entry.mtime = ParseListingDate(fields[5], fields[6], fields[7]);
-            entry.timeKnown = entry.mtime != 0;
-        }
-        else
+        if (!ParseUnixListingLine(line, entry))
         {
             entry.name = line;
             if (!entry.name.empty() && entry.name.back() == '/')
@@ -1256,12 +1240,67 @@ void ProtocolClient::FreeNames(LscpNames * names)
     names->count = 0;
 }
 
+/* One place that turns listing entries into the names array the rest of
+ * the client (and the SFTP path) hands around. */
+bool FillNames(const std::vector<ListingEntry> & entries, LscpNames * names,
+    std::string & error)
+{
+    names->count = 0;
+    names->names = NULL;
+    names->count = static_cast<int>(entries.size());
+    if (names->count == 0)
+    {
+        return true;
+    }
+    names->names = static_cast<LscpName *>(calloc(names->count, sizeof(LscpName)));
+    if (names->names == NULL)
+    {
+        error = "Out of memory allocating directory entries.";
+        names->count = 0;
+        return false;
+    }
+    for (int i = 0; i < names->count; i++)
+    {
+        names->names[i].filename = DupString(entries[i].name);
+        names->names[i].longname = DupString(entries[i].longname);
+        names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
+        names->names[i].attrs.permissions = entries[i].permissions;
+        names->names[i].attrs.size = entries[i].size;
+        if (entries[i].timeKnown)
+        {
+            names->names[i].attrs.flags |= LSCP_ATTR_ACMODTIME;
+            names->names[i].attrs.atime = entries[i].mtime;
+            names->names[i].attrs.mtime = entries[i].mtime;
+        }
+    }
+    return true;
+}
+
 bool ProtocolClient::List(const SessionOptions & options, const std::string & remotePath,
     LscpNames * names, std::string & error)
 {
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::List(options, remotePath, names, error);
+    }
+    if (FtpClient::Handles(options))
+    {
+        /* Plain FTP goes to the native engine, which speaks MLSD/MLST and
+         * honours FtpPasvMode/FtpUseMlsd; the curl path below keeps the
+         * TLS FTP sessions and the servers whose listing needs it. */
+        if (names == NULL)
+        {
+            error = "Null output pointer.";
+            return false;
+        }
+        names->count = 0;
+        names->names = NULL;
+        std::vector<ListingEntry> nativeEntries;
+        if (!FtpClient::List(options, remotePath, nativeEntries, error))
+        {
+            return false;
+        }
+        return FillNames(nativeEntries, names, error);
     }
     if (names == NULL)
     {
@@ -1284,42 +1323,20 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
         return false;
     }
 
-    names->count = static_cast<int>(entries.size());
-    if (names->count == 0)
-    {
-        names->names = NULL;
-        return true;
-    }
-
-    names->names = static_cast<LscpName *>(calloc(names->count, sizeof(LscpName)));
-    if (names->names == NULL)
-    {
-        error = "Out of memory allocating directory entries.";
-        names->count = 0;
-        return false;
-    }
-
-    for (int i = 0; i < names->count; i++)
-    {
-        names->names[i].filename = DupString(entries[i].name);
-        names->names[i].longname = DupString(entries[i].longname);
-        names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
-        names->names[i].attrs.permissions = entries[i].permissions;
-        names->names[i].attrs.size = entries[i].size;
-        if (entries[i].timeKnown)
-        {
-            names->names[i].attrs.flags |= LSCP_ATTR_ACMODTIME;
-            names->names[i].attrs.atime = entries[i].mtime;
-            names->names[i].attrs.mtime = entries[i].mtime;
-        }
-    }
-
-    return true;
+    return FillNames(entries, names, error);
 }
 
 bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
     const std::string & remotePath, std::string & error)
 {
+    /* The curl protocols have no connection of their own, so this is where
+     * a policy this build cannot carry out - a TLS certificate fingerprint
+     * it cannot check, a TLS setting on a plain session - is refused
+     * before anything is sent. */
+    if (!ValidateSessionSettings(options, error))
+    {
+        return false;
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::CheckEndpoint(options, remotePath, error);
@@ -1380,6 +1397,30 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
         error.clear();
         return true;
     }
+    if (FtpClient::Handles(options))
+    {
+        /* The native FTP engine opens its own control connection, so this
+         * is a real connection test: a refused login or an unreachable
+         * host fails the open here, while a directory the server will not
+         * list is left to the command that asks for it. */
+        std::vector<ListingEntry> nativeEntries;
+        int ftpCode = 0;
+        if (FtpClient::List(options, path, nativeEntries, error, &ftpCode))
+        {
+            return true;
+        }
+        if (ftpCode != kFtpTransportFailure)
+        {
+            error.clear();
+            return true;
+        }
+        if (error.empty())
+        {
+            error = "The FTP server could not be reached.";
+        }
+        return false;
+    }
+
     std::vector<ListingEntry> entries;
     int code = 0;
     if (FetchListing(options, path, entries, error, &code))
@@ -1418,6 +1459,10 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Stat(options, remotePath, attrs, error);
+    }
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::Stat(options, remotePath, attrs, error);
     }
     if (attrs != NULL)
     {
@@ -1718,6 +1763,10 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 int ProtocolClient::Remove(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::Remove(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Remove(options, remotePath, error);
@@ -1763,6 +1812,10 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
 int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::RemoveDir(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::RemoveDir(options, remotePath, error);
@@ -1824,6 +1877,10 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
 int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::MakeDir(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::MakeDir(options, remotePath, error);
@@ -1975,6 +2032,10 @@ int ProtocolClient::Copy(const SessionOptions & options,
 int ProtocolClient::Move(const SessionOptions & options, const std::string & fromPath,
     const std::string & toPath, std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::Move(options, fromPath, toPath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Move(options, fromPath, toPath, error);
@@ -2058,6 +2119,10 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
 int ProtocolClient::SetPermissions(const SessionOptions & options,
     const std::string & remotePath, int permissions, std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::SetPermissions(options, remotePath, permissions, error);
+    }
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
 
