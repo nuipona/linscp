@@ -202,7 +202,20 @@ jobs:
           cmake -S . -B build
           cmake --build build -j
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          set -o pipefail
+          if ! ctest --test-dir build --output-on-failure 2>&1 | tee "$RUNNER_TEMP/ctest.log"; then
+            # Surface diagnostics through the checks API as well as hosted
+            # logs, so failures remain reviewable in restricted environments.
+            python3 - "$RUNNER_TEMP/ctest.log" <<'PY'
+          import pathlib
+          import sys
+          text = pathlib.Path(sys.argv[1]).read_text()[-50000:]
+          text = text.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error::' + text)
+          PY
+            exit 1
+          fi
       - name: Check relocated CMake install
         run: |
           prefix="$RUNNER_TEMP/linscp-relocated"
