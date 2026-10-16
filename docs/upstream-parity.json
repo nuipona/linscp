@@ -16,12 +16,13 @@
     "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite",
     "date": "2026-10-16",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 967 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
+     "unit": "source/linux/tests/UnitTest.cpp - 987 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log. It checks -literal command input (including GUI filenames with percent placeholders), mkdir -parents argument validation and the adjacent -gui launcher plus Makefile/CMake source-tree launchers.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader). Recursive directory copy and multiple source files into an existing destination directory are tested over SFTP; the test server refuses the optional copy-data extension, so these prove the streamed fallback rather than the native extension. A second server mode implements copy-data and verifies the native extension path as well as exact copied bytes. The server can also refuse check-file-name, which proves the download-and-hash fallback for sha-256, sha-1, md5 and crc32, or implement the extension, which proves the native sha-256 digest and that the client does not fall back after a valid reply. It also proves that synchronize remote with a path exclusion ('-filemask=|skip/') leaves an excluded file untouched despite -delete and does not upload files from the excluded subtree. Recursive symbolic chmod is checked over a nested tree, including exact directory and file modes. copyid installs a generated OpenSSH public key into the test SFTP home, verifies the 0700/0600 permissions and proves that repeating the command does not duplicate the key.",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, filename and full-text search controls/results, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored), and browser file/folder drop enumeration with nested paths and explicit empty directories.",
      "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl. It also covers -parents mkdir and literal remote names containing spaces, percent signs, question marks and hashes through DAV PROPFIND/GET/PUT/MOVE/COPY.",
+     "live-curl": "source/linux/tests/LiveCurlTest.py - throwaway pyftpdlib FTP and implicit FTPS servers verify authenticated downloads/uploads, including FTP .filepart completion; when OpenSSH sshd is available, the SCP case verifies authenticated direct upload/download and rejects unsafe upload resume rather than staging a remote .filepart.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server.",
      "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet.",
      "gui-browser-upload": "source/gui/tests/BrowserUploadTest.py - rejects missing run tokens and invalid/traversal paths, stages exact bytes from HTTP to a private file, queues nested uploads and explicit empty directories with retry-safe parent creation, verifies that background tasks use -literal for percent-sign filenames, and removes partial staging on an incomplete upload. ClientTest.js exercises browser file/folder traversal, batches, and target selection.",
@@ -443,7 +444,7 @@
   {
    "name": "Transfers",
    "status": "partial",
-   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live. S3 multipart uploads report progress between completed parts; generic curl transfers still lack in-flight per-file progress. Interrupted S3 multipart uploads restart from part one rather than resuming remote upload IDs.",
+   "notes": "Binary and ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), include/exclude options, failonnomatch, resume with a -resumesupport= threshold (binary only), -append to add to an existing file, -speed= bandwidth limiting (pacing in the native engine, curl --limit-rate elsewhere), -preservetime with -preservetime=all for directories, and reconnecttime with automatic reconnect; ASCII conversion, speed, append, resume and times were verified byte-exact or by timing against a live server. Resume-capable transfers stage through upstream's '.filepart' temporary and are renamed into place only when complete ('option resume automatic|on|off', default automatic = upstream's rsSmart at 100 KB), which the live suite checks for both directions, for interruption and restart, for a stale oversized staging file and against splicing an existing destination. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live. The Linux curl wrapper now streams in-flight byte progress from its child for generic transfers, while S3 reports small-object and multipart progress; the checked-in LiveCurlTest exercises authenticated FTP/FTPS/SCP get/put and SCP's unsafe-resume refusal; compatibility matrices for varied curl servers, queue cancellation/data-integrity and interrupted S3 multipart uploads restarting from part one rather than resuming remote upload IDs remain.",
    "verified_on": {
     "linux": [
      "unit",
@@ -712,11 +713,22 @@
    "id": "scp.curl-file-transfer",
    "area": "SCP",
    "status": "partial",
-   "notes": "An scp:// URL selects curl for file transfers when curl is built with SCP.",
-   "gap": "Add a live SCP-server test for authentication, upload/download and resume; curl is not the WinSCP SCP engine.",
+   "notes": "An scp:// URL selects curl for authenticated file transfers when curl is built with SCP. Downloads retain local .filepart staging; automatic uploads go directly to the final remote name because curl's SCP backend has no remote rename, and explicit upload resume is refused rather than silently pretending to resume.",
+   "gap": "Implement a safe resume contract only if the backend can provide remote staging, because curl is not the WinSCP SCP engine.",
    "source": [
-    "source/linux/ProtocolClient.cpp"
-   ]
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "live-curl": [
+     "test_scp_authenticated_download_upload_and_resume_policy"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-curl"
+    ]
+   }
   },
   {
    "id": "scp.shell-directory-engine",
@@ -736,11 +748,22 @@
    "id": "ftp.curl-transfer",
    "area": "FTP/FTPS",
    "status": "partial",
-   "notes": "curl handles FTP/FTPS basic transfers and attempts FTP directory operations.",
-   "gap": "Run a live FTP/FTPS compatibility matrix covering auth, transfers, resume and errors.",
+   "notes": "curl handles authenticated FTP/FTPS downloads and uploads and attempts FTP directory operations; the Linux live suite covers throwaway FTP and implicit FTPS endpoints with final-byte checks.",
+   "gap": "Broaden the live FTP/FTPS compatibility matrix to cover resume, errors and varied server implementations.",
    "source": [
     "source/linux/ProtocolClient.cpp"
-   ]
+   ],
+   "checks": {
+    "live-curl": [
+     "test_ftp_authenticated_download_and_upload",
+     "test_ftps_authenticated_download_and_upload"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-curl"
+    ]
+   }
   },
   {
    "id": "ftp.listings-and-mlsd",
@@ -764,10 +787,20 @@
    "area": "FTP/FTPS",
    "status": "partial",
    "notes": "FTPS uses curl TLS defaults and hostkey=* disables certificate checks.",
-   "gap": "Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit/implicit modes.",
+   "gap": "Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit mode in addition to the implicit smoke case.",
    "source": [
     "source/linux/ProtocolClient.cpp"
-   ]
+   ],
+   "checks": {
+    "live-curl": [
+     "test_ftps_authenticated_download_and_upload"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-curl"
+    ]
+   }
   },
   {
    "id": "dav.propfind-and-stat",
@@ -1107,7 +1140,7 @@
    "area": "Transfers",
    "status": "partial",
    "notes": "Native SFTP supports append and paced transfers; curl uses --limit-rate and refuses append.",
-   "gap": "Automate timing/append tests and provide per-file in-flight progress on curl paths.",
+   "gap": "Automate timing and append tests across the supported native and curl protocol matrix.",
    "source": [
     "source/linux/Script.cpp",
     "source/linux/ProtocolClient.cpp"
@@ -1142,7 +1175,7 @@
    "area": "Transfers",
    "status": "partial",
    "notes": "GUI task queue supports pause, cancel and retry; browser-originated files are privately staged.",
-   "gap": "Add queue priorities, per-file curl progress and live cancellation/data-integrity tests.",
+   "gap": "Add queue priorities and live cancellation/data-integrity tests for curl-backed tasks.",
    "source": [
     "source/gui/linuxscp_gui.py"
    ],
@@ -1160,9 +1193,23 @@
   {
    "id": "transfer.curl-progress",
    "area": "Transfers",
-   "status": "missing",
-   "notes": "curl-backed transfers do not report in-flight progress to the core callback.",
-   "gap": "Propagate byte progress for downloads/uploads through curl without exposing credentials or blocking pipes."
+   "status": "partial",
+   "notes": "curl-backed downloads and uploads stream curl's progress meter from the Linux child process and translate it into the same byte-progress callback used by native SFTP; credentials stay in argv only in the child and both output pipes are drained concurrently. LiveCurlTest now checks authenticated FTP/FTPS/SCP transfers and the SCP upload-resume refusal, while the unit suite exercises both meter columns.",
+   "gap": "Add a direct live assertion of intermediate progress callbacks and cancellation/data-integrity behavior; the S3 small-object and multipart paths report progress, but the CLI live suite currently proves final bytes and protocol policy rather than observing the callback itself.",
+   "source": [
+    "source/linux/Platform.cpp",
+    "source/linux/ProtocolClient.cpp"
+   ],
+   "checks": {
+     "unit": [
+      "TestCurlProgress"
+     ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit"
+    ]
+   }
   },
   {
    "id": "sync.one-way",
@@ -2008,6 +2055,70 @@
    "verified_on": {
     "linux": [
      "gui-desktop-uri"
+    ]
+   }
+  },
+  {
+   "id": "platform.posix-runtime-services",
+   "area": "Packaging/platforms",
+   "status": "verified",
+   "notes": "The Linux platform layer supplies temporary directories, home/config lookup and concurrent child stdout/stderr capture.",
+   "source": [
+    "source/linux/Platform.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestPlatformServices"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit"
+    ]
+   }
+  },
+  {
+   "id": "platform.terminal-and-console",
+   "area": "Packaging/platforms",
+   "status": "verified",
+   "notes": "Linux command-line parsing, terminal-facing configuration and the native console entry point are built from the Linux sources.",
+   "source": [
+    "source/linux/Console.cpp",
+    "source/linux/Platform.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestTerminalCommandLine"
+    ],
+    "script": [
+     "test_help_lists_commands_and_command_help"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "unit",
+     "script"
+    ]
+   }
+  },
+  {
+   "id": "platform.linux-file-events",
+   "area": "Packaging/platforms",
+   "status": "verified",
+   "notes": "The Linux synchronization watcher uses filesystem events and retains interval polling as a safety net when a watch cannot be installed.",
+   "source": [
+    "source/linux/SyncPlanner.cpp",
+    "source/linux/Platform.cpp"
+   ],
+   "checks": {
+    "live-dav": [
+     "test_keepuptodate_reflects_local_files_on_the_remote_side",
+     "test_keepuptodate_wakes_on_a_local_change"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-dav"
     ]
    }
   }

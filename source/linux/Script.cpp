@@ -3633,6 +3633,18 @@ bool Script::PutFiles(const std::vector<std::string> & args)
         return SwitchError("put", "'-append' needs the native SFTP "
             "transport; the transfer backends cannot position a write.");
     }
+    const std::string curlProtocol = ToLower(mSession.Options().protocol);
+    const bool scpUpload = curlProtocol == "scp" || curlProtocol == "ssh";
+    if (scpUpload && (flags.resume ||
+        flags.resumeSupport == TransferFlags::ResumeOn ||
+        flags.resumeSupport == TransferFlags::ResumeSmart ||
+        (flags.resumeSupport == TransferFlags::ResumeUnset &&
+         mResumeMode == ResumeMode::On)))
+    {
+        return SwitchError("put", "SCP's curl backend cannot resume an upload "
+            "safely: it has no remote rename for the '.filepart' staging "
+            "name. Use 'option resume off' or '-resumesupport=off'.");
+    }
     ResolveTransferMask(flags);
     SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
 
@@ -3798,7 +3810,8 @@ bool Script::PutFiles(const std::vector<std::string> & args)
              * confirmation below still runs before anything is removed
              * or written. */
             TransferStage stage;
-            if (!ResolveStage(!flags.append && Resumes(flags, info.size), true,
+            if (!ResolveStage(!flags.append && !scpUpload &&
+                    Resumes(flags, info.size), true,
                     remotePath, info.size, stage, error))
             {
                 Console::Instance().Error(Texts::RemoteError(

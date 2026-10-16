@@ -30,6 +30,7 @@
 #include "SessionStore.h"
 #include "S3SigV4.h"
 #include "SyncPlanner.h"
+#include "ProtocolClient.h"
 
 namespace {
 
@@ -253,6 +254,22 @@ void TestMaskCase()
     CHECK_FALSE(MatchesMask("*.TXT", "a.txt"));
 }
 
+struct StreamCapture
+{
+    std::string stdoutText;
+    std::string stderrText;
+    unsigned chunks;
+    StreamCapture() : chunks(0) {}
+};
+
+void CaptureChildOutput(const void * data, size_t len, bool fromStderr, void * ctx)
+{
+    StreamCapture & capture = *static_cast<StreamCapture *>(ctx);
+    capture.chunks++;
+    (fromStderr ? capture.stderrText : capture.stdoutText).append(
+        static_cast<const char *>(data), len);
+}
+
 void TestPlatformServices()
 {
     /* Process capture returns the exit code and both streams. */
@@ -263,12 +280,120 @@ void TestPlatformServices()
     args.push_back("hello-posix");
     CHECK_TRUE(RunCapture(args, out, err) == 0);
     CHECK_TRUE(out.find("hello-posix") != std::string::npos);
+
+    /* The streaming form is what curl progress uses: stdout and stderr
+     * remain captured while chunks are delivered before the child exits. */
+    std::vector<std::string> streamArgs;
+    streamArgs.push_back("sh");
+    streamArgs.push_back("-c");
+    streamArgs.push_back("printf stdout; printf stderr >&2");
+    StreamCapture capture;
+    CHECK_TRUE(RunCaptureWithOutput(streamArgs, out, err,
+        CaptureChildOutput, &capture) == 0);
+    CHECK_TRUE(capture.chunks >= 2);
+    CHECK_EQ(capture.stdoutText, "stdout");
+    CHECK_EQ(capture.stderrText, "stderr");
+    CHECK_EQ(out, "stdout");
+    CHECK_EQ(err, "stderr");
+
     /* A missing program is a start failure, not a crash. */
     std::vector<std::string> missing;
     missing.push_back("linuxscp-no-such-program-xyz");
     CHECK_TRUE(RunCapture(missing, out, err) == -1 || !err.empty() || out.empty());
 
     CHECK_TRUE(!HomeDirectory().empty() || !ConfigDirectory().empty());
+}
+
+struct TransferProgressCapture
+{
+    unsigned callbacks;
+    unsigned long long last;
+    unsigned long long total;
+    TransferProgressCapture() : callbacks(0), last(0), total(0) {}
+};
+
+void CaptureTransferProgress(unsigned long long transferred,
+    unsigned long long total, void * ctx)
+{
+    TransferProgressCapture & capture =
+        *static_cast<TransferProgressCapture *>(ctx);
+    capture.callbacks++;
+    capture.last = transferred;
+    capture.total = total;
+}
+
+void TestCurlProgress()
+{
+    /* This is a local file:// transfer, so the test exercises curl's Linux
+     * child-process progress path without depending on an FTP/WebDAV server.
+     * curl is a runtime dependency rather than a C++ build dependency; keep
+     * the platform unit suite usable on a minimal compiler-only host. */
+    if (FindExecutableOnPath("curl").empty())
+    {
+        return;
+    }
+    const std::string directory = MakeTempDirectory();
+    CHECK_TRUE(!directory.empty());
+    if (directory.empty())
+    {
+        return;
+    }
+    const std::string source = directory + "/progress-source.bin";
+    const std::string target = directory + "/progress-target.bin";
+    const std::string uploadTarget = directory + "/progress-upload.bin";
+    FILE * file = fopen(source.c_str(), "wb");
+    CHECK_TRUE(file != NULL);
+    if (file == NULL)
+    {
+        RemoveDirectoryQuiet(directory);
+        return;
+    }
+    std::vector<unsigned char> bytes(128 * 1024, 0x5a);
+    CHECK_EQ(std::to_string(fwrite(bytes.data(), 1, bytes.size(), file)),
+        std::to_string(bytes.size()));
+    fclose(file);
+
+    std::vector<std::string> args;
+    args.push_back(FindExecutableOnPath("curl"));
+    args.push_back("-S");
+    args.push_back("--progress-meter");
+    args.push_back("-o");
+    args.push_back(target);
+    args.push_back("file://" + source);
+    std::string out;
+    std::string error;
+    TransferProgressCapture capture;
+    CHECK_TRUE(RunCurlCaptureWithProgress(args, out, error,
+        CaptureTransferProgress, &capture, false) == 0);
+    CHECK_TRUE(capture.callbacks > 0);
+    CHECK_TRUE(capture.total > 0);
+    CHECK_TRUE(capture.last > 0);
+    CHECK_EQ(std::to_string(StatLocal(target).size),
+        std::to_string(bytes.size()));
+
+    /* Uploads use the other curl meter column; file:// keeps this test
+     * independent of a network service while still exercising that parser
+     * branch and the callback's total-byte contract. */
+    std::vector<std::string> uploadArgs;
+    uploadArgs.push_back(FindExecutableOnPath("curl"));
+    uploadArgs.push_back("-S");
+    uploadArgs.push_back("--progress-meter");
+    uploadArgs.push_back("-T");
+    uploadArgs.push_back(source);
+    uploadArgs.push_back("file://" + uploadTarget);
+    TransferProgressCapture uploadCapture;
+    CHECK_TRUE(RunCurlCaptureWithProgress(uploadArgs, out, error,
+        CaptureTransferProgress, &uploadCapture, true) == 0);
+    CHECK_TRUE(uploadCapture.callbacks > 0);
+    CHECK_TRUE(uploadCapture.total > 0);
+    CHECK_TRUE(uploadCapture.last > 0);
+    CHECK_EQ(std::to_string(StatLocal(uploadTarget).size),
+        std::to_string(bytes.size()));
+
+    remove(source.c_str());
+    remove(target.c_str());
+    remove(uploadTarget.c_str());
+    CHECK_TRUE(RemoveDirectoryQuiet(directory));
 }
 
 void TestDateParsing()
@@ -2481,6 +2606,7 @@ int main()
     TestMasks();
     TestMaskCase();
     TestPlatformServices();
+    TestCurlProgress();
     TestFormatting();
     TestDateParsing();
     TestTerminalCommandLine();

@@ -42,6 +42,7 @@ CASE_SOURCES = {
     "live-sftp": "source/linux/tests/LiveSftpTest.py",
     "live-s3": "source/linux/tests/LiveS3Test.py",
     "live-dav": "source/linux/tests/LiveDavTest.py",
+    "live-curl": "source/linux/tests/LiveCurlTest.py",
     "gui": "source/gui/tests/ClientTest.js",
     "gui-search": "source/gui/tests/RemoteSearchTest.py",
     "gui-local-editor": "source/gui/tests/LocalEditorTest.py",

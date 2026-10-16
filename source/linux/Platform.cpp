@@ -252,8 +252,9 @@ int RunInteractive(const std::vector<std::string> & args, std::string & error)
     return -1;
 }
 
-int RunCapture(const std::vector<std::string> & args, std::string & out,
-    std::string & err)
+int RunCaptureWithOutput(const std::vector<std::string> & args,
+    std::string & out, std::string & err, RunCaptureOutputFn output,
+    void * ctx)
 {
     out.clear();
     err.clear();
@@ -348,6 +349,10 @@ int RunCapture(const std::vector<std::string> & args, std::string & out,
                 ssize_t bytesRead = read(fds[i].fd, buffer, sizeof(buffer));
                 if (bytesRead > 0)
                 {
+                    if (output != NULL)
+                    {
+                        output(buffer, static_cast<size_t>(bytesRead), i == 1, ctx);
+                    }
                     (i == 0 ? out : err).append(buffer,
                         static_cast<size_t>(bytesRead));
                 }
@@ -387,6 +392,12 @@ int RunCapture(const std::vector<std::string> & args, std::string & out,
         return 128 + WTERMSIG(status);
     }
     return -1;
+}
+
+int RunCapture(const std::vector<std::string> & args, std::string & out,
+    std::string & err)
+{
+    return RunCaptureWithOutput(args, out, err, NULL, NULL);
 }
 
 std::string FindExecutableOnPath(const std::string & name)

@@ -2,7 +2,7 @@
 
 Source: [upstream-parity.json](upstream-parity.json), pinned to winscp/winscp `69edabbe2dc2c62661a7d3fc7e2396b5f42d504d`. **This is not full WinSCP parity or an exhaustive upstream behavioral certification.** The 40 registered upstream script commands are tracked separately in [the parity audit](upstream-parity.md); these rows decompose the 15 feature areas into specific Linux behaviors and named gaps.
 
-84 capabilities: 39 verified for the stated behavior, 26 partial, 19 missing. `verified` means the **row's** behavior has an automated case on Linux, not that every upstream variant or protocol works. `partial` names a working subset and the next gap. `missing` has no implementation. Evidence skipped by a missing dependency is not a pass; consult each suite's `evidence:` line in CI.
+87 capabilities: 42 verified for the stated behavior, 27 partial, 18 missing. `verified` means the **row's** behavior has an automated case on Linux, not that every upstream variant or protocol works. `partial` names a working subset and the next gap. `missing` has no implementation. Evidence skipped by a missing dependency is not a pass; consult each suite's `evidence:` line in CI.
 
 Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --write-report`. The default check fails if this view or a cited test case drifts.
 
@@ -20,7 +20,7 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 
 | Capability | Linux status | Automated evidence | Scope / remaining gap |
 | --- | --- | --- | --- |
-| `scp.curl-file-transfer` | partial | — | An scp:// URL selects curl for file transfers when curl is built with SCP. **Next:** Add a live SCP-server test for authentication, upload/download and resume; curl is not the WinSCP SCP engine. |
+| `scp.curl-file-transfer` | partial | live-curl | An scp:// URL selects curl for authenticated file transfers when curl is built with SCP. Downloads retain local .filepart staging; automatic uploads go directly to the final remote name because curl's SCP backend has no remote rename, and explicit upload resume is refused rather than silently pretending to resume. **Next:** Implement a safe resume contract only if the backend can provide remote staging, because curl is not the WinSCP SCP engine. |
 | `scp.shell-directory-engine` | missing | — | No WinSCP-style remote shell filesystem engine or SCP directory listing. **Next:** Implement and test remote-shell listing, stat and directory operations before claiming SCP parity. |
 | `scp.command-and-metadata` | missing | — | No SCP-specific remote command and metadata semantics matching upstream. **Next:** Implement and test SCP shell commands and metadata with an actual SCP server. |
 
@@ -28,10 +28,10 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 
 | Capability | Linux status | Automated evidence | Scope / remaining gap |
 | --- | --- | --- | --- |
-| `ftp.curl-transfer` | partial | — | curl handles FTP/FTPS basic transfers and attempts FTP directory operations. **Next:** Run a live FTP/FTPS compatibility matrix covering auth, transfers, resume and errors. |
+| `ftp.curl-transfer` | partial | live-curl | curl handles authenticated FTP/FTPS downloads and uploads and attempts FTP directory operations; the Linux live suite covers throwaway FTP and implicit FTPS endpoints with final-byte checks. **Next:** Broaden the live FTP/FTPS compatibility matrix to cover resume, errors and varied server implementations. |
 | `ftp.listings-and-mlsd` | partial | — | A text listing parser extracts names, dates, sizes and permissions when a server supplies them. **Next:** Implement and verify MLSD/MLST and non-Unix listing dialects instead of relying on ls -l parsing. |
 | `ftp.active-passive` | missing | — | No explicit active/passive connection policy or tests. **Next:** Expose and verify FTP active/passive settings against controlled servers. |
-| `ftp.tls-policy` | partial | — | FTPS uses curl TLS defaults and hostkey=* disables certificate checks. **Next:** Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit/implicit modes. |
+| `ftp.tls-policy` | partial | live-curl | FTPS uses curl TLS defaults and hostkey=* disables certificate checks. **Next:** Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit mode in addition to the implicit smoke case. |
 
 ## WebDAV
 
@@ -65,10 +65,10 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 | `transfer.filepart-resume` | verified | live-sftp | Interrupted uploads/downloads stage in .filepart and continue there rather than splicing the final destination. |
 | `transfer.resume-modes` | verified | live-sftp, script | Automatic/on/off and -resumesupport thresholds are parsed; resume-off transfers without staging. |
 | `transfer.time-permissions` | partial | live-sftp | SFTP preserves file times in both directions; -preservetime=all and -permissions are accepted. **Next:** Expand live directory timestamp/permission checks and test metadata semantics across curl transports. |
-| `transfer.speed-and-append` | partial | — | Native SFTP supports append and paced transfers; curl uses --limit-rate and refuses append. **Next:** Automate timing/append tests and provide per-file in-flight progress on curl paths. |
+| `transfer.speed-and-append` | partial | — | Native SFTP supports append and paced transfers; curl uses --limit-rate and refuses append. **Next:** Automate timing and append tests across the supported native and curl protocol matrix. |
 | `transfer.presets` | verified | live-dav, script | Named, per-site and rule-selected presets change live transfer settings. |
-| `transfer.desktop-queue` | partial | gui-browser-upload | GUI task queue supports pause, cancel and retry; browser-originated files are privately staged. **Next:** Add queue priorities, per-file curl progress and live cancellation/data-integrity tests. |
-| `transfer.curl-progress` | missing | — | curl-backed transfers do not report in-flight progress to the core callback. **Next:** Propagate byte progress for downloads/uploads through curl without exposing credentials or blocking pipes. |
+| `transfer.desktop-queue` | partial | gui-browser-upload | GUI task queue supports pause, cancel and retry; browser-originated files are privately staged. **Next:** Add queue priorities and live cancellation/data-integrity tests for curl-backed tasks. |
+| `transfer.curl-progress` | partial | unit | curl-backed downloads and uploads stream curl's progress meter from the Linux child process and translate it into the same byte-progress callback used by native SFTP; credentials stay in argv only in the child and both output pipes are drained concurrently. LiveCurlTest now checks authenticated FTP/FTPS/SCP transfers and the SCP upload-resume refusal, while the unit suite exercises both meter columns. **Next:** Add a direct live assertion of intermediate progress callbacks and cancellation/data-integrity behavior; the S3 small-object and multipart paths report progress, but the CLI live suite currently proves final bytes and protocol policy rather than observing the callback itself. |
 
 ## Synchronization
 
@@ -164,3 +164,6 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 | `platform.cmake-linux` | partial | — | CMake builds Linux binaries, registers CTest, refuses unsupported hosts and has an installed-prefix smoke check in CI. **Next:** Compare release artifacts on multiple Linux distributions/architectures and test upgrades in place. |
 | `platform.debian-package` | partial | — | The Debian package installs the CLI, GUI, desktop entry, icons and man page; CI smokes the installed paths. **Next:** Verify installation/upgrade/uninstall on Debian stable and non-root environments. |
 | `platform.prefix-lookup` | verified | gui-desktop-uri | An arbitrary PREFIX/share/linuxscp/gui resolves PREFIX/bin/linuxscp before /usr/bin. |
+| `platform.posix-runtime-services` | verified | unit | The Linux platform layer supplies temporary directories, home/config lookup and concurrent child stdout/stderr capture. |
+| `platform.terminal-and-console` | verified | script, unit | Linux command-line parsing, terminal-facing configuration and the native console entry point are built from the Linux sources. |
+| `platform.linux-file-events` | verified | live-dav | The Linux synchronization watcher uses filesystem events and retains interval polling as a safety net when a watch cannot be installed. |

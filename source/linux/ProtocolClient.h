@@ -17,6 +17,14 @@ namespace linuxscp {
  */
 bool IsCurlEndpointUnreachable(int code);
 
+/* Runs curl with its progress meter enabled and translates the meter into
+ * byte callbacks. This is shared by the generic protocol client and S3;
+ * the caller supplies all curl arguments, so credentials and URLs remain
+ * in the same child process as ordinary transfers. */
+int RunCurlCaptureWithProgress(const std::vector<std::string> & args,
+    std::string & out, std::string & error, LscpProgressFn progress,
+    void * progressCtx, bool upload);
+
 class ProtocolClient
 {
 public:

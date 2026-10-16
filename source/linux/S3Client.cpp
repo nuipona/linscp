@@ -629,7 +629,8 @@ bool InvokeCurl(const S3Site & site, const SessionOptions & options,
     const std::string & payloadHash,
     const std::vector<std::string> & extraArgs,
     const std::string & outFile, S3Response & response,
-    std::string & transportError)
+    std::string & transportError, LscpProgressFn progress = NULL,
+    void * progressCtx = NULL, bool upload = false)
 {
     const unsigned long long now = static_cast<unsigned long long>(time(NULL));
     const s3sig::SignedRequest signed1 = s3sig::Sign(method, encodedPath,
@@ -638,8 +639,15 @@ bool InvokeCurl(const S3Site & site, const SessionOptions & options,
 
     std::vector<std::string> args;
     args.push_back(CurlExecutable());
-    args.push_back("-s");
+    if (progress == NULL)
+    {
+        args.push_back("-s");
+    }
     args.push_back("-S");
+    if (progress != NULL)
+    {
+        args.push_back("--progress-meter");
+    }
     /*
      * Deliberately no -f: the HTTP status comes from --write-out and
      * the body keeps the S3 error document, which is how a failure
@@ -678,7 +686,10 @@ bool InvokeCurl(const S3Site & site, const SessionOptions & options,
     args.push_back(S3Url(site, encodedPath, query));
 
     std::string out;
-    const int rc = RunCapture(args, out, response.err);
+    const int rc = progress != NULL ?
+        RunCurlCaptureWithProgress(args, out, response.err, progress,
+            progressCtx, upload) :
+        RunCapture(args, out, response.err);
     response.curlCode = rc;
     if (rc == -1 && response.err.empty())
     {
@@ -1488,8 +1499,6 @@ int S3Client::Get(const SessionOptions & options,
     unsigned long long * size, LscpProgressFn progress, void * progressCtx,
     std::string & error, unsigned speedKBytesPerSecond)
 {
-    (void)progress;
-    (void)progressCtx;
     if (size != NULL)
     {
         *size = 0;
@@ -1532,7 +1541,8 @@ int S3Client::Get(const SessionOptions & options,
     if (!InvokeCurl(site, options, "GET", EncodePath(remotePath),
             std::string(),
             std::vector<std::pair<std::string, std::string> >(),
-            kEmptySha256, extraArgs, localPath, response, error))
+            kEmptySha256, extraArgs, localPath, response, error,
+            progress, progressCtx, false))
     {
         return -1;
     }
@@ -1548,6 +1558,10 @@ int S3Client::Get(const SessionOptions & options,
     }
 
     const LocalFileInfo info = StatLocal(localPath);
+    if (info.exists && progress != NULL)
+    {
+        progress(info.size, info.size, progressCtx);
+    }
     if (info.exists && size != NULL)
     {
         *size = info.size;
@@ -1613,7 +1627,8 @@ int S3Client::Put(const SessionOptions & options,
     if (!InvokeCurl(site, options, "PUT", EncodePath(remotePath),
             std::string(),
             std::vector<std::pair<std::string, std::string> >(),
-            kUnsignedPayload, extraArgs, std::string(), response, error))
+            kUnsignedPayload, extraArgs, std::string(), response, error,
+            progress, progressCtx, true))
     {
         return -1;
     }

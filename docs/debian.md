@@ -31,12 +31,18 @@ sudo apt install build-essential dpkg-dev curl python3
 ```sh
 make -C source/linux            # -> source/linux/build/linuxscp
 make -C source/linux check      # builds and runs the unit tests
-make -C source/linux check-live # the script and live-server suites
+make -C source/linux check-live # script, live-server and GUI suites
 make -C source/linux clean
 ```
 
 The build is a single `make`; there is no `configure` step. Object files and
 the resulting binary go to `source/linux/build/`, which is git-ignored.
+
+`LiveCurlTest.py` is optional live evidence rather than a product dependency:
+install `pyftpdlib` and `pyOpenSSL` in the test Python environment for the FTP/
+FTPS cases; the SCP case additionally uses a local `sshd` and `ssh-keygen` when
+available. Missing test dependencies are reported as skips on the suite's
+evidence line.
 
 CMake builds the same client from the same sources and registers every test
 suite with CTest, which is what CI runs second:

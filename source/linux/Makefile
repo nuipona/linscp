@@ -221,12 +221,15 @@ check: $(BINDIR)/unittest
 # Transfers against the servers in tests/, which take seconds rather than
 # milliseconds: ScriptTest is server-free, LiveSftpTest skips itself without
 # paramiko, LiveS3Test is standard-library-only (botocore is an optional
-# extra one test skips without), and the GUI search test uses a fake session.
+# extra one test skips without), LiveCurlTest uses optional pyftpdlib/
+# pyOpenSSL and the local sshd when available, and the GUI search test uses a
+# fake session.
 check-live: $(BINDIR)/linuxscp
 	python3 tests/ScriptTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveSftpTest.py $(BINDIR)/linuxscp
 	python3 tests/LiveS3Test.py $(BINDIR)/linuxscp
 	python3 tests/LiveDavTest.py $(BINDIR)/linuxscp
+	python3 tests/LiveCurlTest.py $(BINDIR)/linuxscp
 	python3 ../../source/gui/tests/RemoteSearchTest.py
 	python3 ../../source/gui/tests/LocalEditorTest.py
 	python3 ../../source/gui/tests/BrowserUploadTest.py
