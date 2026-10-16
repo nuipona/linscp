@@ -44,7 +44,13 @@ suite with CTest, which is what CI runs second:
 ```sh
 cmake -S . -B build && cmake --build build -j
 ctest --test-dir build --output-on-failure
+cmake --install build --prefix /opt/linuxscp  # relocatable private prefix
 ```
+
+Both builds are Linux-only and fail early on other hosts. The GUI launcher
+prefers its adjacent core binary in a nonstandard prefix, rather than assuming
+`/usr/bin/linuxscp` or a build-tree path; tests exercise this lookup and
+`linuxscp -gui` from a relocated directory.
 
 Useful overrides:
 
@@ -113,6 +119,7 @@ linuxscp -batch -command="open sftp://user@example.com/ /data ; ls ; get * /tmp"
 | `-log=<file>` | write the session log to a file |
 | `-xmllog=<file>` | write an XML action log of every command, message and transfer, with passwords masked |
 | `-parameter <value>...` | script parameters, for `%1%` .. `%9%` in the commands |
+| `-literal` | do not expand `%TIMESTAMP%`, `%1%` or `%NAME%` in `-command` input; used by GUI-generated commands containing literal filenames (requires `-command`) |
 | `-batch` | never ask a question; fail instead |
 | `-server` | read one command per line on stdin and answer with `LSCP-RESULT` (what the GUI drives) |
 | `-gui` | launch the graphical Commander desktop interface |
@@ -136,7 +143,9 @@ say that it is not supported.
 Local and remote paths may contain `*` and `?` wildcards, so `get *.txt /tmp`
 transfers every match. The exit status is non-zero if any command failed. When a
 transfer selects multiple source files, the destination is treated as a
-directory and created if it does not exist.
+directory and created if it does not exist. `mkdir <path>` creates one remote
+directory; `mkdir -parents <path>` creates missing parent directories too
+(without failing when they already exist).
 
 Directory transfers are recursive by default or with the `-r` switch. Both `get`
 and `put` support WinSCP switches:
@@ -197,8 +206,10 @@ seconds `S`, minutes `N`, hours `H`, days `D` or years `Y`, and a trailing `S`
 to snap to the start of that unit), and `%NAME%` by an environment variable,
 left in place when it is not set. None of it happens inside single quotes, and
 a timestamp placeholder with an offset but no format is an error rather than a
-path containing a percent sign. `-server` input is not expanded, because the
-graphical client sends literal paths.
+path containing a percent sign. For literal filenames such as `%TIMESTAMP%`
+in `-command`, add `-literal` to suppress all expansion; the GUI does this for
+its generated commands. In `-script` input use single quotes around literal
+placeholders instead. `-server` input is not expanded either.
 
 Overwrite and delete confirmations are enabled by default. Interactive runs
 ask before replacing or removing data. In `-batch` or other non-interactive
@@ -242,7 +253,10 @@ URL schemes `ftp://`, `ftps://`, `dav://` / `webdav://`, and `s3://`,
 as well as bare `host[:port]`. These curl-backed paths do not establish full
 protocol support: WebDAV has PROPFIND listings and basic COPY/MOVE operations;
 S3 has SigV4, object CRUD, server-side copy, and multipart uploads for large
-files. Both remain partial implementations. See [the parity audit](upstream-parity.md).
+files. Both remain partial implementations. WebDAV URL paths are percent-encoded
+so spaces, percent signs and URL query/fragment characters in filenames are
+transferred literally. See the [parity audit](upstream-parity.md) and
+[capability matrix](linux-feature-inventory.md).
 The password is
 optional here; prefer `-password=` or `LINUXSCP_PASSWORD` so that it does not
 end up in the script file.
@@ -255,7 +269,12 @@ LinSCP includes a standalone dark-themed, WinSCP-style Commander graphical inter
 * Background transfer queue with live progress metrics and transfer speeds.
 * Remote search by filename mask or literal UTF-8 file content (bounded per file and per search).
 * Real-time console log and embedded interactive command-line terminal.
-* Full integration with desktop environments via `/usr/share/applications/linuxscp.desktop`.
+* The remote pane accepts files and folders dropped from a file manager (where
+  the browser exposes file-entry APIs). It preserves their relative paths and
+  empty directories, rejects unsafe paths, and queues uploads with retryable
+  parent creation; local-pane drops and cross-desktop compatibility are not
+  yet established.
+* Desktop launcher and URL scheme handlers via `/usr/share/applications/linuxscp.desktop`.
 
 ### Compatibility limits
 
@@ -268,8 +287,9 @@ requires native SFTP, and `-resume` with ASCII conversion is rejected. Resume
 uses each backend's range/continuation support; S3 multipart uploads restart
 from part one rather than resuming a saved upload ID. Transfer presets are
 supported; `-rawtransfersettings=` accepts settings implemented by this build
-and refuses unsupported names. `synchronize both -delete` is rejected,
-`-mirror` is rejected with `both`, and an unknown switch or an option value
+and refuses unsupported names. `synchronize both -delete` consults the
+previous sync state before deleting; `-mirror` is rejected with `both`, and
+an unknown switch or an option value
 outside its vocabulary is reported before any file is read. A non-octal
 `-permissions=`, a malformed `-filemask` and a `%TIMESTAMP%` placeholder with
 an offset but no format are errors for the same reason. This is deliberate:
@@ -418,7 +438,7 @@ implementation includes:
 * Binary, ASCII and automatic transfers with WinSCP file masks (`-filemask=`,
   `option include`/`exclude`, `option failonnomatch`).
 * Resuming interrupted file transfers (`-resume`, `-resumesupport=`,
-  `option resume on|off`), appending to a destination (`-append`), bandwidth
+  `option resume on|off|automatic`), appending to a destination (`-append`), bandwidth
   limiting (`-speed=`) and timestamp preservation (`-preservetime`,
   `-preservetime=all`).
 * Recursive directory downloads, uploads, and synchronization (`synchronize`,

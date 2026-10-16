@@ -42,6 +42,28 @@ USER = "testuser"
 PASSWORD = "testpass"
 
 
+class ProxyLines(list):
+    """Reports are emitted by the proxy and read on a different thread.
+
+    Waiting on the condition is deterministic: the client may return before
+    the reader has drained a REJECT or AUTH line, especially on a loaded CI
+    host. Reading an unsynchronized list after subprocess.run is racy.
+    """
+    def __init__(self):
+        super().__init__()
+        self.updated = threading.Condition()
+
+    def report(self, text):
+        with self.updated:
+            self.append(text)
+            self.updated.notify_all()
+
+    def contains(self, predicate, timeout=3):
+        with self.updated:
+            return self.updated.wait_for(lambda: any(predicate(line) for line in self),
+                                         timeout=timeout)
+
+
 def sha256_of(path):
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -137,7 +159,7 @@ class LiveSftpTests(unittest.TestCase):
                           start_new_session=True)
         proxy = subprocess.Popen(
             [sys.executable, str(HERE / "TestProxyServer.py")], **popen_args)
-        lines = []
+        lines = ProxyLines()
         port = []
         ready = threading.Event()
 
@@ -146,7 +168,7 @@ class LiveSftpTests(unittest.TestCase):
                 line = line.strip()
                 if not line:
                     continue
-                lines.append(line)
+                lines.report(line)
                 if line.startswith("READY ") and not port:
                     port.append(int(line.split()[1]))
                     ready.set()
@@ -838,9 +860,9 @@ class LiveSftpTests(unittest.TestCase):
                        "ProxyLocalhost=1"])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(sha256_of(target), digest)
-        self.assertIn("CONNECT 127.0.0.1:%d" % self.port, proxy_lines,
-                      "the session did not go through the proxy: %s" %
-                      (proxy_lines,))
+        self.assertTrue(proxy_lines.contains(
+            lambda line: line == "CONNECT 127.0.0.1:%d" % self.port),
+            "the session did not go through the proxy: %s" % (proxy_lines,))
 
     def test_proxy_credentials_are_used_and_a_wrong_one_is_refused(self):
         """A proxy that authenticates has to be given the credentials, and a
@@ -858,15 +880,17 @@ class LiveSftpTests(unittest.TestCase):
         combined = result.stdout + result.stderr
         self.assertIn("Cannot open session", combined)
         self.assertNotIn("Connected", result.stdout)
-        self.assertTrue(any(line.startswith("REJECT") for line in proxy_lines),
+        self.assertTrue(proxy_lines.contains(lambda line: line.startswith("REJECT")),
                         proxy_lines)
 
         del proxy_lines[:]
         result = self.run_script("pwd", open_args=settings +
                                  ["ProxyPassword=proxypass"])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("AUTH proxyuser", proxy_lines)
-        self.assertIn("CONNECT 127.0.0.1:%d" % self.port, proxy_lines)
+        self.assertTrue(proxy_lines.contains(lambda line: line == "AUTH proxyuser"),
+                        proxy_lines)
+        self.assertTrue(proxy_lines.contains(
+            lambda line: line == "CONNECT 127.0.0.1:%d" % self.port), proxy_lines)
 
     def test_a_stored_session_keeps_its_proxy(self):
         """'savesession -rawsettings' stores the proxy encrypted, 'open'
@@ -896,8 +920,9 @@ class LiveSftpTests(unittest.TestCase):
                 capture_output=True, text=True, timeout=60,
                 env=dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config)))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            self.assertIn("CONNECT 127.0.0.1:%d" % self.port, proxy_lines,
-                          proxy_lines)
+            self.assertTrue(proxy_lines.contains(
+                lambda line: line == "CONNECT 127.0.0.1:%d" % self.port),
+                proxy_lines)
         finally:
             self.clean_sessions()
 

@@ -577,6 +577,71 @@ function options(id) {
       JSON.stringify(desktopUrl ? Array.from(desktopUrl.searchParams.entries()) : []) :
       'no upload request');
 
+  // A folder from the Linux file manager exposes FileSystemEntries. Some
+  // browsers return directory children in batches, including an empty final
+  // batch; nested and empty folders must both survive the drop.
+  function fileEntry(name, contents) {
+    const file = new window.File([contents], name);
+    return { name, isFile: true, file(done) { done(file); } };
+  }
+  function directoryEntry(name, batches) {
+    return { name, isDirectory: true, createReader() {
+      let next = 0;
+      return { readEntries(done) { done(batches[next++] || []); } };
+    } };
+  }
+  const tree = directoryEntry('project', [
+    [directoryEntry('empty', [[]]),
+      directoryEntry('src', [
+        [fileEntry('read %TIMESTAMP%.txt', 'preserve this literal name')], []])],
+    []
+  ]);
+  const foldersBefore = calls.filter(c => c.path === '/api/transfer/drop-dir').length;
+  const filesBefore = calls.filter(c => c.path === '/api/transfer/drop').length;
+  await window.dropOnPane('remote', { dataTransfer: {
+    items: [{ kind: 'file', webkitGetAsEntry() { return tree; } }],
+    files: [], types: ['Files']
+  }, preventDefault() {} });
+  const folders = calls.filter(c => c.path === '/api/transfer/drop-dir')
+    .slice(foldersBefore).map(c => JSON.parse(c.options.body).relative_path);
+  check('desktop folders and empty subfolders are queued in order',
+    folders.join(',') === 'project,project/empty,project/src', folders.join(','));
+  const folderFiles = calls.filter(c => c.path === '/api/transfer/drop')
+    .slice(filesBefore);
+  const nestedFile = folderFiles.length ?
+    new URL(folderFiles[0].url, 'http://localhost:8080') : null;
+  check('nested desktop file keeps its relative path and bytes',
+    folderFiles.length === 1 && !!nestedFile &&
+      nestedFile.searchParams.get('relative_path') ===
+        'project/src/read %TIMESTAMP%.txt' &&
+      folderFiles[0].options.body.name === 'read %TIMESTAMP%.txt');
+
+  // Enumeration failure is all-or-nothing, not a half-uploaded tree.
+  const countBeforeInvalid = calls.filter(c =>
+    c.path === '/api/transfer/drop' || c.path === '/api/transfer/drop-dir').length;
+  await window.dropOnPane('remote', { dataTransfer: {
+    items: [{ kind: 'file', webkitGetAsEntry() {
+      return directoryEntry('unsafe', [[fileEntry('..', 'bad')], []]);
+    } }], files: [], types: ['Files']
+  }, preventDefault() {} });
+  check('an unsafe folder entry queues nothing',
+    calls.filter(c => c.path === '/api/transfer/drop' ||
+      c.path === '/api/transfer/drop-dir').length === countBeforeInvalid);
+
+  // The newer handle API is also usable if the browser has no Entry API.
+  const handle = { kind: 'directory', name: 'via-handle',
+    async *values() { yield { kind: 'file', name: 'x.txt',
+      async getFile() { return new window.File(['handle'], 'x.txt'); } }; }
+  };
+  await window.dropOnPane('remote', { dataTransfer: {
+    items: [{ kind: 'file', getAsFileSystemHandle() { return Promise.resolve(handle); } }],
+    files: [], types: ['Files']
+  }, preventDefault() {} });
+  const handleFile = calls.filter(c => c.path === '/api/transfer/drop').pop();
+  check('file system handles retain the directory of their file',
+    !!handleFile && new URL(handleFile.url, 'http://localhost:8080')
+      .searchParams.get('relative_path') === 'via-handle/x.txt');
+
   // A drop on the pane the items came from queues nothing.
   const sameDt = fakeTransfer();
   window.beginDrag('local', LOCAL_ENTRIES[0], { dataTransfer: sameDt });

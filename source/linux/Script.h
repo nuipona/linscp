@@ -140,7 +140,7 @@ public:
     /* Runs a whole script file ('-' for standard input). */
     int RunFile(const std::string & path);
     /* Runs the command(s) given on the command line, ';' separated. */
-    int RunCommand(const std::string & line);
+    int RunCommand(const std::string & line, bool literal = false);
     /* Reads commands from the terminal until 'exit'. */
     int RunInteractive(const std::string & initialUrl);
     /* Reads one command per line from stdin and prints the outcome of

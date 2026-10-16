@@ -8,7 +8,8 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
-from check_upstream_parity import check_verification, upstream_commands
+from check_upstream_parity import (check_capabilities, check_verification,
+                                   matrix_report, upstream_commands)
 
 
 class InventoryTests(unittest.TestCase):
@@ -131,15 +132,67 @@ class InventoryTests(unittest.TestCase):
                                  "notes": "works"}], errors)
         return errors
 
+    def test_capability_matrix_cannot_lose_areas_or_invent_evidence(self):
+        valid = {"id": "sftp.example", "area": "SFTP", "status": "verified",
+                 "notes": "A narrowly checked behavior", "source": ["source/linux/SftpClient.c"],
+                 "checks": {"live-sftp": ["test_open_with_a_wrong_password_is_refused"]},
+                 "verified_on": {"linux": ["live-sftp"]}}
+        inventory = {"features": [{"name": "SFTP"}],
+                     "capabilities": [valid]}
+        errors = []
+        self.assertEqual(check_capabilities(inventory, errors), [valid])
+        self.assertEqual(errors, [])
+        for changes, expected in (
+                ({"id": "oops"}, "Invalid capability id"),
+                ({"area": "made-up"}, "unknown feature area"),
+                ({"source": ["../../etc/passwd"]}, "implementation source does not exist"),
+                ({"checks": {"live-sftp": ["test_a_made_up_test"]}},
+                 "has no test case"),
+                ({"checks": {"script": ["test_batch_modes"]}},
+                 "verified_on.linux must match"),
+                ({"checks": {}}, "verified without a test case"),
+                ({"status": "partial", "checks": {}, "verified_on": {}},
+                 "needs a concrete gap"),
+                ({"status": "missing", "gap": "implement this"},
+                 "missing yet names an implementation")):
+            with self.subTest(changes=changes):
+                row = dict(valid, **changes)
+                errors = []
+                check_capabilities({"features": [{"name": "SFTP"}],
+                                    "capabilities": [row]}, errors)
+                self.assertIn(expected, " | ".join(errors))
+        errors = []
+        check_capabilities({"features": [{"name": "SFTP"}, {"name": "SCP"}],
+                            "capabilities": [valid, dict(valid)]}, errors)
+        self.assertTrue(any("Duplicate capability id" in error for error in errors))
+        self.assertTrue(any("Feature area has no capability rows: SCP" in error
+                            for error in errors))
+        errors = []
+        check_capabilities({"features": [{"name": "SFTP"}]}, errors)
+        self.assertIn("Inventory has no capability matrix", errors)
+
+    def test_pinned_gaps_cannot_be_deleted_to_fake_full_parity(self):
+        inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
+        inventory["capabilities"] = [row for row in inventory["capabilities"]
+                                     if row["id"] != "dav.locks"]
+        errors = []
+        check_capabilities(inventory, errors)
+        self.assertIn("Pinned upstream gap was dropped from the inventory: dav.locks",
+                      errors)
+
     def test_the_real_ledger_is_consistent(self):
         """The shipped inventory has to satisfy its own rules, and the evidence
         it claims has to be evidence the platform it ships on produces."""
         inventory = json.loads((ROOT / "docs/upstream-parity.json").read_text())
-        entries = (list(inventory["commands"].values()) + inventory["features"] +
-                   inventory.get("linuxscp_additions", []))
         errors = []
+        capabilities = check_capabilities(inventory, errors)
+        entries = (list(inventory["commands"].values()) + inventory["features"] +
+                   inventory.get("linuxscp_additions", []) + capabilities)
         check_verification(inventory, entries, errors)
         self.assertEqual(errors, [])
+        self.assertGreaterEqual(len(capabilities), 80)
+        self.assertEqual((ROOT / "docs/linux-feature-inventory.md").read_text(),
+                         matrix_report(inventory))
         # LinSCP is a Linux application: the ledger names exactly that
         # platform, so no entry can cite evidence from a host this client is
         # not built for.
@@ -158,7 +211,7 @@ class InventoryTests(unittest.TestCase):
         # of the entry is still listed as missing inside the claim.
         verified = [e for e in entries if e["status"] == "verified"]
         for entry in verified:
-            label = entry.get("name") or "?"
+            label = entry.get("name") or entry.get("id") or "?"
             cited = entry.get("verified_on")
             self.assertTrue(cited, label + ": verified with no evidence at all")
             self.assertEqual(sorted(cited), sorted(platforms),
@@ -167,13 +220,19 @@ class InventoryTests(unittest.TestCase):
             for platform, suites in cited.items():
                 self.assertTrue(suites,
                                 label + ": " + platform + " cites no suite")
-            self.assertRegex(
-                entry["notes"], r"(?i)covered by|covered on",
-                label + ": the notes never say which evidence covers which "
-                "behaviour")
-            self.assertNotIn(
-                "Missing:", entry["notes"],
-                label + ": a verified claim still lists a missing aspect")
+            if entry in capabilities:
+                # Unlike the broad ledger, these rows cite the exact cases;
+                # a suite name alone is no longer enough for 'verified'.
+                self.assertTrue(entry["checks"], label + ": no test cases")
+                self.assertNotIn("gap", entry, label + ": still has a gap")
+            else:
+                self.assertRegex(
+                    entry["notes"], r"(?i)covered by|covered on",
+                    label + ": the notes never say which evidence covers which "
+                    "behaviour")
+                self.assertNotIn(
+                    "Missing:", entry["notes"],
+                    label + ": a verified claim still lists a missing aspect")
 
 
 if __name__ == "__main__":

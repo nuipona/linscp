@@ -90,12 +90,14 @@ def find_linuxscp_binary():
         os.path.join(BASE_DIR, "..", "linux", "build", name),
         os.path.join(BASE_DIR, "..", "..", "source", "linux", "build", name),
         os.path.join(BASE_DIR, "..", "..", "build", name),
-        "/usr/bin/linuxscp",
-        "/usr/local/bin/linuxscp",
+        # CMake installs into any prefix, not just /usr. With the module at
+        # PREFIX/share/linuxscp/gui, the executable is PREFIX/bin/linuxscp.
+        os.path.join(BASE_DIR, "..", "..", "..", "bin", name),
     ]
     found = shutil.which(name)
     if found:
         candidates.append(found)
+    candidates.extend(["/usr/bin/linuxscp", "/usr/local/bin/linuxscp"])
     for c in candidates:
         if c and os.path.isfile(c) and os.access(c, os.X_OK):
             return os.path.abspath(c)
@@ -399,7 +401,7 @@ def run_linuxscp(command_script, session=None, timeout=300):
     session = session or new_session()
     bin_path = find_linuxscp_binary()
     cmd = core_command_line(session)
-    cmd.append("-command=" + "option confirm off ; " + command_script)
+    cmd.extend(["-literal", "-command=" + "option confirm off ; " + command_script])
     add_log("Executing: " + command_script, "cmd")
     try:
         proc = subprocess.Popen(cmd, **popen_kwargs())
@@ -768,8 +770,10 @@ class TaskManager(object):
         # that is what makes it cancellable without dropping the session
         # the panes are browsing.
         cmd = core_command_line(task.session)
-        cmd.append("-command=" + "open " + session_url(task.session) +
-                   " ; option confirm off ; " + task.command)
+        # Queued tasks are GUI-generated commands too. A dropped filename can
+        # literally contain %TIMESTAMP% or %NAME%; do not expand it on retry.
+        cmd.extend(["-literal", "-command=" + "open " + session_url(task.session) +
+                    " ; option confirm off ; " + task.command])
         try:
             task.proc = subprocess.Popen(cmd, **popen_kwargs())
         except OSError as exc:
@@ -975,8 +979,57 @@ def quote_remote(path):
     return '"' + path.replace('"', '\\"') + '"'
 
 
-def queue_browser_upload(tab, remote_dir, filename, source_stream, content_length):
-    """Stage one browser File body and queue it through the normal client."""
+def browser_destination(remote_dir, relative_path):
+    """Return a path beneath the selected pane, never an absolute/escaping drop.
+
+    Desktop drag entries come from a browser, not the local file panel. Validate
+    *every* component before joining: posixpath.join discards its base for an
+    absolute child, while normpath would silently turn ../ into a sibling of
+    the requested destination. A backslash is not a separator on the server
+    but browsers disagree about it, so refuse it rather than flattening it.
+    """
+    if not isinstance(remote_dir, str) or not remote_dir.startswith("/") or \
+            not isinstance(relative_path, str) or not relative_path:
+        raise ValueError("The drop destination must be a remote directory and a relative path.")
+    segments = relative_path.split("/")
+    try:
+        too_long = (len(relative_path.encode("utf-8")) > 4096 or
+                    len(remote_dir.encode("utf-8")) > 4096 or
+                    any(len(part.encode("utf-8")) > 255 for part in segments))
+    except UnicodeError as exc:
+        raise ValueError("The drop path has invalid Unicode.") from exc
+    if too_long or len(segments) > 32 or any(
+            not segment or segment in (".", "..") or "\\" in segment or
+            any(ord(char) < 32 or ord(char) == 127 for char in segment)
+            for segment in segments) or \
+            any(part in (".", "..") for part in remote_dir.split("/")) or \
+            "\\" in remote_dir or \
+            any(ord(char) < 32 or ord(char) == 127 for char in remote_dir):
+        raise ValueError("The drop path contains an invalid name or escapes the remote directory.")
+    base = posixpath.normpath(remote_dir)
+    destination = posixpath.join(base, *segments)
+    if posixpath.commonpath((base, destination)) != base:
+        raise ValueError("The drop path escapes the remote directory.")
+    return destination
+
+
+def queue_browser_directory(tab, remote_dir, relative_path):
+    """Queue even empty folders, without treating an existing folder as an error."""
+    destination = browser_destination(remote_dir, relative_path)
+    return TASKS.submit("Create directory",
+                        "mkdir -parents " + quote_remote(destination),
+                        tab.session, "Browser: " + relative_path,
+                        destination, tab.id)
+
+
+def queue_browser_upload(tab, remote_dir, filename, source_stream,
+                         content_length, relative_path=None):
+    """Stage a browser File and queue a retry-safe, nested destination."""
+    if relative_path is None:
+        relative_path = filename
+    destination = browser_destination(remote_dir, relative_path)
+    if not isinstance(filename, str) or relative_path.split("/")[-1] != filename:
+        raise ValueError("The file name does not match the dropped path.")
     fd, source_path = tempfile.mkstemp(prefix="linscp-browser-upload-")
     try:
         remaining = content_length
@@ -987,11 +1040,15 @@ def queue_browser_upload(tab, remote_dir, filename, source_stream, content_lengt
                     raise IOError("The upload ended before all bytes arrived.")
                 uploaded.write(chunk)
                 remaining -= len(chunk)
-        destination = posixpath.join(remote_dir, filename)
-        command = "put %s %s" % (quote_remote(source_path),
-                                  quote_remote(destination))
+        # This runs in the task's short-lived process. mkdir -parents checks
+        # every existing component is a directory and is safe on retry; if
+        # any creation fails, batch mode stops before put touches the file.
+        parent = posixpath.dirname(destination)
+        command = "mkdir -parents %s ; put %s %s" % (
+            quote_remote(parent), quote_remote(source_path),
+            quote_remote(destination))
         task = TASKS.submit("Upload", command, tab.session,
-                            "Browser: " + filename, destination, tab.id,
+                            "Browser: " + relative_path, destination, tab.id,
                             progress_remote=(tab.id, destination),
                             cleanup_path=source_path)
         task.bytes_total = content_length
@@ -1426,26 +1483,18 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                                status=415)
                 return
             tab = require_tab(tab_id)
-            if tab is None:
+            if tab is None or tab.id != tab_id:
                 self.send_json({"success": False, "error": "Not connected"},
                                status=400)
                 return
             filename = query.get("name", [""])[0]
             remote_dir = query.get("remote_dir", [tab.remote_dir])[0]
-            if (not filename or filename in (".", "..") or
-                    "/" in filename or "\\" in filename or
-                    any(ord(char) < 32 or ord(char) == 127
-                        for char in filename) or
-                    any(ord(char) < 32 or ord(char) == 127
-                        for char in remote_dir)):
-                self.send_json({"success": False,
-                                "error": "The file or destination name is invalid."},
-                               status=400)
-                return
+            relative_path = query.get("relative_path", [filename])[0]
             try:
                 task = queue_browser_upload(tab, remote_dir, filename,
-                                            self.rfile, content_length)
-            except (IOError, OSError) as exc:
+                                            self.rfile, content_length,
+                                            relative_path)
+            except (IOError, OSError, ValueError) as exc:
                 self.send_json({"success": False,
                                 "error": "Could not receive the file: %s" % exc},
                                status=400)
@@ -1454,6 +1503,25 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             return
 
         body = self.read_json_body()
+
+        if path == "/api/transfer/drop-dir":
+            if not isinstance(body, dict):
+                self.send_json({"success": False, "error": "Invalid drop request"},
+                               status=400)
+                return
+            tab = require_tab(body.get("tab"))
+            if tab is None or str(tab.id) != str(body.get("tab")):
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            try:
+                task = queue_browser_directory(
+                    tab, body.get("remote_dir", tab.remote_dir),
+                    body.get("relative_path"))
+            except ValueError as exc:
+                self.send_json({"success": False, "error": str(exc)}, status=400)
+                return
+            self.send_json({"success": True, "task_id": task.id})
+            return
 
         if path == "/api/tabs/open":
             session = dict(new_session())

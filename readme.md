@@ -37,6 +37,11 @@ CMake builds the same client, and registers the test suites with CTest:
 
     cmake -S . -B build && cmake --build build -j
     ctest --test-dir build --output-on-failure
+    python3 tools/check_upstream_parity.py # evidence/report drift check
+
+Live SFTP tests require `paramiko`, and an S3 signature-reference test uses
+`botocore`; their evidence lines report skipped cases when these optional
+test dependencies are missing. CI installs them.
 
 To build a Debian package:
 
@@ -61,7 +66,10 @@ synchronization, and a browser-based dual-pane Commander interface
 and remote file viewing/editing, a transfer queue and bounded UTF-8 full-text
 search of remote files. The `keepuptodate` command reflects local changes onto
 the remote side, watching the local tree recursively with inotify and falling
-back to interval polling.
+back to interval polling. The remote pane queues files and folders dropped
+from a file manager, retaining nested paths and empty directories where the
+browser exposes file-entry APIs; local-pane and cross-desktop drops still need
+work.
 
 Protocol URL acceptance is not proof of complete support: WebDAV lists and
 stats through PROPFIND, moves with MOVE, and file copies with COPY (falling
@@ -87,7 +95,12 @@ assembly and PowerShell automation APIs, SSH tunnels and session folder trees
 remain open gaps.
 
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
-for the pinned upstream baseline, command inventory, limitations and tests.
+and its [Linux capability matrix](docs/linux-feature-inventory.md) for the
+pinned upstream baseline, named test evidence, limitations and remaining gaps.
+The matrix currently has 84 scoped capabilities across 15 areas; it is not
+an exhaustive behavioral parity certification. Refresh it after changing
+`docs/upstream-parity.json` with
+`python3 tools/check_upstream_parity.py --write-report`.
 Unsupported compatibility options fail explicitly instead of silently doing
 nothing. Batch scripts default to stopping after errors; `option batch continue`
 permits subsequent commands while preserving a failing process exit status.

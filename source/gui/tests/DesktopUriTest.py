@@ -3,6 +3,7 @@
 
 import pathlib
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -14,6 +15,24 @@ import linuxscp_gui as gui  # noqa: E402
 
 
 class DesktopUriTests(unittest.TestCase):
+    def test_nonstandard_linux_prefix_finds_its_own_core_binary(self):
+        # The CMake install prefix is arbitrary; an /usr/bin binary from an
+        # older .deb must never override this GUI's sibling prefix/bin.
+        with tempfile.TemporaryDirectory(prefix="linscp-prefix-") as temp:
+            prefix = pathlib.Path(temp)
+            module_dir = prefix / "share" / "linuxscp" / "gui"
+            module_dir.mkdir(parents=True)
+            binary = prefix / "bin" / "linuxscp"
+            binary.parent.mkdir()
+            binary.write_text("#!/bin/sh\necho prefix-binary\n")
+            binary.chmod(0o755)
+            old_base = gui.BASE_DIR
+            gui.BASE_DIR = str(module_dir)
+            try:
+                self.assertEqual(gui.find_linuxscp_binary(), str(binary))
+            finally:
+                gui.BASE_DIR = old_base
+
     def test_sftp_url_parses_credentials_ipv6_port_and_remote_path(self):
         session = gui.parse_desktop_site_url(
             "sftp://alice:p%40ss@[2001:db8::4]:2202/etc/my%20files")

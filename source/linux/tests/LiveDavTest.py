@@ -18,7 +18,9 @@ what a DAV filesystem has to answer:
     bytes checked independently (the mock records which HTTP method ran);
   - `cp` falling back to a streamed download/upload when the mock refuses
     COPY with 405, again checked byte-for-byte;
-  - an upload/download roundtrip with a checksum;
+  - an upload/download roundtrip with a checksum, including escaped names
+    containing spaces, %, ? and # across PUT/GET/PROPFIND/MOVE/COPY;
+  - mkdir -parents creating nested remote paths and refusing a file as parent;
   - keepuptodate uploading local changes and waking on a nested file event.
 
 The client uses curl over plain HTTP and the server is the standard
@@ -235,6 +237,76 @@ class LiveDavTests(unittest.TestCase):
         result = self.run_script("ls -l /docs ; echo STILL_THERE")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("hello.txt", result.stdout)
+
+    def test_mkdir_parents_is_retryable_and_stops_on_a_file(self):
+        """The desktop queue creates parents for every upload and retries
+        independently, including folders with spaces and % in their names."""
+        source = self.root / "drop-payload.bin"
+        source.write_bytes(b"exact dropped bytes\x00")
+        target = "/dropped/empty folder/%TIMESTAMP%/nested"
+        # Use -literal, as the GUI does, so the percent signs in names
+        # stay literal rather than expanding into the current time.
+        argv = [BINARY, "-batch", "-hostkey=*", "-literal",
+                "-command=open dav://%s:%s@127.0.0.1:%d/ ; "
+                "mkdir -parents \"%s\" ; mkdir -parents \"%s\" ; "
+                "put %s \"%s/payload.bin\" ; echo DROPPED" %
+                (USER, PASSWORD, self.port, target, target, source, target)]
+        result = subprocess.run(argv, capture_output=True, text=True,
+                                timeout=30, env=dict(os.environ,
+                                                     LINUXSCP_CONFIG_DIR=str(self.config)))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("DROPPED", result.stdout)
+        received = self.root / "received-drop.bin"
+        # The regular script runner expands %TIMESTAMP%; use the literal
+        # argv for the readback too.
+        verify = subprocess.run([
+            BINARY, "-batch", "-hostkey=*", "-literal",
+            "-command=open dav://%s:%s@127.0.0.1:%d/ ; get \"%s/payload.bin\" %s" %
+            (USER, PASSWORD, self.port, target, received)],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(verify.returncode, 0, verify.stdout + verify.stderr)
+        self.assertEqual(received.read_bytes(), source.read_bytes())
+
+        # URL escaping also applies to the WebDAV Destination header on COPY
+        # and MOVE, and to PROPFIND href comparisons. '#' and '?' are file
+        # name bytes here, not URL fragment/query delimiters; '%25' is a
+        # literal percent followed by two digits, not a double-decoded '%'.
+        odd = target + "/report #1? 100%25.txt"
+        copied = target + "/copy #1? 100%25.txt"
+        moved = target + "/moved #1? 100%25.txt"
+        result = subprocess.run([
+            BINARY, "-batch", "-hostkey=*", "-literal",
+            "-command=open dav://%s:%s@127.0.0.1:%d/ ; "
+            "put %s \"%s\" ; cp \"%s\" \"%s\" ; "
+            "mv \"%s\" \"%s\" ; stat \"%s\" ; echo SPECIAL_OK" %
+            (USER, PASSWORD, self.port, source, odd, odd, copied,
+             copied, moved, moved)],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("SPECIAL_OK", result.stdout)
+        self.assertIn("Copied '", result.stdout)
+        self.assertIn("moved #1? 100%25.txt", result.stdout)
+        received2 = self.root / "received-special.bin"
+        readback = subprocess.run([
+            BINARY, "-batch", "-hostkey=*", "-literal",
+            "-command=open dav://%s:%s@127.0.0.1:%d/ ; get \"%s\" %s" %
+            (USER, PASSWORD, self.port, moved, received2)],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(readback.returncode, 0,
+                         readback.stdout + readback.stderr)
+        self.assertEqual(received2.read_bytes(), source.read_bytes())
+
+        # It is not permitted to turn an existing file into a directory;
+        # batch abort prevents the command after the error from running.
+        denied = subprocess.run([
+            BINARY, "-batch", "-hostkey=*", "-literal",
+            "-command=open dav://%s:%s@127.0.0.1:%d/ ; "
+            "mkdir -parents \"%s/payload.bin/child\" ; echo SHOULD_NOT_RUN" %
+            (USER, PASSWORD, self.port, target)],
+            capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertIn("not a directory", denied.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", denied.stdout)
 
     def test_stat_reports_size_and_time_and_missing_paths(self):
         source = self.root / "sized.bin"

@@ -15,6 +15,10 @@
 #
 # See ../../docs/debian.md for the Debian package build.
 
+ifneq ($(shell uname -s),Linux)
+$(error LinSCP supports Linux only; this Makefile requires the Linux platform layer)
+endif
+
 TOP := ../..
 BUILD ?= build
 

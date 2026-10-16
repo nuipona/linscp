@@ -65,7 +65,9 @@ class Store:
 
     @staticmethod
     def normalize(path):
-        path = urllib.parse.unquote(path.split("?")[0].split("#")[0])
+        # Callers pass decoded filesystem paths, not URLs. Decoding again
+        # would turn a literal '%23' name into '#', while stripping '?' or
+        # '#' here would lose legitimate file names altogether.
         if not path.startswith("/"):
             path = "/" + path
         while len(path) > 1 and path.endswith("/"):
@@ -268,7 +270,7 @@ class DavHandler(BaseHTTPRequestHandler):
             if entry is None:
                 continue
             href = "%s://%s%s" % (scheme, host,
-                                  target if target != "/" else "/")
+                                  urllib.parse.quote(target, safe="/"))
             if entry["kind"] == "dir" and not href.endswith("/"):
                 href += "/"
             if entry["kind"] == "dir":
@@ -396,7 +398,7 @@ class DavHandler(BaseHTTPRequestHandler):
             self.send_error_text(400, "Destination required.")
             return
         parsed = urllib.parse.urlsplit(destination)
-        dest = parsed.path or destination
+        dest = urllib.parse.unquote(parsed.path or destination)
         overwrite = self.headers.get("Overwrite", "T").upper() != "F"
         result = SERVER_STORE.move(self.local_path(), dest, overwrite)
         if result in ("created", "replaced"):
@@ -428,7 +430,7 @@ class DavHandler(BaseHTTPRequestHandler):
                 "Host", "").lower():
             self.send_error_text(502, "Destination must be on this server.")
             return
-        dest = parsed.path or destination
+        dest = urllib.parse.unquote(parsed.path or destination)
         overwrite = self.headers.get("Overwrite", "T").upper() != "F"
         result = SERVER_STORE.copy(self.local_path(), dest, overwrite)
         if result in ("created", "replaced"):

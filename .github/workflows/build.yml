@@ -162,7 +162,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/gui-client-test"
           cd "$RUNNER_TEMP/gui-client-test"
-          npm install jsdom --no-audit --no-fund
+          npm install jsdom@26 --no-audit --no-fund
           node "$GITHUB_WORKSPACE/source/gui/tests/ClientTest.js" \
             "$GITHUB_WORKSPACE/source/gui/web/index.html"
       - name: GUI integration regression tests
@@ -181,6 +181,20 @@ jobs:
           cmake --build build -j
       - name: Test
         run: ctest --test-dir build --output-on-failure
+      - name: Check relocated CMake install
+        run: |
+          prefix="$RUNNER_TEMP/linscp-relocated"
+          cmake --install build --prefix "$prefix"
+          "$prefix/bin/linuxscp" -version
+          "$prefix/bin/linuxscp-gui" --help > "$RUNNER_TEMP/linscp-gui-help.txt"
+          LIN_PREFIX="$prefix" PYTHONPATH="$prefix/share/linuxscp/gui" python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import linuxscp_gui as gui
+          prefix = Path(os.environ['LIN_PREFIX'])
+          assert gui.find_linuxscp_binary() == str(prefix / 'bin/linuxscp')
+          assert (prefix / 'share/linuxscp/gui/web/index.html').is_file()
+          PY
 
   debian-package:
     name: Debian package (.deb)

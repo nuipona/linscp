@@ -1,4 +1,4 @@
-.TH LINUXSCP 1 "2026-10-15" "LinSCP 1.0" "LinSCP"
+.TH LINUXSCP 1 "2026-10-16" "LinSCP 1.0" "LinSCP"
 .SH NAME
 linuxscp \- secure file transfer client for the command line
 .SH SYNOPSIS
@@ -117,6 +117,15 @@ environment variables are expanded on script and interactive lines before the
 command is dispatched, in single quotes they are not, and input read by
 .BI \-server
 is not expanded at all.
+.TP
+.B \-literal
+With
+.BI \-command=
+only, treat placeholders as literal text rather than expanding script
+parameters, timestamps and environment variables. The GUI uses this for
+filenames containing percent signs; script files can quote the placeholders
+with single quotes instead. Requires
+.BI \-command= .
 .TP
 .B \-batch
 Never ask a question. Operations that require an answer fail instead. To
@@ -590,8 +599,11 @@ Remove remote files.
 .BI rmdir " directory"
 Remove a remote directory.
 .TP
-.BI mkdir " directory"
-Create a remote directory.
+.BI mkdir " [\-parents] directory"
+Create a remote directory. With
+.B \-parents
+create missing ancestors too, leaving existing directories intact; without
+it the parent must already exist.
 .TP
 .BI mv " from to"
 Move or rename a remote file.
@@ -795,7 +807,9 @@ sessions, a remote editor and a browser-based graphical interface exist.
 Every other protocol uses curl and depends on its build capabilities: when the
 installed curl lacks the protocol, opening such an endpoint fails with that
 statement rather than reporting a session that cannot transfer anything.
-WebDAV provides PROPFIND listings, MOVE and single-file COPY, but
+Remote WebDAV paths encode spaces and URL metacharacters in filenames rather
+than treating them as a URL query or fragment. WebDAV provides PROPFIND
+listings, MOVE and single-file COPY, but
 not locking, dead properties or conditional requests. S3 uses Signature
 Version 4, supports object listing/stat/transfer and CopyObject, and uses
 multipart uploads for files larger than 16 MiB; an interrupted multipart
@@ -819,7 +833,10 @@ reachable from the machine that runs it (or through a proxy you point at it
 with
 .IR \-allow\-host ),
 and its API is protected by a per\-run token rather than by a user account,
-so it expects to be the only thing talking to that port.
+so it expects to be the only thing talking to that port. The remote pane
+queues file/folder drops from a file manager, including nested paths and
+empty directories when the browser exposes file\-entry APIs. Local\-pane
+drops and cross\-desktop compatibility are not established.
 .PP
 .B synchronize
 both directions relies on a record of the previous synchronization written to
