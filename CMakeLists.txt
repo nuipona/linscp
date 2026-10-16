@@ -95,8 +95,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME script-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/ScriptTest.py
     $<TARGET_FILE:linscp>)
-  # Skips itself where paramiko is not installed, so a plain C++ build is
-  # never held up by a missing Python dependency.
+  # Individual cases skip themselves where their dependency is
+  # missing, but a suite that skips every case has checked
+  # nothing, which is the failure mode this repository guards
+  # against (see the ran=0 properties below and the Makefile
+  # workflow's greps).
   add_test(NAME live-sftp-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveSftpTest.py
     $<TARGET_FILE:linscp>)
@@ -120,6 +123,16 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME live-curl-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveCurlTest.py
     $<TARGET_FILE:linscp>)
+  # A live suite that ran no case prints 'ran=0' in its evidence
+  # line, and ctest fails the test on that pattern: a suite that
+  # quietly did less is the failure mode this repository guards
+  # against, and the Makefile workflow's grep enforces the same
+  # contract. The timeout bounds a suite whose throwaway server
+  # hangs, which would otherwise eat the default 1500 seconds.
+  set_tests_properties(live-sftp-tests live-scp-tests live-s3-tests
+    live-dav-tests live-curl-tests PROPERTIES
+    FAIL_REGULAR_EXPRESSION "ran=0 "
+    TIMEOUT 600)
   add_test(NAME gui-search-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/RemoteSearchTest.py)
   add_test(NAME gui-local-editor-tests COMMAND ${Python3_EXECUTABLE}

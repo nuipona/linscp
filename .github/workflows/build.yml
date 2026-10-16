@@ -222,10 +222,26 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure and build
         run: |
+          # ctest runs the same live suites as the Makefile
+          # job, and they need their server libraries: without
+          # paramiko the SFTP suite runs no case at all, which
+          # the ran=0 guard in CMakeLists.txt now fails loudly.
+          # The venv goes on PATH before configure so
+          # find_package(Python3) resolves the tests to it.
+          python3 -m venv "$RUNNER_TEMP/live-test-venv"
+          "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko botocore pyftpdlib pyOpenSSL
+          echo "$RUNNER_TEMP/live-test-venv/bin" >> "$GITHUB_PATH"
           cmake -S . -B build
           cmake --build build -j
       - name: Test
         run: |
+          # The SCP suite drives a real sshd, which the runner
+          # image has; install it rather than let the suite skip
+          # every case and trip the ran=0 guard in ctest.
+          if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq openssh-server
+          fi
           set -o pipefail
           if ! ctest --test-dir build --output-on-failure 2>&1 | tee "$RUNNER_TEMP/ctest.log"; then
             # Surface diagnostics through the checks API as well as hosted
