@@ -400,7 +400,9 @@ class LiveCurlTests(unittest.TestCase):
             "get %s %s ; put %s %s ; exit" %
             (remote, downloaded, local_upload, uploaded), extra=extra,
             hostkey=fingerprint)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 0,
+                         "hostkey pin %s: %s%s" %
+                         (fingerprint, result.stdout, result.stderr))
         self.assertEqual(downloaded.read_bytes(), payload)
         self.assertEqual(uploaded.read_bytes(), upload)
 
@@ -619,9 +621,9 @@ def run_and_report():
     for test, report in list(result.failures) + list(result.errors):
         lines = [line.strip() for line in report.strip().splitlines()
                  if line.strip()]
-        detail = lines[-1] if lines else "no detail"
+        detail = " | ".join(lines[-6:]) if lines else "no detail"
         print("evidence: FAILED %s: %s" %
-              (test.id().split(".")[-1], detail[-300:]))
+              (test.id().split(".")[-1], detail[-1200:]))
     line = ("evidence: suite=%s platform=linux ran=%d skipped=%d failed=%d" %
             (SUITE_NAME, result.testsRun, len(result.skipped),
              len(result.failures) + len(result.errors)))
