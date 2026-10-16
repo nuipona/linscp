@@ -47,6 +47,7 @@ CASE_SOURCES = {
     "live-s3": "source/linux/tests/LiveS3Test.py",
     "live-dav": "source/linux/tests/LiveDavTest.py",
     "live-curl": "source/linux/tests/LiveCurlTest.py",
+    "live-scp": "source/linux/tests/LiveScpTest.py",
     "gui": "source/gui/tests/ClientTest.js",
     "gui-localization": "source/gui/tests/LocalizationTest.js",
     "gui-search": "source/gui/tests/RemoteSearchTest.py",

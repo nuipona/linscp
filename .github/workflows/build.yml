@@ -168,6 +168,29 @@ jobs:
           node "$GITHUB_WORKSPACE/source/gui/tests/ClientTest.js" \
             "$GITHUB_WORKSPACE/source/gui/web/index.html"
           node "$GITHUB_WORKSPACE/source/gui/tests/LocalizationTest.js"
+      - name: Live SCP regressions
+        run: |
+          # The SCP engine drives a real sshd, which the runner image has;
+          # install it rather than let the suite skip and the evidence line
+          # report a run that checked nothing.
+          set -o pipefail
+          if ! command -v sshd >/dev/null 2>&1 && [ ! -x /usr/sbin/sshd ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq openssh-server
+          fi
+          status=0
+          "$RUNNER_TEMP/live-test-venv/bin/python" \
+            -u source/linux/tests/LiveScpTest.py source/linux/build/linuxscp 2>&1 |
+            tee "$RUNNER_TEMP/live-scp-tests.log" || status=$?
+          grep '^evidence: ' "$RUNNER_TEMP/live-scp-tests.log" |
+            { while IFS= read -r line; do
+              printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
+          grep -E 'evidence: suite=live-scp .*ran=[1-9]' \
+            "$RUNNER_TEMP/live-scp-tests.log" > /dev/null || {
+            echo "::error::the live SCP suite ran no tests"
+            exit 1
+          }
+          exit $status
       - name: Live curl protocol regressions
         run: |
           # The suite's evidence lines are surfaced as annotations whatever

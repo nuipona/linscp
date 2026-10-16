@@ -1,10 +1,7 @@
-"""Live tests for the FTP, FTPS and SCP protocols.
+"""Live tests for the FTP and FTPS protocols over curl and the native engine.
 
-FTP/FTPS use a throwaway pyftpdlib server (the dependency is optional), while
-SCP uses a throwaway OpenSSH daemon when sshd is installed. Each test checks
-an authenticated download and upload byte-for-byte. The SCP test also checks
-the fail-closed upload-resume policy: curl's SCP backend has no remote rename,
-so the Linux client must not pretend that its .filepart staging is resumable.
+FTP/FTPS use a throwaway pyftpdlib server (the dependency is optional), and
+each test checks an authenticated download and upload byte-for-byte.
 
 Plain FTP is served by the native engine (source/linux/FtpClient.cpp), so the
 tests here drive the FTP control connection itself: the server records which
@@ -16,9 +13,15 @@ active (PORT arrives at the server). FTPS is the curl path: implicit
 a private CA, a pinned public key, the TLS version bounds, and the refusal of
 a certificate fingerprint this build cannot check.
 
+Neither SSH protocol is here any more. sftp:// is served by the PuTTY SFTP
+engine (LiveSftpTest.py) and scp:// by the client's own SCP engine
+(LiveScpTest.py), so no part of an SSH session depends on which SSH library
+the installed curl happens to link - which is what the SCP test in this file
+used to have to work around.
+
 The suite is optional in a source-tree build. Missing pyftpdlib/OpenSSL skips
-the FTP cases, and missing sshd skips SCP, with the evidence line making the
-limitation explicit rather than turning an empty run into a passing claim.
+the FTP cases, with the evidence line making the limitation explicit rather
+than turning an empty run into a passing claim.
 
 Evidence convention:
 
@@ -27,9 +30,7 @@ Evidence convention:
 
 import os
 import pathlib
-import pwd
 import shutil
-import signal
 import socket
 import subprocess
 import sys
@@ -64,32 +65,6 @@ class ImplicitTLSHandler(TLS_FTPHandler if TLS_FTPHandler is not None else objec
             if getattr(self, "connected", False):
                 self._ssl_requested = True
                 self._ssl_accepting = True
-
-
-def free_port():
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    port = sock.getsockname()[1]
-    sock.close()
-    return port
-
-
-def wait_for_port(port, process):
-    deadline = time.time() + 15
-    while time.time() < deadline:
-        if process.poll() is not None:
-            detail = process.stderr.read() if process.stderr is not None else ""
-            raise RuntimeError("sshd exited before listening: " + detail)
-        sock = socket.socket()
-        sock.settimeout(0.2)
-        try:
-            sock.connect(("127.0.0.1", port))
-            sock.close()
-            return
-        except OSError:
-            sock.close()
-            time.sleep(0.05)
-    raise RuntimeError("sshd did not listen on port %d" % port)
 
 
 class LiveCurlTests(unittest.TestCase):
@@ -160,24 +135,12 @@ class LiveCurlTests(unittest.TestCase):
     def setUp(self):
         self.ftp_server = None
         self.ftp_thread = None
-        self.sshd = None
 
     def tearDown(self):
         if self.ftp_server is not None:
             self.ftp_server.close_all()
         if self.ftp_thread is not None:
             self.ftp_thread.join(timeout=5)
-        if self.sshd is not None and self.sshd.poll() is None:
-            try:
-                os.killpg(os.getpgid(self.sshd.pid), signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                self.sshd.terminate()
-            try:
-                self.sshd.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.sshd.kill()
-                self.sshd.wait()
-        self.sshd = None
 
     def start_ftp(self, tls=False, tls_mode="implicit", record=None,
                   refuse_mlsd=False):
@@ -251,80 +214,6 @@ class LiveCurlTests(unittest.TestCase):
         self.ftp_thread.start()
         return self.ftp_server.socket.getsockname()[1]
 
-    def start_sshd(self):
-        sshd_binary = shutil.which("sshd")
-        if sshd_binary is None:
-            for candidate in ("/usr/sbin/sshd", "/usr/bin/sshd"):
-                if pathlib.Path(candidate).is_file():
-                    sshd_binary = candidate
-                    break
-        keygen_binary = shutil.which("ssh-keygen")
-        curl_binary = shutil.which("curl")
-        if sshd_binary is None or keygen_binary is None:
-            self.skipTest("sshd and ssh-keygen are required for live SCP coverage")
-        if curl_binary is None:
-            self.skipTest("curl is not installed; SCP is a curl-backed protocol")
-        curl_info = subprocess.run([curl_binary, "--version"],
-                                   capture_output=True, text=True)
-        if not any(line.startswith("Protocols:") and " scp" in line
-                   for line in curl_info.stdout.splitlines()):
-            self.skipTest("the installed curl has no SCP protocol support")
-        user = pwd.getpwuid(os.getuid()).pw_name
-        host_key = pathlib.Path(self.workdir.name) / "host_ed25519"
-        user_key = pathlib.Path(self.workdir.name) / "user_ed25519"
-        for key in (host_key, user_key):
-            result = subprocess.run(
-                [keygen_binary, "-q", "-t", "ed25519", "-N", "", "-f", str(key)],
-                capture_output=True, text=True)
-            if result.returncode != 0:
-                self.skipTest("ssh-keygen could not create the SCP test key: " +
-                              result.stderr.strip())
-        authorized = pathlib.Path(self.workdir.name) / "authorized_keys"
-        authorized.write_text(pathlib.Path(str(user_key) + ".pub").read_text())
-        authorized.chmod(0o600)
-        port = free_port()
-        config = pathlib.Path(self.workdir.name) / "sshd_config"
-        config.write_text("\n".join([
-            "Port %d" % port,
-            "ListenAddress 127.0.0.1",
-            "HostKey %s" % host_key,
-            "AuthorizedKeysFile %s" % authorized,
-            "PubkeyAuthentication yes",
-            "PasswordAuthentication no",
-            "KbdInteractiveAuthentication no",
-            "UsePAM no",
-            "StrictModes no",
-            "PermitRootLogin no",
-            "AllowUsers %s" % user,
-            "PidFile %s" % (pathlib.Path(self.workdir.name) / "sshd.pid"),
-            "LogLevel VERBOSE",
-            "",
-        ]))
-        checked = subprocess.run(
-            [sshd_binary, "-t", "-f", str(config)], capture_output=True, text=True)
-        if checked.returncode != 0:
-            self.skipTest("sshd rejected the SCP test configuration: " +
-                          checked.stderr.strip())
-        self.sshd = subprocess.Popen(
-            [sshd_binary, "-D", "-e", "-f", str(config)],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            start_new_session=True)
-        wait_for_port(port, self.sshd)
-        # The host key's SHA-256 fingerprint in OpenSSH's spelling: what a
-        # '-hostkey=SHA256:...' pin has to be converted from.
-        listing = subprocess.run(
-            [keygen_binary, "-lf", str(host_key) + ".pub", "-E", "sha256"],
-            capture_output=True, text=True)
-        fingerprint = ""
-        for field in listing.stdout.split():
-            if field.startswith("SHA256:"):
-                fingerprint = field
-                break
-        if not fingerprint:
-            self.skipTest("ssh-keygen did not report the host key fingerprint: " +
-                          listing.stdout + listing.stderr)
-        return port, user_key, user, fingerprint
-
     def run_client(self, url, commands, extra=(), rawsettings=(), hostkey="*"):
         """Runs one scripted session.
 
@@ -344,18 +233,6 @@ class LiveCurlTests(unittest.TestCase):
         if rawsettings:
             settings = " -rawsettings " + " ".join(rawsettings)
         return "open %s%s ; %s" % (url, settings, commands)
-
-    def curl_has_sha256_hostkey_pins(self):
-        """Whether the installed curl can check a SHA-256 host key pin.
-
-        curl implements '--hostpubsha256' in its libssh2 backend; a build
-        that links libssh (Debian 13, Ubuntu 24.04) accepts the option and
-        ignores it, so the question is the backend named in 'curl
-        --version', not the option list.
-        """
-        result = subprocess.run(["curl", "--version"],
-                                capture_output=True, text=True)
-        return "libssh2/" in result.stdout
 
     def run_client_without_hostkey(self, url, commands, extra=(), rawsettings=()):
         """Like run_client, but nothing accepts the server blindly."""
@@ -392,69 +269,6 @@ class LiveCurlTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.local / "ftps-download.txt").read_bytes(), payload)
         self.assertEqual((self.root / "ftps-uploaded.txt").read_bytes(), upload)
-
-    def test_scp_authenticated_download_upload_and_resume_policy(self):
-        port, private_key, user, fingerprint = self.start_sshd()
-        payload = b"live SCP download\n" * 8192
-        upload = b"live SCP upload\n" * 8192
-        remote = pathlib.Path(self.workdir.name) / "scp-remote.txt"
-        remote.write_bytes(payload)
-        local_upload = self.local / "scp-upload.txt"
-        local_upload.write_bytes(upload)
-        downloaded = self.local / "scp-download.txt"
-        uploaded = pathlib.Path(self.workdir.name) / "scp-uploaded.txt"
-        extra = ["-privatekey=" + str(private_key)]
-        url = "scp://%s@127.0.0.1:%d/" % (user, port)
-        transfers = ("get %s %s ; put %s %s ; exit" %
-                     (remote, downloaded, local_upload, uploaded))
-
-        if not self.curl_has_sha256_hostkey_pins():
-            # This curl's SSH backend cannot check a SHA-256 pin, so the
-            # client has to refuse the session rather than drop the pin and
-            # verify less than it was asked to. The transfer still works
-            # with an explicitly accepted host key.
-            refused = self.run_client(url, transfers, extra=extra,
-                                      hostkey=fingerprint)
-            self.assertNotEqual(refused.returncode, 0,
-                                "hostkey pin %s: %s%s" %
-                                (fingerprint, refused.stdout, refused.stderr))
-            message = refused.stdout + refused.stderr
-            self.assertIn("hostpubsha256", message)
-            self.assertFalse(downloaded.exists())
-            self.assertFalse(uploaded.exists())
-
-            accepted = self.run_client(url, transfers, extra=extra)
-            self.assertEqual(accepted.returncode, 0,
-                             accepted.stdout + accepted.stderr)
-            self.assertEqual(downloaded.read_bytes(), payload)
-            self.assertEqual(uploaded.read_bytes(), upload)
-        else:
-            # The host key is pinned by its SHA-256 fingerprint rather than
-            # accepted blindly: the pin is this build's conversion of the
-            # OpenSSH spelling into curl's --hostpubsha256, and a different
-            # key's pin is refused.
-            result = self.run_client(url, transfers, extra=extra,
-                                     hostkey=fingerprint)
-            self.assertEqual(result.returncode, 0,
-                             "hostkey pin %s: %s%s" %
-                             (fingerprint, result.stdout, result.stderr))
-            self.assertEqual(downloaded.read_bytes(), payload)
-            self.assertEqual(uploaded.read_bytes(), upload)
-
-            wrong = self.run_client(
-                url, "ls ; exit", extra=extra,
-                hostkey="SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-            self.assertNotEqual(wrong.returncode, 0,
-                                wrong.stdout + wrong.stderr)
-
-        refused = pathlib.Path(self.workdir.name) / "scp-resume-refused.txt"
-        result = self.run_client(
-            url, "put -resume %s %s ; exit" % (local_upload, refused),
-            extra=extra, hostkey="*")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot resume", (result.stdout + result.stderr).lower())
-        self.assertFalse(refused.exists())
-
 
     def test_ftp_listing_uses_mlsd_and_stat_uses_mlst(self):
         """The native engine asks the server for facts, not for text.

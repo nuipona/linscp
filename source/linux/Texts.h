@@ -72,6 +72,7 @@ std::string EtagSet(const std::string & type, const std::string & etag,
     const std::string & path);
 std::string EtagCleared(const std::string & path);
 std::string NoEtag(const std::string & path);
+std::string NoEtagReported(const std::string & path);
 std::string EtagNotAvailable(const std::string & protocol);
 std::string SyncPlanHeader(int count);
 std::string SyncDirection(const std::string & direction);

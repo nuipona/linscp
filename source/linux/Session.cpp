@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 
 #include "PuttyCompat.h"
 
@@ -71,6 +72,18 @@ size_t seat_output(Seat * seat, SeatOutputType type, const void * data, size_t l
 
     if (type == SEAT_OUTPUT_STDERR)
     {
+        /*
+         * The native SCP engine reads a command's error output as the
+         * reason for a failure ('ls: cannot access ...: No such file or
+         * directory') instead of printing it, because that text is the
+         * message the user is owed. Anything else - the 'call' command,
+         * whose output belongs on the screen - keeps printing it.
+         */
+        if (scpSeat->session->CapturesStderr())
+        {
+            scpSeat->session->AppendCapturedStderr(bytes, len);
+            return 0;
+        }
         Console::Instance().Write(std::string(bytes, len));
         return 0;
     }
@@ -213,9 +226,18 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
     }
     /* One machine readable line for whatever the server just offered, so
      * that a script or the graphical interface can pin this key later
-     * instead of being told only that something went wrong. */
+     * instead of being told only that something went wrong.
+     *
+     * An SCP session opens a connection per command and is offered the same
+     * key every time, so the line is printed once per host and key per
+     * process: a listing that repeated a fact already stated would bury the
+     * listing, and a fact stated once is just as pinnable. */
     const std::string hostkeyLine = "HOSTKEY " + std::string(keytype) + " " +
         fingerprint;
+    static std::set<std::string> reportedHostKeys;
+    const bool hostKeyAlreadyReported = !reportedHostKeys.insert(
+        std::string(host) + ":" + std::to_string(port) + " " + keytype + " " +
+        fingerprint).second;
 
     /* An explicit pin must be checked even if the core can also establish
      * trust from its cache or a host certificate. */
@@ -238,7 +260,10 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
      * connection instead of accepting any key again. */
     if (session->AcceptAnyHostKey())
     {
-        console.WriteLine(hostkeyLine);
+        if (!hostKeyAlreadyReported)
+        {
+            console.WriteLine(hostkeyLine);
+        }
         return SPR_OK;
     }
 
@@ -1369,12 +1394,6 @@ bool ValidateSessionSettings(const SessionOptions & options, std::string & error
             "or https://), and this is a '" + options.protocol + "' session.";
         return false;
     }
-    /*
-     * An SSH host key pinned by its SHA-256 fingerprint over curl: where
-     * the curl in use cannot check that pin (see CurlSupportsHostPubSha256)
-     * the value would be dropped and the session would verify less than it
-     * was asked to, so it is refused with what remains.
-     */
     const std::string protocol = LowerAscii(options.protocol);
     if (!options.s3.Empty() && protocol != "s3")
     {
@@ -1389,21 +1408,6 @@ bool ValidateSessionSettings(const SessionOptions & options, std::string & error
         error = "S3KmsKeyId requires S3ServerSideEncryption=aws:kms (or "
             "aws:kms:dsse).";
         return false;
-    }
-    if (IsSshCurlProtocol(protocol) && !UseNativeSftp(protocol) &&
-        !options.hostKey.empty() && options.hostKey != "*")
-    {
-        std::string pin;
-        if (HostKeySha256(options.hostKey, pin) && !CurlSupportsHostPubSha256())
-        {
-            error = "The installed curl cannot check a SHA-256 host key pin "
-                "('--hostpubsha256' needs its libssh2 backend), so '" +
-                options.hostKey + "' would not be enforced. Use -hostkey=\"*\" "
-                "to accept any host key, an MD5 fingerprint, or a curl built "
-                "with libssh2; sftp:// sessions check the pin in this client "
-                "either way.";
-            return false;
-        }
     }
     if (tls && !options.hostKey.empty() && options.hostKey != "*" &&
         LooksLikeCertificateFingerprint(options.hostKey))
@@ -1769,8 +1773,47 @@ Session::Session() :
     mReceivedStart(0),
     mReceivedEnd(0),
     mOutputSink(NULL),
-    mOutputSinkCtx(NULL)
+    mOutputSinkCtx(NULL),
+    mCaptureStderr(false)
 {
+}
+
+void Session::AppendCapturedStderr(const void * data, size_t len)
+{
+    mCapturedStderr.append(static_cast<const char *>(data), len);
+}
+
+bool Session::TakeAllReceived(std::string & out)
+{
+    out.assign(mReceived.begin() + mReceivedStart,
+        mReceived.begin() + mReceivedEnd);
+    mReceived.clear();
+    mReceivedStart = 0;
+    mReceivedEnd = 0;
+    return true;
+}
+
+bool Session::SendEof()
+{
+    if (mBackend == NULL)
+    {
+        return false;
+    }
+    /* The core turns this into the channel's EOF: 'scp -t' waits for the
+     * end of its input before it exits and reports its status. */
+    backend_special(static_cast<Backend *>(mBackend), SS_EOF, 0);
+    return true;
+}
+
+void Session::PumpUntilExit()
+{
+    while (mAlive)
+    {
+        if (!Pump())
+        {
+            break;
+        }
+    }
 }
 
 void Session::SetOutputSink(OutputSinkFn sink, void * ctx)
@@ -1914,6 +1957,34 @@ void Session::SetConnectionError(const std::string & error)
     mConnectionError = error;
 }
 
+namespace {
+
+/*
+ * A fingerprint the tools print carries the digest it is in front of:
+ * 'ssh-keygen -E md5' writes 'MD5:0b:60:52:...' where the SSH core writes
+ * the same digest as '0b:60:52:...' with no marker at all, and OpenSSH's
+ * SHA-256 spelling 'SHA256:xyz' is one the core also writes. The marker
+ * names the digest and is not part of it, so it is not part of the
+ * comparison either: a pin copied from ssh-keygen has to check the key
+ * ssh-keygen was shown, not fail against the same key.
+ */
+std::string WithoutFingerprintMarker(const std::string & text)
+{
+    const std::string::size_type colon = text.find(':');
+    if (colon == std::string::npos || colon == 0 || colon > 8)
+    {
+        return text;
+    }
+    const std::string marker = LowerAscii(text.substr(0, colon));
+    if (marker == "md5" || marker == "sha256" || marker == "sha-256")
+    {
+        return text.substr(colon + 1);
+    }
+    return text;
+}
+
+} // namespace
+
 bool Session::HostKeyMatches(const char * const * fingerprints) const
 {
     const std::string expected = mOptions.hostKey;
@@ -1921,6 +1992,17 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
     {
         return false;
     }
+    const std::string expectedDigestText = WithoutFingerprintMarker(expected);
+    /*
+     * A SHA-256 pin also arrives as a hex digest, with or without ':'
+     * separators, where the core reports it as base64 - and as curl's
+     * 'sha256//base64'. Normalizing both sides to the same 32 bytes is what
+     * lets one '-hostkey=' value work in every spelling instead of only the
+     * one a transport happened to compare.
+     */
+    std::string expectedDigest;
+    const bool haveDigest = HostKeySha256(expected, expectedDigest);
+
     for (int i = 0; fingerprints != NULL && i < SSH_N_FPTYPES; i++)
     {
         if (fingerprints[i] == NULL)
@@ -1928,15 +2010,14 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
             continue;
         }
         /*
-         * The core hands the fingerprint over as '<key type> <bits>
-         * <fingerprint>', e.g. 'ssh-rsa 2048 SHA256:xyz'. Accept a match
-         * against the whole string, against the fingerprint on its own, or
-         * against either without the 'SHA256:'/'MD5:' marker in front.
+         * The core hands every fingerprint type over as '<key type> <bits>
+         * <fingerprint>', e.g. 'ssh-rsa 2048 SHA256:xyz', so the whole
+         * string and the digest on its own are both accepted.
          */
         const std::string candidate = fingerprints[i];
         const std::string::size_type lastSpace = candidate.find_last_of(" \t");
-        const std::string tail = candidate.substr(lastSpace + 1);
-        const std::string forms[2] = { candidate, tail };
+        const std::string forms[2] = { candidate,
+            candidate.substr(lastSpace + 1) };
         for (int n = 0; n < 2; n++)
         {
             const std::string & form = forms[n];
@@ -1944,14 +2025,14 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
             {
                 return true;
             }
-            const std::string::size_type colon = form.find(':');
-            if (colon == std::string::npos)
+            const std::string digestText = WithoutFingerprintMarker(form);
+            if (digestText == expectedDigestText)
             {
-                continue;
+                return true;
             }
-            const std::string prefix = form.substr(0, colon);
-            if ((prefix == "SHA256" || prefix == "SHA-256" || prefix == "MD5") &&
-                form.substr(colon + 1) == expected)
+            std::string serverDigest;
+            if (haveDigest && HostKeySha256(form, serverDigest) &&
+                serverDigest == expectedDigest)
             {
                 return true;
             }
@@ -1989,6 +2070,20 @@ const std::string & Session::DavLockFor(const std::string & remotePath) const
     return found == mOptions.davLocks.end() ? none : found->second;
 }
 
+void Session::SetDavEtag(const std::string & remotePath,
+    const std::string & ifMatch, const std::string & ifNoneMatch)
+{
+    SessionOptions::EtagPrecondition precondition;
+    precondition.ifMatch = ifMatch;
+    precondition.ifNoneMatch = ifNoneMatch;
+    mOptions.davEtags[remotePath] = precondition;
+}
+
+void Session::ClearDavEtag(const std::string & remotePath)
+{
+    mOptions.davEtags.erase(remotePath);
+}
+
 bool Session::Open(const SessionOptions & options, std::string & error)
 {
     /*
@@ -2010,7 +2105,12 @@ bool Session::Open(const SessionOptions & options, std::string & error)
             error = "No host name was specified.";
             return false;
         }
-        if (!ProxyUsableByCurl(options.proxy, error))
+        /* A proxy the curl protocols cannot carry is refused rather than
+         * connected around - except for SCP, which the native engine
+         * connects through the PuTTY core, where a telnet or local command
+         * proxy works exactly as it does for SFTP. */
+        if (!UseNativeScp(options.protocol) &&
+            !ProxyUsableByCurl(options.proxy, error))
         {
             return false;
         }
@@ -2071,7 +2171,7 @@ bool Session::Connect(const SessionOptions & options, const char * program,
     mPasswordUsed = false;
     mAlive = true;
     mConnectionError.clear();
-
+    mCapturedStderr.clear();
 
     ScpSeat * seat = new ScpSeat();
     seat->session = this;
@@ -2258,10 +2358,19 @@ int Session::ExitCode() const
     return backend_exitcode(static_cast<Backend *>(mBackend));
 }
 
+bool Session::OpenExec(const SessionOptions & options,
+    const std::string & command, std::string & error)
+{
+    /* A session of its own, exactly like ExecRemote's: it never becomes the
+     * session the SFTP transport glue addresses, so an open SFTP session
+     * stays connected and buffered while this command runs. */
+    return Connect(options, command.c_str(), false, false, error);
+}
+
 bool Session::ExecRemote(const SessionOptions & options,
     const std::string & command, std::string & error)
 {
-    if (!UseNativeSftp(options.protocol) && options.protocol != "scp")
+    if (!UseNativeSftp(options.protocol) && !UseNativeScp(options.protocol))
     {
         error = "Remote command execution needs an SSH (sftp:// or scp://) session.";
         return false;

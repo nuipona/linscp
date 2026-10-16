@@ -40,8 +40,10 @@ The review corrected several stale claims without upgrading unimplemented work:
 - Local-pane desktop drops, cross-browser enumeration APIs, local edit
   monitoring, session folders and conflict controls have test evidence. This
   does not certify all real browser/file-manager/server combinations.
-- WebDAV session locks and dead properties are implemented Linux extensions;
-  general ETag/collection preconditions remain missing.
+- WebDAV session locks and dead properties are implemented Linux extensions.
+  `etag` records an If-Match/If-None-Match precondition and WebDAV writes send
+  it, but no automated case proves it yet and collection preconditions are not
+  defined.
 - English/Spanish GUI and shared CLI localization exists. Remaining
   human-facing script/engine diagnostics keep localization partial.
 - Non-UTF-8 editor transcoding and upstream XML consumer/schema compatibility
@@ -49,10 +51,19 @@ The review corrected several stale claims without upgrading unimplemented work:
 - `?`, `delsession`, `terminal`, `presets`, `savepreset` and `rmspreset` are
   explicitly inventoried rather than left outside the command ledger.
 
+- An `scp://` (or `ssh://`) session is served by this client's own SSH code: a
+  remote-shell engine for listings, `stat`, `cd` and the directory, permission,
+  time and link commands, and the rcp protocol for the bytes on the server's
+  own `scp -f`/`scp -t`. No SSH session asks the installed curl for anything,
+  so a host-key pin no longer depends on which SSH library that curl linked.
+  What the protocol cannot do is continue a partial transfer - it has no
+  offset - so a resume is refused by name and a stale staging file is
+  discarded rather than spliced onto.
+
 Upstream Windows VCL forms, .NET assemblies, Explorer commands and shell
-extensions are not implicitly covered by a Linux substitute. Missing native
-SCP shell operations, authentication/tunnel work, multi-user GUI isolation,
-automation and desktop extensions remain in the plan.
+extensions are not implicitly covered by a Linux substitute. GSSAPI and SSH
+tunnels, multi-user GUI isolation, automation APIs and desktop extensions
+remain in the plan.
 
 ## Evidence and status rules
 

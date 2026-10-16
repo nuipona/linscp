@@ -147,13 +147,13 @@ APP_SRCS := \
 	SessionStore.cpp \
 	ListingParse.cpp \
 	FtpClient.cpp \
+	ScpClient.cpp \
 	TransferPresets.cpp \
 	SftpClient.c \
 	HashUtil.c \
 	ProtocolClient.cpp \
 	S3SigV4.cpp \
 	S3Client.cpp \
-	ScpShell.cpp \
 	SshTunnel.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
@@ -230,15 +230,16 @@ check: $(BINDIR)/unittest
 
 # Transfers against the servers in tests/, which take seconds rather than
 # milliseconds: ScriptTest is server-free, LiveSftpTest skips itself without
-# paramiko, LiveS3Test is standard-library-only (botocore is an optional
-# extra one test skips without), LiveCurlTest uses optional pyftpdlib/
-# pyOpenSSL and the local sshd when available, and the GUI search test uses a
-# fake session.
+# paramiko, LiveScpTest starts a throwaway sshd of its own and skips itself
+# without sshd/ssh-keygen, LiveS3Test is standard-library-only (botocore is an
+# optional extra one test skips without), LiveCurlTest uses optional pyftpdlib/
+# pyOpenSSL when available, and the GUI search test uses a fake session.
 PYTHON ?= python3
 
 check-live: $(BINDIR)/linuxscp
 	$(PYTHON) tests/ScriptTest.py $(BINDIR)/linuxscp
 	$(PYTHON) tests/LiveSftpTest.py $(BINDIR)/linuxscp
+	$(PYTHON) tests/LiveScpTest.py $(BINDIR)/linuxscp
 	$(PYTHON) tests/LiveS3Test.py $(BINDIR)/linuxscp
 	$(PYTHON) tests/LiveDavTest.py $(BINDIR)/linuxscp
 	$(PYTHON) tests/LiveCurlTest.py $(BINDIR)/linuxscp

@@ -106,13 +106,6 @@ bool WriteWholeFile(const std::string & path, const std::string & content)
     return ok;
 }
 
-bool HasUtf8Bom(const std::string & bytes)
-{
-    return bytes.size() >= 3 &&
-        static_cast<unsigned char>(bytes[0]) == 0xEF &&
-        static_cast<unsigned char>(bytes[1]) == 0xBB &&
-        static_cast<unsigned char>(bytes[2]) == 0xBF;
-}
 
 bool UsesPureCrlf(const std::string & bytes)
 {

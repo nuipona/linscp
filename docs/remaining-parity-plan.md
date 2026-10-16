@@ -2,33 +2,9 @@
 
 Generated from [upstream-parity.json](upstream-parity.json); do not edit separately. Full upstream parity is the target, **not a completed claim**.
 
-14 tracked capability gaps. Each requires implementation and acceptance evidence; recording a plan does not satisfy its tests.
+12 tracked capability gaps. Each requires implementation and acceptance evidence; recording a plan does not satisfy its tests.
 
 Regenerate with `python3 tools/check_upstream_parity.py --write-report`.
-
-## scp.shell-directory-engine
-
-**Area:** SCP · **Status:** missing
-
-No WinSCP-style remote shell filesystem engine or SCP directory listing.
-
-**Next:** Implement and test remote-shell listing, stat and directory operations before claiming SCP parity.
-
-**Acceptance criteria:**
-
-- [ ] Implement an authenticated remote-shell filesystem backend with safely quoted listing/stat and directory CRUD. Test filenames containing spaces, newlines and shell metacharacters against a real SSH/SCP server; do not silently replace SCP semantics with SFTP.
-
-## scp.command-and-metadata
-
-**Area:** SCP · **Status:** missing
-
-No SCP-specific remote command and metadata semantics matching upstream.
-
-**Next:** Implement and test SCP shell commands and metadata with an actual SCP server.
-
-**Acceptance criteria:**
-
-- [ ] Add remote commands, chmod and timestamp preservation to that backend. Check exit status, stderr, permission failures, recursion and interrupted transfers with a live server.
 
 ## security.gssapi-and-tunnels
 
@@ -80,11 +56,11 @@ No WinSCP .NET assembly or equivalent object model for Linux.
 
 ## automation.powershell
 
-**Area:** Automation · **Status:** missing
+**Area:** Automation · **Status:** partial
 
-No PowerShell cmdlets or compatibility shim.
+automation/LinSCP.psm1 is a PowerShell 5.1 module that wraps the console client in -server mode and exports Open-LScpSession, Close-LScpSession, Get-LScpItem, Send-LScpItem, Get-LScpDirectory and Sync-LScpDirectory; 'make install' puts it in PREFIX/share/linuxscp/automation. Nothing exercises it: no automated case runs PowerShell, so its session lifetime, pipeline objects, terminating errors, cancellation and secret handling are unevidenced, and it is a shim over the CLI rather than upstream's assembly API.
 
-**Next:** Provide and test PowerShell automation only if this is a product requirement.
+**Next:** Exercise the shipped module with PowerShell on Linux: a session opened and closed, an upload and a download of exact bytes, a listing as pipeline objects, a terminating error, a cancelled transfer, and a password that appears neither in the process list nor in the output.
 
 **Acceptance criteria:**
 
@@ -131,11 +107,11 @@ The shared LIST parser accepts Unix long listings. MLSD provides a structured al
 
 ## dav.etag-preconditions
 
-**Area:** WebDAV · **Status:** missing
+**Area:** WebDAV · **Status:** partial
 
-Session lock tokens protect writes to locked paths. General ETag-based If-Match/If-None-Match conditional writes and collection precondition policies are not implemented.
+The 'etag' command records an If-Match or If-None-Match precondition per path with the session, and a WebDAV upload, delete or move of that path sends it in the If header next to any lock token; '-get' reads the current ETag with a Depth-0 PROPFIND and says so when the path is not there; a session whose protocol has no ETags is refused rather than left believing a write is conditional. What is missing is evidence and the collection semantics: no automated case shows a matching ETag letting a write through, a stale one refused, or a refused precondition leaving the destination untouched.
 
-**Next:** Add explicit ETag preconditions independently of the existing session lock-token support.
+**Next:** Prove the precondition against a live WebDAV server - a matching ETag writes, a stale one is refused with 412 and changes nothing at the destination, an absent resource answers If-None-Match - and define what a precondition on a collection means instead of inheriting one path's rule.
 
 **Acceptance criteria:**
 

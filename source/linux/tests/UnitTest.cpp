@@ -34,6 +34,7 @@
 #include "ProtocolClient.h"
 #include "SshTunnel.h"
 #include "Editor.h"
+#include "ScpClient.h"
 
 namespace {
 
@@ -3176,7 +3177,7 @@ void TestNonUnixListingFormats()
         CHECK_EQ(entry.name, std::string("filename.txt"));
         CHECK_FALSE(entry.isDir);
         CHECK_TRUE(entry.typeKnown);
-        CHECK_EQ(entry.size, 12345ULL);
+        CHECK_EQ(std::to_string(entry.size), std::string("12345"));
     }
     /* DOS line should not match Unix. */
     {
@@ -3193,7 +3194,7 @@ void TestNonUnixListingFormats()
         CHECK_EQ(entry.name, std::string("FILE.TXT"));
         CHECK_FALSE(entry.isDir);
         CHECK_TRUE(entry.typeKnown);
-        CHECK_EQ(entry.size, 25ULL);
+        CHECK_EQ(std::to_string(entry.size), std::string("25"));
     }
     {
         ListingEntry entry;
@@ -3283,9 +3284,9 @@ void TestSshTunnelParsing()
         std::string error;
         CHECK_TRUE(ParseTunnelSpec("8080:localhost:80", TunnelType::Local,
             tunnel, error));
-        CHECK_EQ(tunnel.bindPort, 8080);
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("8080"));
         CHECK_EQ(tunnel.remoteHost, std::string("localhost"));
-        CHECK_EQ(tunnel.remotePort, 80);
+        CHECK_EQ(std::to_string(tunnel.remotePort), std::string("80"));
     }
     /* Local tunnel with bind address */
     {
@@ -3294,7 +3295,7 @@ void TestSshTunnelParsing()
         CHECK_TRUE(ParseTunnelSpec("0.0.0.0:8080:localhost:80", TunnelType::Local,
             tunnel, error));
         CHECK_EQ(tunnel.bindAddress, std::string("0.0.0.0"));
-        CHECK_EQ(tunnel.bindPort, 8080);
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("8080"));
     }
     /* Dynamic tunnel */
     {
@@ -3302,7 +3303,7 @@ void TestSshTunnelParsing()
         std::string error;
         CHECK_TRUE(ParseTunnelSpec("1080", TunnelType::Dynamic,
             tunnel, error));
-        CHECK_EQ(tunnel.bindPort, 1080);
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("1080"));
     }
     /* Dynamic tunnel with bind address */
     {
@@ -3311,7 +3312,7 @@ void TestSshTunnelParsing()
         CHECK_TRUE(ParseTunnelSpec("0.0.0.0:1080", TunnelType::Dynamic,
             tunnel, error));
         CHECK_EQ(tunnel.bindAddress, std::string("0.0.0.0"));
-        CHECK_EQ(tunnel.bindPort, 1080);
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("1080"));
     }
     /* Remote tunnel */
     {
@@ -3319,9 +3320,9 @@ void TestSshTunnelParsing()
         std::string error;
         CHECK_TRUE(ParseTunnelSpec("9090:localhost:9090", TunnelType::Remote,
             tunnel, error));
-        CHECK_EQ(tunnel.bindPort, 9090);
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("9090"));
         CHECK_EQ(tunnel.remoteHost, std::string("localhost"));
-        CHECK_EQ(tunnel.remotePort, 9090);
+        CHECK_EQ(std::to_string(tunnel.remotePort), std::string("9090"));
     }
     /* Invalid: empty */
     {
@@ -3380,6 +3381,261 @@ void TestDavEtagHelpers()
     CHECK_FALSE(options.davEtags.find("/other.txt") == options.davEtags.end());
 }
 
+void TestScpEngine()
+{
+    /* A path is one argument on a remote command line, so everything goes
+     * inside single quotes; the shell then sees no expansion, no separator
+     * and no redirection. The one sequence a POSIX shell cannot be handed
+     * inside a single-quoted word is a quote, and it is spelled as: close
+     * the word, add an escaped quote, open the word again. */
+    const std::string quoteEscape = std::string("'") + "\\" + "'" + "'";
+    CHECK_EQ(ScpShellQuote("plain"), std::string("'plain'"));
+    CHECK_EQ(ScpShellQuote("sub dir/file name.txt"),
+        std::string("'sub dir/file name.txt'"));
+    CHECK_EQ(ScpShellQuote("it's"), std::string("'it") + quoteEscape + "s'");
+    CHECK_EQ(ScpShellQuote("'"), std::string("'") + quoteEscape + "'");
+    CHECK_EQ(ScpShellQuote("''"),
+        std::string("'") + quoteEscape + quoteEscape + "'");
+    CHECK_EQ(ScpShellQuote("$HOME"), std::string("'$HOME'"));
+    CHECK_EQ(ScpShellQuote("a;b|c`d`e"), std::string("'a;b|c`d`e'"));
+    CHECK_EQ(ScpShellQuote("*?[]"), std::string("'*?[]'"));
+    CHECK_EQ(ScpShellQuote(""), std::string("''"));
+    /* A trailing backslash stays inside the quotes, so it quotes nothing. */
+    CHECK_EQ(ScpShellQuote("dir\\"), std::string("'dir") + "\\" + "'");
+
+    /* The paths the engine refuses to send, and why. */
+    std::string error;
+    CHECK_TRUE(ScpValidRemotePath("/srv/site/file.txt", error));
+    CHECK_TRUE(error.empty());
+    CHECK_TRUE(ScpValidRemotePath("sub dir/it's here.txt", error));
+    CHECK_FALSE(ScpValidRemotePath("", error));
+    CHECK_TRUE(error.find("empty") != std::string::npos);
+    /* A newline cannot be told apart from the end of an 'ls -l' line, so a
+     * name holding one is refused instead of being listed as two names. */
+    error.clear();
+    CHECK_FALSE(ScpValidRemotePath("a\nb", error));
+    CHECK_TRUE(error.find("control character") != std::string::npos);
+    error.clear();
+    CHECK_FALSE(ScpValidRemotePath("tab\there", error));
+    CHECK_TRUE(error.find("control character") != std::string::npos);
+    error.clear();
+    CHECK_FALSE(ScpValidRemotePath(
+        std::string("del") + static_cast<char>(0x7f), error));
+    CHECK_TRUE(error.find("control character") != std::string::npos);
+
+    /* One line of 'ls -l -a' as an entry. */
+    ListingEntry entry;
+    CHECK_TRUE(ScpParseListingLine(
+        "-rw-r--r-- 1 user group 512 Oct 16 05:33 file.txt", entry));
+    CHECK_EQ(entry.name, std::string("file.txt"));
+    CHECK_EQ(std::to_string(entry.size), std::string("512"));
+    CHECK_FALSE(entry.isDir);
+    CHECK_TRUE(entry.typeKnown);
+    CHECK_EQ(std::to_string(entry.permissions), std::to_string(0100644UL));
+    CHECK_EQ(entry.longname,
+        std::string("-rw-r--r-- 1 user group 512 Oct 16 05:33 file.txt"));
+    /* A name with spaces is one name: the ninth field keeps them. */
+    CHECK_TRUE(ScpParseListingLine(
+        "drwxr-xr-x 2 user group 60 Oct 16 05:33 sub dir", entry));
+    CHECK_EQ(entry.name, std::string("sub dir"));
+    CHECK_TRUE(entry.isDir);
+    /* The year form an old file is listed with. */
+    CHECK_TRUE(ScpParseListingLine(
+        "-rw-r--r-- 1 user group 10 Feb 13  2009 hello.txt", entry));
+    CHECK_EQ(entry.name, std::string("hello.txt"));
+    CHECK_TRUE(entry.timeKnown);
+    /* A symbolic link keeps its own name and its own type bits: the
+     * ' -> target' half says where the link points, not what it is called. */
+    CHECK_TRUE(ScpParseListingLine(
+        "lrwxrwxrwx 1 user group 9 Oct 16 05:33 link.txt -> hello.txt", entry));
+    CHECK_EQ(entry.name, std::string("link.txt"));
+    CHECK_FALSE(entry.isDir);
+    CHECK_EQ(std::to_string(entry.permissions), std::to_string(0120777UL));
+    /* What is not an entry: the block count 'ls' prints in front of a
+     * directory, the two directory links '-a' adds, and a line the shell
+     * printed itself - none of which is a name on the server. */
+    CHECK_FALSE(ScpParseListingLine("total 12", entry));
+    CHECK_FALSE(ScpParseListingLine(
+        "drwxr-xr-x 3 user group 100 Oct 16 05:33 .", entry));
+    CHECK_FALSE(ScpParseListingLine(
+        "drwxr-xr-x 3 user group 100 Oct 16 05:33 ..", entry));
+    CHECK_FALSE(ScpParseListingLine("bash: ls: command not found", entry));
+    CHECK_FALSE(ScpParseListingLine("", entry));
+    /* A plain file whose name holds the arrow sequence keeps its whole
+     * name: only a link line has a target to take off. */
+    CHECK_TRUE(ScpParseListingLine(
+        "-rw-r--r-- 1 user group 4 Oct 16 05:33 odd -> name.txt", entry));
+    CHECK_EQ(entry.name, std::string("odd -> name.txt"));
+
+    /* The header lines of the rcp protocol, as the server writes them. */
+    char kind = 0;
+    unsigned int mode = 0;
+    unsigned long long size = 0;
+    std::string name;
+    unsigned long mtime = 0;
+    unsigned long atime = 0;
+    CHECK_TRUE(ScpParseHeaderLine("C0644 512 file.txt", kind, mode, size,
+        name, mtime, atime));
+    CHECK_EQ(std::string(1, kind), std::string("C"));
+    CHECK_EQ(std::to_string(mode), std::to_string(0644));
+    CHECK_EQ(std::to_string(size), std::string("512"));
+    CHECK_EQ(name, std::string("file.txt"));
+    /* The line ends in a newline on the wire, and a name may hold spaces. */
+    CHECK_TRUE(ScpParseHeaderLine("C0640 10 my file name.txt\n", kind, mode,
+        size, name, mtime, atime));
+    CHECK_EQ(std::to_string(mode), std::to_string(0640));
+    CHECK_EQ(std::to_string(size), std::string("10"));
+    CHECK_EQ(name, std::string("my file name.txt"));
+    /* A directory header carries no size, and the protocol still sends the
+     * field. */
+    CHECK_TRUE(ScpParseHeaderLine("D0755 0 tree\n", kind, mode, size, name,
+        mtime, atime));
+    CHECK_EQ(std::string(1, kind), std::string("D"));
+    CHECK_EQ(std::to_string(size), std::string("0"));
+    CHECK_EQ(name, std::string("tree"));
+    /* Times come first: 'T<mtime> 0 <atime> 0'. */
+    CHECK_TRUE(ScpParseHeaderLine("T1792131060 0 1792131061 0\n", kind, mode,
+        size, name, mtime, atime));
+    CHECK_EQ(std::string(1, kind), std::string("T"));
+    CHECK_EQ(std::to_string(mtime), std::string("1792131060"));
+    CHECK_EQ(std::to_string(atime), std::string("1792131061"));
+    /* 'E' closes a directory level. */
+    CHECK_TRUE(ScpParseHeaderLine("E\n", kind, mode, size, name, mtime, atime));
+    CHECK_EQ(std::string(1, kind), std::string("E"));
+    /* An error the server reports is its own text, kept verbatim. */
+    CHECK_TRUE(ScpParseHeaderLine(
+        std::string(1, '\x01') + "scp: /x: No such file or directory\n",
+        kind, mode, size, name, mtime, atime));
+    CHECK_EQ(std::to_string(static_cast<int>(kind)), std::string("1"));
+    CHECK_EQ(name, std::string("scp: /x: No such file or directory"));
+    CHECK_TRUE(ScpParseHeaderLine(
+        std::string(1, '\x02') + "lost connection", kind, mode, size, name,
+        mtime, atime));
+    CHECK_EQ(std::to_string(static_cast<int>(kind)), std::string("2"));
+    /* What is not a header line: a truncated one, a mode outside the
+     * permission bits, a size that is not a number, a kind the protocol has
+     * no meaning for. */
+    CHECK_FALSE(ScpParseHeaderLine("C0644", kind, mode, size, name, mtime,
+        atime));
+    CHECK_FALSE(ScpParseHeaderLine("C99999 1 file.txt", kind, mode, size, name,
+        mtime, atime));
+    CHECK_FALSE(ScpParseHeaderLine("C0644 many file.txt", kind, mode, size,
+        name, mtime, atime));
+    CHECK_FALSE(ScpParseHeaderLine("Q0644 1 file.txt", kind, mode, size, name,
+        mtime, atime));
+    CHECK_FALSE(ScpParseHeaderLine("T1792131060\n", kind, mode, size, name,
+        mtime, atime));
+    CHECK_FALSE(ScpParseHeaderLine("", kind, mode, size, name, mtime, atime));
+
+    /* The lines the sending side writes, byte for byte: a header the server
+     * has to guess at is a transfer it refuses or truncates. */
+    CHECK_EQ(ScpFileHeaderLine(0644, 512, "file.txt"),
+        std::string("C0644 512 file.txt\n"));
+    CHECK_EQ(ScpFileHeaderLine(0640, 10, "my file name.txt"),
+        std::string("C0640 10 my file name.txt\n"));
+    /* Only the permission bits go on the wire; the type bits of a local
+     * st_mode would put a five digit mode in front of the size. */
+    CHECK_EQ(ScpFileHeaderLine(0100644, 512, "file.txt"),
+        std::string("C0644 512 file.txt\n"));
+    CHECK_EQ(ScpDirectoryHeaderLine(0755, "tree"),
+        std::string("D0755 0 tree\n"));
+    CHECK_EQ(ScpDirectoryHeaderLine(0100750, "sub dir"),
+        std::string("D0750 0 sub dir\n"));
+    /* A zero access time means the same as the modification time, which is
+     * what a local file with no separate atime should give the server. */
+    CHECK_EQ(ScpTimeHeaderLine(1792131060, 0),
+        std::string("T1792131060 0 1792131060 0\n"));
+    CHECK_EQ(ScpTimeHeaderLine(1792131060, 1792131061),
+        std::string("T1792131060 0 1792131061 0\n"));
+
+    /* 'touch -t' reads the stamp in the server's local time, so the command
+     * that carries it asks for UTC and the stamp is the UTC reading of the
+     * moment. */
+    CHECK_EQ(ScpTouchStamp(0), std::string("197001010000.00"));
+    CHECK_EQ(ScpTouchStamp(1000000000), std::string("200109090146.40"));
+    CHECK_EQ(ScpTouchStamp(1792131060), std::string("202610160611.00"));
+
+    /* The spellings a shell prints for a path that is not there, so that
+     * 'stat' can answer "missing" where the server did answer and "error"
+     * where it refused. */
+    CHECK_TRUE(ScpSaysMissing(
+        "ls: cannot access '/x/nope': No such file or directory"));
+    CHECK_TRUE(ScpSaysMissing(
+        "ls: cannot access '/x/nope': no such file or directory"));
+    CHECK_TRUE(ScpSaysMissing("/x/nope: Not a directory"));
+    CHECK_TRUE(ScpSaysMissing("/x/nope does not exist"));
+    CHECK_TRUE(ScpSaysMissing("ls: /x/nope: not found"));
+    /* A refusal is not a missing path. */
+    CHECK_FALSE(ScpSaysMissing(
+        "ls: cannot open directory '/x': Permission denied"));
+    CHECK_FALSE(ScpSaysMissing(""));
+
+    /*
+     * The date columns GNU 'ls --full-time' prints, and the offset they are
+     * in. An approximation of a timestamp is a synchronizer that sees every
+     * file older than six months as changed, so the exact reading has to
+     * survive the trip from the server's listing to the entry.
+     */
+    CHECK_EQ(std::to_string(ScpParseFullTime("2001-09-09",
+        "01:46:40.000000000", "+0000")), std::string("1000000000"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16",
+        "05:33:07.123456789", "+0200")), std::string("1792121587"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16",
+        "05:33:07.123456789", "-0700")), std::string("1792153987"));
+    /* Half hour zones, and the two shapes the offset arrives in. */
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16", "05:33:07",
+        "+05:30")), std::string("1792108987"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16", "05:33:07",
+        "+0530")), std::string("1792108987"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16", "05:33:07", "Z")),
+        std::string("1792128787"));
+    /* The epoch itself is not a usable timestamp: 0 is what "no time"
+     * means to every caller, so a reading that would be 0 says "none". */
+    CHECK_EQ(std::to_string(ScpParseFullTime("1970-01-01", "00:00:00",
+        "+0000")), std::string("0"));
+    /* What is not that shape: a month name from a plain listing, an offset
+     * that is not one, a month that does not exist, a time that is not one. */
+    CHECK_EQ(std::to_string(ScpParseFullTime("Oct 16", "05:33", "+0000")),
+        std::string("0"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16", "05:33:07.0",
+        "somewhere")), std::string("0"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-13-16", "05:33:07.0",
+        "+0000")), std::string("0"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("2026-10-16", "25:33:07.0",
+        "+0000")), std::string("0"));
+    CHECK_EQ(std::to_string(ScpParseFullTime("", "", "")), std::string("0"));
+
+    /* And a whole listing line in that shape is an entry whose time is
+     * exact, where the same line from a plain 'ls -l' carries a minute. */
+    CHECK_TRUE(ScpParseListingLine(
+        "-rw-r--r-- 1 user group 512 2001-09-09 01:46:40.000000000 +0000 "
+        "file.txt", entry));
+    CHECK_EQ(entry.name, std::string("file.txt"));
+    CHECK_TRUE(entry.timeKnown);
+    CHECK_EQ(std::to_string(entry.mtime), std::string("1000000000"));
+    CHECK_EQ(std::to_string(entry.size), std::string("512"));
+    CHECK_FALSE(entry.isDir);
+    CHECK_TRUE(ScpParseListingLine(
+        "drwxr-xr-x 2 user group 60 2001-09-09 01:46:40.000000000 +0000 "
+        "sub dir", entry));
+    CHECK_EQ(entry.name, std::string("sub dir"));
+    CHECK_TRUE(entry.isDir);
+    CHECK_EQ(std::to_string(entry.mtime), std::string("1000000000"));
+
+    /* Which sessions this engine serves. */
+    SessionOptions options;
+    options.protocol = "scp";
+    CHECK_TRUE(ScpClient::Handles(options));
+    options.protocol = "ssh";
+    CHECK_TRUE(ScpClient::Handles(options));
+    options.protocol = "SCP";
+    CHECK_TRUE(ScpClient::Handles(options));
+    options.protocol = "sftp";
+    CHECK_FALSE(ScpClient::Handles(options));
+    options.protocol = "ftp";
+    CHECK_FALSE(ScpClient::Handles(options));
+}
+
 int main()
 {
     TestLocalization();
@@ -3425,6 +3681,7 @@ int main()
     TestEncodingHelpers();
     TestSshTunnelParsing();
     TestDavEtagHelpers();
+    TestScpEngine();
 
     if (gFailures != 0)
     {

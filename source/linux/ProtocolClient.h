@@ -15,20 +15,7 @@ namespace linuxscp {
  * 'open' must not second-guess. Shared with S3Client.cpp, whose
  * requests are signed but whose transport is the same curl.
  */
-/* True for the SSH protocols curl can serve ('sftp', 'scp'). */
-bool IsSshCurlProtocol(const std::string & proto);
-
 bool IsCurlEndpointUnreachable(int code);
-
-/*
- * Whether the curl in use can check an SSH host key against a SHA-256
- * fingerprint. curl implements '--hostpubsha256' in its libssh2 backend;
- * a build that links libssh (what Debian 13 and Ubuntu 24.04 ship) accepts
- * the option and ignores it, so the option list is not the question - the
- * backend named in 'curl --version' is. Anything unrecognised answers
- * false: a pin that cannot be enforced has to fail, not pass unnoticed.
- */
-bool CurlSupportsHostPubSha256();
 
 /*
  * The pieces of the WebDAV lock and dead-property extensions that can be
@@ -56,6 +43,11 @@ class ProtocolClient
 {
 public:
     static bool IsMultiProtocol(const std::string & protocol);
+    /* True for the two spellings a WebDAV session is opened with. 'http'
+     * and 'https' are not DAV here: a plain HTTP session has no PROPFIND
+     * server behind it, so the DAV code paths must not claim it. Asked from
+     * Script.cpp by the commands that only a WebDAV server can answer. */
+    static bool IsDavProtocol(const std::string & protocol);
 
     static bool List(const SessionOptions & options, const std::string & remotePath,
         LscpNames * names, std::string & error);
@@ -96,12 +88,14 @@ public:
     /*
      * WebDAV ETag preconditions: retrieve the current ETag of a resource
      * and apply If-Match/If-None-Match conditional write headers.
-     * Returns false when the path does not exist (etag is empty) or when
-     * the server does not answer PROPFIND.
+     * An empty 'etag' with true returned is an answer, not a failure, and
+     * 'pathMissing' says which one it was: the path is not there, or the
+     * server answered PROPFIND without a getetag property. Returns false
+     * only when the server did not answer at all.
      */
     static bool DavGetEtag(const SessionOptions & options,
         const std::string & remotePath, std::string & etag,
-        std::string & error);
+        bool & pathMissing, std::string & error);
 
     /*
      * Ask the endpoint whether it is there at all, by listing a directory.

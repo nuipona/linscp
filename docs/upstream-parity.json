@@ -14,15 +14,16 @@
   "platforms": {
    "linux": {
     "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite; npm install --no-save --package-lock=false jsdom@26 && node source/gui/tests/ClientTest.js && node source/gui/tests/LocalizationTest.js exercises the browser UI; python3 tools/tests/test_translations.py checks catalog generation.",
-    "date": "2026-10-15",
+    "date": "2026-10-16",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, a plan refused over a file nobody could hash, and '-conflict=skip|local|remote|newer' two-way resolution), the proxy session settings, the FTP engine and TLS policy settings, the S3 object write settings and multipart upload resume state sidecar, the SSH private-key passphrase option and XML action log elements, the host-key pin spellings, the WebDAV lock-token and dead-property XML, parameter and timestamp expansion, the stored-session file and folder hierarchy helpers, the editor content-comparison and EOL normalization helpers, the file-hash and HMAC helpers, and AWS Signature Version 4 signing. Includes English/Spanish help, security messages, named-placeholder safety, locale fallback and plural-count messages.",
-     "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log. It checks -literal command input (including GUI filenames with percent placeholders), mkdir -parents argument validation, that a SHA-256 host key pin the installed curl cannot enforce is refused by name instead of dropped (a fake curl whose version names libssh stands in for those systems), and the adjacent -gui launcher plus Makefile/CMake source-tree launchers.",
+     "unit": "source/linux/tests/UnitTest.cpp - checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, a plan refused over a file nobody could hash, and '-conflict=skip|local|remote|newer' two-way resolution), the proxy session settings, the FTP engine and TLS policy settings, the S3 object write settings and multipart upload resume state sidecar, the SSH private-key passphrase option and XML action log elements, the host-key pin spellings, the native SCP engine's connection-free parts (the shell quoting a remote path needs, the paths it refuses to send, one 'ls -l' line as an entry including a symbolic link's own name, the exact date columns of '--full-time' with the offset they are in, the rcp header lines read and written byte for byte, and the 'touch -t' stamp), the WebDAV lock-token and dead-property XML, parameter and timestamp expansion, the stored-session file and folder hierarchy helpers, the editor content-comparison and EOL normalization helpers, the file-hash and HMAC helpers, and AWS Signature Version 4 signing. Includes English/Spanish help, security messages, named-placeholder safety, locale fallback and plural-count messages.",
+     "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log. It checks -literal command input (including GUI filenames with percent placeholders), mkdir -parents argument validation, that an SSH session of either spelling (scp:// or ssh://) is served by this client's own SSH code and never asks the curl on PATH for anything - a fake curl that records every call is the witness - with a host key pin in either digest spelling compared by the client instead of handed to a library whose support cannot be known, and the adjacent -gui launcher plus Makefile/CMake source-tree launchers.",
      "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader). Recursive directory copy and multiple source files into an existing destination directory are tested over SFTP; the test server refuses the optional copy-data extension, so these prove the streamed fallback rather than the native extension. A second server mode implements copy-data and verifies the native extension path as well as exact copied bytes. The server can also refuse check-file-name, which proves the download-and-hash fallback for sha-256, sha-1, md5 and crc32, or implement the extension, which proves the native sha-256 digest and that the client does not fall back after a valid reply. It also proves that synchronize remote with a path exclusion ('-filemask=|skip/') leaves an excluded file untouched despite -delete and does not upload files from the excluded subtree. Recursive symbolic chmod is checked over a nested tree, including exact directory and file modes. copyid installs a generated OpenSSH public key into the test SFTP home, verifies the 0700/0600 permissions and proves that repeating the command does not duplicate the key.",
+     "live-scp": "source/linux/tests/LiveScpTest.py against a throwaway OpenSSH daemon - one per test, on a port the kernel picks, with host and user keys generated for the run and public-key authentication only, so nothing outside the test's own temporary directory is read or written. It covers the native SCP engine's shell half: 'open' resolving the login's home directory and the site's initial path in one connection (and refusing a path the server will not change into), 'cd' ending where the server's shell went, listings from 'ls -l -a --full-time' with names holding spaces, hidden entries, subdirectories and symbolic links kept as links, 'stat' from 'ls -l -d' answering \"missing\" for a path that is not there, mkdir/chmod/mv/rm/rmdir, 'ln -s', a server-side 'cp -p', 'call' and the checksum computed from a downloaded file. Its rcp half: byte-exact downloads and uploads of a many-chunk file, an empty file and a name with spaces, a recursive tree with an empty directory and preserved directory times, '-preservetime' both ways, '-permissions' on an upload, ASCII line-ending conversion, '-speed=' pacing, and the progress percentage of an interactive run typed into a PTY. And its refusals: a host key pin checked in OpenSSH's SHA-256 spelling, as a hex digest with and without separators and as MD5, an unknown key refused in a batch run with the key printed, a wrong pin refused, resume refused by name, a stale '.filepart' discarded rather than spliced onto, an interrupted download leaving nothing under the final name, a permission the server did not grant reported in the server's own sentence, an unreachable port and a refused login reported by 'open', and a SOCKS5 proxy that really carries the session. sshd, ssh-keygen and the server's own scp binary are required; without them every case skips loudly instead of passing quietly.",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, filename and full-text search controls/results, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored), and browser file/folder drop enumeration with nested paths and explicit empty directories.",
      "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication, which also implements LOCK/UNLOCK (refusing a write from a session that holds no token with 423), PROPPATCH and dead properties, so the lock and property behavior is asserted against the server's own state rather than against the client alone: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl. It also covers -parents mkdir and literal remote names containing spaces, percent signs, question marks and hashes through DAV PROPFIND/GET/PUT/MOVE/COPY.",
-     "live-curl": "source/linux/tests/LiveCurlTest.py - throwaway pyftpdlib FTP, implicit FTPS and explicit-TLS (AUTH TLS) servers verify authenticated downloads/uploads and FTP .filepart completion; a recording handler proves which commands the session sent, so the suite checks that a listing is MLSD with LIST absent, that FtpUseMlsd=0 and a server refusing MLSD both fall back to LIST, that FtpUseMlsd=2 fails instead of listing without facts (and never sends LIST), and that FtpPasvMode=0 opens the data connection with PORT. The explicit-TLS case walks the TLS policy in one session: ftpes:// and Ftps=3 on an ftp:// URL, a refused handshake when the certificate is not accepted, CaCertificateFile, a PinnedPublicKey that matches, one that does not, MaxTlsVersion=1.1 refused against MinTlsVersion=1.2 accepted, and a host-key fingerprint refused with the setting to use instead. A saved site is stored and reopened by name to prove the FTP/TLS policy travels with it. When OpenSSH sshd is available, the SCP case verifies authenticated direct upload/download and rejects unsafe upload resume rather than staging a remote .filepart; it pins the host key by the SHA-256 fingerprint from -hostkey and refuses a wrong one where the installed curl checks such a pin (its libssh2 backend), and where curl cannot (a libssh build) it asserts the refusal and that the same transfer works with an accepted host key.",
+     "live-curl": "source/linux/tests/LiveCurlTest.py - throwaway pyftpdlib FTP, implicit FTPS and explicit-TLS (AUTH TLS) servers verify authenticated downloads/uploads and FTP .filepart completion; a recording handler proves which commands the session sent, so the suite checks that a listing is MLSD with LIST absent, that FtpUseMlsd=0 and a server refusing MLSD both fall back to LIST, that FtpUseMlsd=2 fails instead of listing without facts (and never sends LIST), and that FtpPasvMode=0 opens the data connection with PORT. The explicit-TLS case walks the TLS policy in one session: ftpes:// and Ftps=3 on an ftp:// URL, a refused handshake when the certificate is not accepted, CaCertificateFile, a PinnedPublicKey that matches, one that does not, MaxTlsVersion=1.1 refused against MinTlsVersion=1.2 accepted, and a host-key fingerprint refused with the setting to use instead. A saved site is stored and reopened by name to prove the FTP/TLS policy travels with it. No SSH protocol is served by curl any more, so none is tested here: sftp:// is LiveSftpTest.py's and scp:// is LiveScpTest.py's.",
      "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet.",
      "gui-browser-upload": "source/gui/tests/BrowserUploadTest.py - rejects missing run tokens and invalid/traversal paths, stages exact bytes from HTTP to a private file, queues nested uploads and explicit empty directories with retry-safe parent creation, verifies that background tasks use -literal for percent-sign filenames, and removes partial staging on an incomplete upload. ClientTest.js exercises browser file/folder traversal, batches, and target selection.",
      "gui-desktop-uri": "source/gui/tests/DesktopUriTest.py - validates sftp://, ftp:// and ftps:// desktop URLs, default and explicit ports, escaped credentials and paths, IPv6 authorities, rejected malformed/query URLs, and startup creation/activation of the site tab without trusting an unknown host key. It also checks core lookup under a relocated install prefix.",
@@ -435,14 +436,15 @@
   },
   {
    "name": "SCP",
-   "status": "partial",
-   "notes": "Delegated to curl, whose SCP support depends on its build; no WinSCP shell-based directory and command engine.",
+   "status": "verified",
+   "notes": "Served by this client's own SSH code rather than by curl: a shell engine for listings, stat, 'cd' and the directory, permission, time and link commands, and an rcp engine for the bytes - the server's own 'scp -f'/'scp -t' on an exec channel, recursive trees, timestamps, permissions, ASCII conversion, speed limits and progress. The host key is verified by the same code that verifies an sftp:// one, so no part of an scp:// session depends on which SSH library the installed curl was linked against. What the protocol itself cannot do is continue a partial transfer: it has no offset, so a resume is refused by name and a staging file an interrupted run left behind is discarded rather than spliced onto. All of it is covered by `LiveScpTest.py`, which starts a throwaway `sshd` per test with keys generated for the run, plus the server-free script suite (a session that never asks curl for anything, a dead endpoint refused by `open`) and the unit suite's engine checks (quoting, listing lines, the rcp header lines in both directions, exact times).",
    "verified_on": {
     "linux": [
-     "live-curl"
+     "live-scp",
+     "script",
+     "unit"
     ]
-   },
-   "gap": "See remaining capabilities: scp.shell-directory-engine, scp.command-and-metadata."
+   }
   },
   {
    "name": "FTP/FTPS",
@@ -459,7 +461,7 @@
   {
    "name": "WebDAV",
    "status": "partial",
-   "notes": "PROPFIND-driven filesystem (Depth 0/1 listings, stat, MKCOL, MOVE, single-file COPY with streamed fallback, non-empty rmdir guard, escaped paths, LOCK/UNLOCK with If-header write protection, and PROPPATCH dead properties), covered by unit and live-dav. ETag/collection preconditions beyond session lock tokens remain unimplemented.",
+   "notes": "PROPFIND-driven filesystem (Depth 0/1 listings, stat, MKCOL, MOVE, single-file COPY with streamed fallback, non-empty rmdir guard, escaped paths, LOCK/UNLOCK with If-header write protection, and PROPPATCH dead properties), covered by unit and live-dav. ETag preconditions are recorded by 'etag' and sent in the If header of a WebDAV write, but no automated case proves them yet and collection preconditions are not defined.",
    "verified_on": {
     "linux": [
      "unit",
@@ -483,12 +485,13 @@
   {
    "name": "Transfers",
    "status": "verified",
-   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, transfer presets, .filepart staging and resume, -append, -speed= pacing/throttling, -preservetime[=all] and -permissions, live PTY curl progress callbacks, and GUI transfer queue prioritization and cancellation, covered by unit, script, live-sftp, live-dav, live-curl, gui and gui-browser-upload.",
+   "notes": "Binary/ASCII/automatic transfers with WinSCP file masks, transfer presets, .filepart staging and resume, -append, -speed= pacing/throttling, -preservetime[=all] and -permissions, live PTY progress callbacks (curl's meter and the native engines' own), and GUI transfer queue prioritization and cancellation, covered by unit, script, live-sftp, live-scp, live-dav, live-curl, gui and gui-browser-upload.",
    "verified_on": {
     "linux": [
      "unit",
      "script",
      "live-sftp",
+     "live-scp",
      "live-dav",
      "live-curl",
      "gui",
@@ -528,12 +531,13 @@
   {
    "name": "Security/authentication",
    "status": "partial",
-   "notes": "Password, private-key/passphrase and ssh-agent authentication, host-key pinning, stored-password encryption, proxy isolation and loopback GUI API tokens are covered by unit, script, live-sftp, live-curl and gui-browser-upload. curl SSH pins are enforced where its backend supports them and explicitly refused otherwise; TLS verification and public-key pinning are configurable. GSSAPI is compiled out, SSH tunnel configuration is not implemented and the GUI has no multi-user accounts or authorization roles.",
+   "notes": "Password, private-key/passphrase and ssh-agent authentication, host-key pinning, stored-password encryption, proxy isolation and loopback GUI API tokens are covered by unit, script, live-sftp, live-scp, live-curl and gui-browser-upload. No part of a host-key pin depends on the installed curl any more: both SSH protocols are served by this client's own SSH code, which compares every fingerprint spelling a pin arrives in - a hex or base64 SHA-256 digest, with or without its marker, and an MD5 digest with or without the 'MD5:' marker ssh-keygen prints - and refuses a key that does not match. TLS verification and public-key pinning stay curl's and are configurable. GSSAPI is compiled out, SSH tunnel configuration is not implemented and the GUI has no multi-user accounts or authorization roles.",
    "verified_on": {
     "linux": [
      "unit",
      "script",
      "live-sftp",
+     "live-scp",
      "live-curl",
      "gui-browser-upload"
     ]
@@ -573,7 +577,7 @@
   {
    "name": "Automation",
    "status": "partial",
-   "notes": "Console scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters (%1%..%9% via -parameter), %TIMESTAMP% with relative offsets and formats, %NAME% environment expansion, and an XML action log (-xmllog=) recording every command, result, message and transfer with passwords masked. Missing: the WinSCP .NET assembly and PowerShell APIs, and equivalence with upstream's log format, which our log mirrors in structure but does not copy; expansions are not applied to -server input, and GUI-generated -command lines use -literal to preserve filenames containing percent signs.",
+   "notes": "Console scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters (%1%..%9% via -parameter), %TIMESTAMP% with relative offsets and formats, %NAME% environment expansion, and an XML action log (-xmllog=) recording every command, result, message and transfer with passwords masked. Missing: the WinSCP .NET assembly, evidence for the shipped PowerShell shim module (automation/LinSCP.psm1, which no automated case runs), and equivalence with upstream's log format, which our log mirrors in structure but does not copy; expansions are not applied to -server input, and GUI-generated -command lines use -literal to preserve filenames containing percent signs.",
    "verified_on": {
     "linux": [
      "script"
@@ -780,6 +784,19 @@
    "commands": [
     "terminal"
    ]
+  },
+  {
+   "name": "etag",
+   "status": "partial",
+   "notes": "'etag <file> -match=ETAG | -nomatch=ETAG' records an If-Match or If-None-Match precondition with the session, '-get' asks the server for the path's ETag with a Depth-0 PROPFIND and prints it, and '-clear' forgets a recorded one. A recorded precondition travels in the If header of every later upload, delete and move of that path, alongside a lock token. Exactly one action per call is required, and a session whose protocol has no ETags - the SSH engines, FTP, S3 - is refused by name instead of recording a precondition nothing would compare. Upstream has no ETag preconditions, so this is a LinSCP command; no automated case exercises it yet, which is what dav.etag-preconditions tracks.",
+   "source": [
+    "source/linux/Script.cpp",
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Session.cpp"
+   ],
+   "commands": [
+    "etag"
+   ]
   }
  ],
  "capabilities": [
@@ -894,41 +911,92 @@
    "id": "scp.curl-file-transfer",
    "area": "SCP",
    "status": "verified",
-   "notes": "An scp:// URL selects curl for authenticated file transfers with local .filepart download staging, direct uploads and explicit refusal of unsafe upload resume.",
+   "notes": "The id is the row's history: an scp:// transfer is not curl's any more. The bytes go over an SSH exec channel running the server's own 'scp -f' and 'scp -t', with the rcp wire protocol spoken by the client - a timestamp header, a mode/size/name header, exactly the stated bytes and an acknowledgement per step, in both directions. Downloads stage through '.filepart' and are renamed when whole, uploads carry '-permissions' and '-preservetime', a tree goes through the recursive form of the protocol with an 'E' per closed level, and continuing a partial file is refused by name instead of attempted, because the protocol has no offset to continue from. ASCII conversion, masks, speed limits, progress and the interrupt behavior are the shared transfer path's and are checked here as well.",
    "source": [
-    "source/linux/ProtocolClient.cpp",
+    "source/linux/ScpClient.cpp",
     "source/linux/Script.cpp"
    ],
    "checks": {
-    "live-curl": [
-     "test_scp_authenticated_download_upload_and_resume_policy"
+    "unit": [
+     "TestScpEngine"
+    ],
+    "script": [
+     "test_an_ssh_session_never_asks_curl_for_anything",
+     "test_open_fails_on_unreachable_endpoint"
+    ],
+    "live-scp": [
+     "test_download_and_upload_carry_the_bytes_intact",
+     "test_recursive_transfer_and_server_side_copy",
+     "test_a_partial_transfer_is_neither_resumed_nor_left_behind",
+     "test_an_interrupted_download_leaves_nothing_under_the_final_name",
+     "test_an_ascii_transfer_converts_the_line_endings",
+     "test_a_speed_limit_paces_the_transfer",
+     "test_progress_is_reported_while_the_transfer_runs"
     ]
    },
    "verified_on": {
     "linux": [
-     "live-curl"
+     "live-scp",
+     "script",
+     "unit"
     ]
    }
   },
   {
    "id": "scp.shell-directory-engine",
    "area": "SCP",
-   "status": "missing",
-   "notes": "No WinSCP-style remote shell filesystem engine or SCP directory listing.",
-   "gap": "Implement and test remote-shell listing, stat and directory operations before claiming SCP parity.",
-   "acceptance": [
-    "Implement an authenticated remote-shell filesystem backend with safely quoted listing/stat and directory CRUD. Test filenames containing spaces, newlines and shell metacharacters against a real SSH/SCP server; do not silently replace SCP semantics with SFTP."
-   ]
+   "status": "verified",
+   "notes": "A directory over SCP is a shell, so the engine asks one: 'ls -l -a --full-time' in an SSH connection of its own, parsed through the shared long-listing parser - the block count and '.'/'..' skipped, a name with spaces kept whole, a symbolic link keeping its own name and its link type bits, and the exact date columns read with the offset they are printed in, which is what makes a timestamp from a listing a timestamp instead of a minute (or a year, for a file older than six months). 'stat' is 'ls -l -d', so a path that is not there is answered as missing rather than as a failure the synchronizer would have to guess at. 'cd' is 'cd <path> && pwd', so the working directory afterwards is the one the server changed into, and 'open' resolves the login's home directory and the site's initial path in one command - refusing a path the server will not change into where the reason can still be reported, instead of turning into a listing error two commands later. A server whose 'ls' has no '--full-time' and no 'env' gets the plainer command rather than an error.",
+   "source": [
+    "source/linux/ScpClient.cpp",
+    "source/linux/ListingParse.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestScpEngine"
+    ],
+    "live-scp": [
+     "test_listing_and_stat_come_from_the_server_shell",
+     "test_cd_reports_the_directory_the_server_changed_into",
+     "test_open_resolves_the_home_directory_and_the_initial_path",
+     "test_a_session_to_an_endpoint_that_is_not_there_is_refused"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-scp",
+     "unit"
+    ]
+   }
   },
   {
    "id": "scp.command-and-metadata",
    "area": "SCP",
-   "status": "missing",
-   "notes": "No SCP-specific remote command and metadata semantics matching upstream.",
-   "gap": "Implement and test SCP shell commands and metadata with an actual SCP server.",
-   "acceptance": [
-    "Add remote commands, chmod and timestamp preservation to that backend. Check exit status, stderr, permission failures, recursion and interrupted transfers with a live server."
-   ]
+   "status": "verified",
+   "notes": "The commands upstream runs on the remote shell, and the metadata a shell can set that 'ls -l' can read back: mkdir, rmdir, rm (never '-f', so a path that is not there stays an error the server words), mv, chmod with the mode the script parsed, 'cp -p' for a server-side copy - with a server that has no 'cp' answered by streaming through the client instead - 'ln -s' for a symbolic link, 'touch -t' asked for in UTC for a modification time, and the rcp timestamp header for the time a transfer carries. Every path is quoted for a POSIX shell and a path holding a control character is refused instead of being sent, because a newline in a name cannot be told apart from the end of a listing line. A refusal arrives as the sentence the server printed, 'call' hands the rest of the line to that shell, and 'checksum' says plainly that the digest came from a downloaded file, this protocol having no server-side hashing to ask for.",
+   "source": [
+    "source/linux/ScpClient.cpp",
+    "source/linux/Script.cpp"
+   ],
+   "checks": {
+    "unit": [
+     "TestScpEngine"
+    ],
+    "live-scp": [
+     "test_directory_and_permission_operations_reach_the_server",
+     "test_symlink_times_and_upload_permissions_are_set_on_the_server",
+     "test_recursive_transfer_and_server_side_copy",
+     "test_a_remote_command_runs_on_the_server_and_a_checksum_is_computed",
+     "test_an_operation_the_server_refuses_says_what_the_server_said"
+    ]
+   },
+   "verified_on": {
+    "linux": [
+     "live-scp",
+     "unit"
+    ]
+   }
   },
   {
    "id": "ftp.curl-transfer",
@@ -1865,10 +1933,10 @@
    "id": "security.curl-pins-and-tls",
    "area": "Security/authentication",
    "status": "verified",
-   "notes": "'-hostkey=' accepts the fingerprint spellings people paste - a SHA-256 digest in hex with optional ':' separators, OpenSSH's SHA256:base64 and curl's sha256//base64 - and converts between them, so the SSH protocols pin the host key with --hostpubsha256 where the installed curl implements it (its libssh2 backend) and with --hostpubmd5 for a 32-hex MD5 digest. A curl that accepts --hostpubsha256 and ignores it - the libssh backend Debian 13 and Ubuntu 24.04 link - is detected before the connection and the session is refused by name, so the pin is enforced or the session does not start. A TLS session keeps chain validation (the system store, or CaCertificateFile and CaCertificateDir) and pins the server's public key with --pinnedpubkey; a value that is not a pin curl can compare is refused with the setting to use instead, and '*' is the only value that disables the checks.",
+   "notes": "'-hostkey=' accepts the fingerprint spellings people paste - a SHA-256 digest in hex with or without ':' separators, OpenSSH's SHA256:base64, curl's sha256//base64, and an MD5 digest with or without the 'MD5:' marker ssh-keygen prints - and both SSH engines compare them with the fingerprints the SSH core reports, so an sftp:// and an scp:// session pin a host key with the same code: a key that does not match is refused, an unknown key in a run nobody can answer a prompt in is refused with the key printed so that it can be pinned next time, and a key that was checked is remembered. Nothing about a pin depends on the installed curl any more, which is what used to make an scp:// pin unverifiable wherever curl linked libssh instead of libssh2 and accepted an option it then ignored. A TLS session keeps chain validation (the system store, or CaCertificateFile and CaCertificateDir) and pins the server's public key with --pinnedpubkey; a value that is not a pin curl can compare is refused with the setting to use instead, and '*' is the only value that disables the checks.",
    "source": [
-    "source/linux/ProtocolClient.cpp",
-    "source/linux/Session.cpp"
+    "source/linux/Session.cpp",
+    "source/linux/ProtocolClient.cpp"
    ],
    "checks": {
     "unit": [
@@ -1876,16 +1944,23 @@
      "TestFtpAndTlsSettings"
     ],
     "script": [
-     "test_a_host_key_pin_curl_cannot_check_is_refused"
+     "test_an_ssh_session_never_asks_curl_for_anything"
+    ],
+    "live-sftp": [
+     "test_open_with_an_unexpected_host_key_is_refused"
+    ],
+    "live-scp": [
+     "test_host_key_is_verified_by_the_client_not_by_curl"
     ],
     "live-curl": [
-     "test_explicit_ftps_session_and_tls_policy",
-     "test_scp_authenticated_download_upload_and_resume_policy"
+     "test_explicit_ftps_session_and_tls_policy"
     ]
    },
    "verified_on": {
     "linux": [
      "live-curl",
+     "live-scp",
+     "live-sftp",
      "script",
      "unit"
     ]
@@ -2408,11 +2483,15 @@
   {
    "id": "automation.powershell",
    "area": "Automation",
-   "status": "missing",
-   "notes": "No PowerShell cmdlets or compatibility shim.",
-   "gap": "Provide and test PowerShell automation only if this is a product requirement.",
+   "status": "partial",
+   "notes": "automation/LinSCP.psm1 is a PowerShell 5.1 module that wraps the console client in -server mode and exports Open-LScpSession, Close-LScpSession, Get-LScpItem, Send-LScpItem, Get-LScpDirectory and Sync-LScpDirectory; 'make install' puts it in PREFIX/share/linuxscp/automation. Nothing exercises it: no automated case runs PowerShell, so its session lifetime, pipeline objects, terminating errors, cancellation and secret handling are unevidenced, and it is a shim over the CLI rather than upstream's assembly API.",
+   "gap": "Exercise the shipped module with PowerShell on Linux: a session opened and closed, an upload and a download of exact bytes, a listing as pipeline objects, a terminating error, a cancelled transfer, and a password that appears neither in the process list nor in the output.",
    "acceptance": [
     "Build cmdlets or a documented compatibility module on the tested automation contract. Exercise them with PowerShell on Linux, including pipeline objects, terminating errors, cancellation and secret handling."
+   ],
+   "source": [
+    "automation/LinSCP.psm1",
+    "source/linux/Makefile"
    ]
   },
   {
@@ -2731,12 +2810,18 @@
   {
    "id": "dav.etag-preconditions",
    "area": "WebDAV",
-   "status": "missing",
-   "notes": "Session lock tokens protect writes to locked paths. General ETag-based If-Match/If-None-Match conditional writes and collection precondition policies are not implemented.",
-   "gap": "Add explicit ETag preconditions independently of the existing session lock-token support.",
+   "status": "partial",
+   "notes": "The 'etag' command records an If-Match or If-None-Match precondition per path with the session, and a WebDAV upload, delete or move of that path sends it in the If header next to any lock token; '-get' reads the current ETag with a Depth-0 PROPFIND and says so when the path is not there; a session whose protocol has no ETags is refused rather than left believing a write is conditional. What is missing is evidence and the collection semantics: no automated case shows a matching ETag letting a write through, a stale one refused, or a refused precondition leaving the destination untouched.",
+   "gap": "Prove the precondition against a live WebDAV server - a matching ETag writes, a stale one is refused with 412 and changes nothing at the destination, an absent resource answers If-None-Match - and define what a precondition on a collection means instead of inheriting one path's rule.",
    "acceptance": [
     "Test successful conditional writes and stale ETag failures against a live DAV server, including If-Match, If-None-Match and absent resources.",
     "Define collection semantics and prove a rejected precondition leaves all destination bytes and metadata unchanged."
+   ],
+   "source": [
+    "source/linux/ProtocolClient.cpp",
+    "source/linux/Script.cpp",
+    "source/linux/Session.cpp",
+    "source/linux/Session.h"
    ]
   },
   {

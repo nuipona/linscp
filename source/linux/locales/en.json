@@ -103,6 +103,7 @@
   "{type}: {etag} on {path}.": "{type}: {etag} on {path}.",
   "Cleared ETag precondition on {path}.": "Cleared ETag precondition on {path}.",
   "No ETag (path does not exist).": "No ETag (path does not exist).",
+  "The server reported no ETag for '{path}'.": "The server reported no ETag for '{path}'.",
   "(ETag not available for {protocol} protocol.)": "(ETag not available for {protocol} protocol.)",
   "{count} differences found.": "{count} differences found.",
   "Synchronizing {direction}...": "Synchronizing {direction}...",
@@ -118,9 +119,5 @@
   "Preset '{name}' saved.": "Preset '{name}' saved.",
   "Preset '{name}' removed.": "Preset '{name}' removed.",
   "Option {name} set to '{value}'.": "Option {name} set to '{value}'.",
-  "Opening terminal...": "Opening terminal...",
-  "yes": "yes",
-  " [Y/n]: ": " [Y/n]: ",
-  " [y/N]: ": " [y/N]: ",
-  "Cancelled.": "Cancelled."
+  "Opening terminal...": "Opening terminal..."
 }

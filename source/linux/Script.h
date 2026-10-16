@@ -260,6 +260,15 @@ private:
      * written or removed - that happens in PrepareStage, after the caller
      * has confirmed overwriting the destination.
      */
+    /*
+     * Whether the transport of the open session can continue a partial
+     * file: the native SFTP engine and the curl protocols with a byte
+     * range can, and SCP cannot - its rcp protocol has no offset, so a
+     * staging file that is already there is discarded and the transfer
+     * starts again instead of being spliced.
+     */
+    bool TransportContinues() const;
+
     bool ResolveStage(bool eligible, bool upload,
         const std::string & finalPath, unsigned long long totalSize,
         TransferStage & stage, std::string & error);

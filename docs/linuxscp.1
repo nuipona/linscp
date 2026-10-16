@@ -15,12 +15,13 @@ linuxscp \- secure file transfer client for the command line
 .BI \-command= commands
 .SH DESCRIPTION
 .B linuxscp
-is the console file transfer client of LinSCP. It connects to an SFTP
-server over SSH, and transfers files to and from the local file system,
+is the console file transfer client of LinSCP. It connects to an SFTP or an
+SCP server over SSH, and transfers files to and from the local file system,
 either from a script, from a command line, or interactively.
 .PP
-The SSH and SFTP protocol code is the PuTTY core, driven by a POSIX front
-end.
+The SSH, SFTP and SCP protocol code is the PuTTY core plus this client's own
+SCP engine, driven by a POSIX front end. Neither SSH protocol is handed to
+another program.
 .SH OPTIONS
 .TP
 .BI \-script= file
@@ -52,14 +53,21 @@ mode the connection fails instead. Either way the key the server offered is
 reported on a
 .B HOSTKEY
 line, so a script or the graphical interface can pin it afterwards instead of
-accepting any key next time. A SHA-256 fingerprint is enforced for the
-.B scp://
-protocol only where the installed curl can check one (its
-.B --hostpubsha256
-needs the libssh2 backend); a curl that cannot is refused with that
-statement rather than used with the pin dropped, and
+accepting any key next time. An MD5 fingerprint may be given with or without
+the
+.B MD5:
+marker
+.B ssh-keygen
+prints, and a SHA-256 one as
+.RI ' SHA256: base64',
+as the hex digest, with or without
+.B :
+separators. Both
 .B sftp://
-sessions are checked by this client either way.
+and
+.B scp://
+sessions are checked by this client's own SSH code, so what a pin enforces
+does not depend on any external program's build.
 .TP
 .BI \-privatekey= file
 Private key to authenticate with. Both PuTTY
@@ -202,13 +210,52 @@ and
 .B s3://
 are all accepted, as is a bare
 .IR host [ :port ].
-The path is the directory the client changes to after connecting. The
+The path is the directory the client changes to after connecting; a URL with
+no path starts in the home directory the login is given. The
 password is optional in the URL; percent-encode reserved characters in URL
 credentials and paths. Prefer
 .B \-password=
 or
 .B LINUXSCP_PASSWORD
 so that the password is not written into a script file.
+.PP
+An
+.B scp://
+.RI (or\  ssh:// )
+session is served by this client itself. SCP is not a filesystem protocol but
+a login shell plus the rcp transfer protocol that runs on it, so a listing is
+an
+.B ls \-l \-a
+the client parses, a
+.B stat
+is an
+.BR "ls \-l \-d" ,
+a
+.B cd
+is a
+.B cd
+the server's own shell answers for, and the directory and metadata commands
+are the shell's
+.BR mkdir ,
+.BR rmdir ,
+.BR rm ,
+.BR mv ,
+.BR chmod ,
+.BR "cp \-p" ,
+.B ln \-s
+and
+.BR touch .
+The bytes of a transfer go through the server's own
+.B scp
+on an SSH channel whose protocol the client speaks. Each of those commands is
+one SSH connection of its own, and every path sent is quoted for a POSIX
+shell; a path holding a control character is refused instead of being sent.
+The rcp protocol has no offset, so a transfer cannot be continued:
+.B \-resume
+is refused by name, and a
+.B .filepart
+file an interrupted run left behind is discarded and the transfer restarted
+rather than spliced onto bytes nobody can position.
 .SS Stored sessions
 A site can be given a name and stored, so that
 .B open
@@ -281,9 +328,9 @@ of them. This build applies the proxy settings
 0|1 and
 .BR ProxyExcludeList= ,
 and refuses any other setting by name rather than accepting one it would
-drop. The native SFTP transport negotiates every method; a protocol served
-through curl uses SOCKS4, SOCKS5 and HTTP proxies and refuses a telnet or
-local-command proxy instead of connecting around it.
+drop. The native SFTP and SCP transports negotiate every method; a protocol
+served through curl uses SOCKS4, SOCKS5 and HTTP proxies and refuses a telnet
+or local-command proxy instead of connecting around it.
 .I ProxyLocalhost=1
 is needed to send a connection to localhost through a proxy, as upstream
 does not proxy it otherwise.
@@ -366,8 +413,11 @@ silently dropped.
 .B \-append
 and
 .B \-resume
-cannot be combined, and both need the native SFTP transport: they are refused
-rather than silently turning into an overwrite.
+cannot be combined, and both need a transport that can position a partial
+file: the native SFTP one. Over
+.B scp://
+they are refused with that statement rather than silently turning into an
+overwrite or into bytes appended where nobody asked for them.
 When omitted,
 .I local
 defaults to the current local directory.
@@ -397,7 +447,9 @@ under
 .BR get .
 The
 .BR \-append " and " \-resume
-switches need the native SFTP transport and exclude each other.
+switches need a transport that can position a partial file, which over
+.B scp://
+nothing can, and they exclude each other.
 When omitted,
 .I remote
 defaults to the current remote directory.
@@ -712,7 +764,7 @@ variable (for example
 or
 .BR foot ),
 otherwise the first common desktop terminal that is installed. SSH
-.RB ( sftp:// )
+.RB ( sftp:// " and " scp:// )
 sessions only.
 .TP
 .BI option " name value"
@@ -850,12 +902,13 @@ linuxscp \-gui
 .RE
 .SH LIMITATIONS
 LinSCP does not implement full WinSCP feature parity, and Linux is the only
-platform it is built, packaged and tested on. Native SFTP through the bundled
-PuTTY core, basic recursive transfers/resume, synchronization, persistent
-sessions, a remote editor and a browser-based graphical interface exist.
-Every other protocol uses curl and depends on its build capabilities: when the
-installed curl lacks the protocol, opening such an endpoint fails with that
-statement rather than reporting a session that cannot transfer anything.
+platform it is built, packaged and tested on. Native SFTP and native SCP
+through the bundled PuTTY core, basic recursive transfers/resume,
+synchronization, persistent sessions, a remote editor and a browser-based
+graphical interface exist. The remaining protocols use curl and depend on its
+build capabilities: when the installed curl lacks the protocol, opening such an
+endpoint fails with that statement rather than reporting a session that cannot
+transfer anything.
 Remote WebDAV paths encode spaces and URL metacharacters in filenames rather
 than treating them as a URL query or fragment. WebDAV provides PROPFIND
 listings, MOVE and single-file COPY, and its locking and dead properties are
@@ -870,8 +923,12 @@ etag, for instance) is not sent. S3 uses Signature
 Version 4, supports object listing/stat/transfer and CopyObject, and uses
 multipart uploads for files larger than 16 MiB; an interrupted multipart
 upload restarts from the first part. ACLs, versioning, storage classes and
-server-side encryption options are absent. SCP remains curl-dependent rather
-than WinSCP's remote-shell implementation, and FTP uses a generic listing
+server-side encryption options are absent. SCP is WinSCP's remote-shell
+implementation - listings, stat, directory and metadata commands over the
+server's shell, transfers over its own
+.B scp
+- and the one thing it cannot do is continue a partial transfer, because the
+rcp protocol has no offset to continue from; FTP uses a generic listing
 parser. File masks, ASCII/automatic conversion, reconnect and transfer presets
 are implemented; the .NET/PowerShell automation API and broad GUI parity are
 not.
