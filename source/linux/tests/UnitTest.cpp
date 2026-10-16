@@ -2597,6 +2597,287 @@ void TestRelativeTime()
 
 } // namespace
 
+/*
+ * The FTP and TLS session settings: upstream's names and vocabulary, the
+ * defaults a connection would use without them, and the refusals that stop
+ * a setting from being silently dropped.
+ */
+void TestFtpAndTlsSettings()
+{
+    SessionOptions options;
+    CHECK_TRUE(options.ftp.passiveMode);
+    CHECK_TRUE(options.ftp.forcePasvIp == 1);
+    CHECK_TRUE(options.ftp.useMlsd == 1);
+    CHECK_TRUE(options.tls.ftpsMode == 0);
+
+    std::string error;
+
+    CHECK_TRUE(ApplySessionRawSetting("FtpPasvMode", "0", options, error));
+    CHECK_FALSE(options.ftp.passiveMode);
+    CHECK_TRUE(ApplySessionRawSetting("FtpPasvMode", "on", options, error));
+    CHECK_TRUE(options.ftp.passiveMode);
+    CHECK_FALSE(ApplySessionRawSetting("FtpPasvMode", "maybe", options, error));
+    CHECK_TRUE(error.find("FtpPasvMode") != std::string::npos);
+
+    CHECK_TRUE(ApplySessionRawSetting("FtpUseMlsd", "2", options, error));
+    CHECK_TRUE(options.ftp.useMlsd == 2);
+    CHECK_TRUE(ApplySessionRawSetting("FtpUseMlsd", "auto", options, error));
+    CHECK_TRUE(options.ftp.useMlsd == 1);
+    CHECK_TRUE(ApplySessionRawSetting("FtpForcePasvIp", "0", options, error));
+    CHECK_TRUE(options.ftp.forcePasvIp == 0);
+    CHECK_FALSE(ApplySessionRawSetting("FtpForcePasvIp", "3", options, error));
+    CHECK_TRUE(ApplySessionRawSetting("FtpAccount", "billing", options, error));
+    CHECK_EQ(options.ftp.account, std::string("billing"));
+
+    /* Ftps is upstream's TFtps, by number and by name. */
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "1", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 1);
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "explicit", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 2);
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "explicittls", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 3);
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "none", options, error));
+    CHECK_TRUE(options.tls.ftpsMode == 0);
+    CHECK_FALSE(ApplySessionRawSetting("Ftps", "sometimes", options, error));
+    CHECK_TRUE(error.find("Ftps") != std::string::npos);
+
+    /* TLS versions, in the forms people write them. */
+    const struct { const char * text; int version; } versions[] = {
+        { "1.2", 12 }, { "tls1.2", 12 }, { "TLSv1.3", 13 },
+        { "12", 12 }, { "13", 13 }, { "default", 0 }
+    };
+    for (size_t i = 0; i < sizeof(versions) / sizeof(versions[0]); i++)
+    {
+        SessionOptions scratch;
+        CHECK_TRUE(ApplySessionRawSetting("MinTlsVersion", versions[i].text,
+            scratch, error));
+        CHECK_TRUE(scratch.tls.minVersion == versions[i].version);
+    }
+    CHECK_FALSE(ApplySessionRawSetting("MinTlsVersion", "1.4", options, error));
+    CHECK_FALSE(ApplySessionRawSetting("MaxTlsVersion", "ssl3", options, error));
+
+    CHECK_TRUE(ApplySessionRawSetting("TlsCertificateFile", "/tmp/c.pem",
+        options, error));
+    CHECK_EQ(options.tls.clientCertificate, std::string("/tmp/c.pem"));
+    CHECK_TRUE(ApplySessionRawSetting("CaCertificateFile", "/tmp/ca.pem",
+        options, error));
+    CHECK_EQ(options.tls.caFile, std::string("/tmp/ca.pem"));
+    CHECK_TRUE(ApplySessionRawSetting("PinnedPublicKey",
+        "sha256//QrZwbj4VrkV2e93XOdjwfQs7i9h3wJB3Fk0BU07xc5A=", options, error));
+    CHECK_EQ(options.tls.pinnedPublicKey,
+        std::string("sha256//QrZwbj4VrkV2e93XOdjwfQs7i9h3wJB3Fk0BU07xc5A="));
+
+    /* The proxy names keep working through the same door. */
+    CHECK_TRUE(ApplySessionRawSetting("ProxyMethod", "SOCKS5", options, error));
+    CHECK_TRUE(options.proxy.method == ProxyMethod::Socks5);
+    CHECK_TRUE(ApplySessionRawSetting("ProxyHost", "proxy.example", options,
+        error));
+    CHECK_EQ(options.proxy.host, std::string("proxy.example"));
+
+    /* An unknown name is refused and the accepted ones are listed. */
+    CHECK_FALSE(ApplySessionRawSetting("NoSuchSetting", "1", options, error));
+    CHECK_TRUE(error.find("NoSuchSetting") != std::string::npos);
+    CHECK_TRUE(error.find("FtpPasvMode") != std::string::npos);
+    CHECK_TRUE(IsSessionRawSettingName("ftp_use_mlsd") == false);
+    CHECK_TRUE(IsSessionRawSettingName("FtpUseMlsd"));
+    CHECK_TRUE(IsSessionRawSettingName("ProxyMethod"));
+    CHECK_FALSE(IsSessionRawSettingName("SshHostKey"));
+
+    /* Where a setting lands in a connection. */
+    SessionOptions ftps;
+    ftps.protocol = "ftp";
+    ftps.tls.ftpsMode = 1;
+    CHECK_TRUE(SessionUsesImplicitTls(ftps));
+    CHECK_TRUE(SessionUsesTls(ftps));
+    ftps.tls.ftpsMode = 3;
+    CHECK_FALSE(SessionUsesImplicitTls(ftps));
+    CHECK_TRUE(SessionUsesTls(ftps));
+    ftps.tls.ftpsMode = 0;
+    CHECK_FALSE(SessionUsesTls(ftps));
+    CHECK_TRUE(SessionDefaultPort("ftp", 0) == 21);
+    CHECK_TRUE(SessionDefaultPort("ftp", 1) == 990);
+    CHECK_TRUE(SessionDefaultPort("ftps", 0) == 990);
+    CHECK_TRUE(SessionDefaultPort("sftp", 0) == 22);
+
+    /* The validations: what would send the session somewhere it did not
+     * ask to go is refused before a connection is made. */
+    SessionOptions plain;
+    plain.protocol = "ftp";
+    CHECK_TRUE(ValidateSessionSettings(plain, error));
+
+    SessionOptions tlsOptions;
+    tlsOptions.protocol = "ftps";
+    tlsOptions.tls.minVersion = 13;
+    tlsOptions.tls.maxVersion = 12;
+    CHECK_FALSE(ValidateSessionSettings(tlsOptions, error));
+    CHECK_TRUE(error.find("MinTlsVersion") != std::string::npos);
+
+    SessionOptions fingerprint;
+    fingerprint.protocol = "ftps";
+    fingerprint.hostKey = "1f2e3d4c5b6a79887766554433221100ffeeddccbbaa99887766554433221100";
+    CHECK_FALSE(ValidateSessionSettings(fingerprint, error));
+    CHECK_TRUE(error.find("fingerprint") != std::string::npos);
+    fingerprint.hostKey = "*";
+    CHECK_TRUE(ValidateSessionSettings(fingerprint, error));
+
+    SessionOptions misplaced;
+    misplaced.protocol = "sftp";
+    misplaced.tls.caFile = "/tmp/ca.pem";
+    CHECK_FALSE(ValidateSessionSettings(misplaced, error));
+    misplaced = SessionOptions();
+    misplaced.protocol = "sftp";
+    misplaced.tls.ftpsMode = 1;
+    CHECK_FALSE(ValidateSessionSettings(misplaced, error));
+
+    /* An ftpes:// URL is FTP with explicit TLS, and its port stays 21. */
+    SessionOptions explicitUrl;
+    CHECK_TRUE(ParseSiteUrl("ftpes://alice@example.com/pub", explicitUrl, error));
+    CHECK_EQ(explicitUrl.protocol, std::string("ftp"));
+    CHECK_TRUE(explicitUrl.tls.ftpsMode == 3);
+    CHECK_TRUE(explicitUrl.portNumber == 21);
+    SessionOptions implicitUrl;
+    CHECK_TRUE(ParseSiteUrl("ftps://alice@example.com/", implicitUrl, error));
+    CHECK_EQ(implicitUrl.protocol, std::string("ftps"));
+    CHECK_TRUE(implicitUrl.tls.ftpsMode == 1);
+    CHECK_TRUE(implicitUrl.portNumber == 990);
+    SessionOptions plainUrl;
+    CHECK_TRUE(ParseSiteUrl("ftp://alice@example.com/", plainUrl, error));
+    CHECK_TRUE(plainUrl.tls.ftpsMode == 0);
+    CHECK_TRUE(plainUrl.portNumber == 21);
+
+    /* A TLS mode set before the URL survives it, which is what makes
+     * 'open ftp://host -rawsettings Ftps=1' an implicit-TLS session on
+     * the port implicit TLS uses. */
+    SessionOptions switched;
+    switched.protocol = "ftp";
+    CHECK_TRUE(ApplySessionRawSetting("Ftps", "1", switched, error));
+    CHECK_TRUE(ParseSiteUrl("ftp://alice@example.com/", switched, error));
+    CHECK_TRUE(switched.tls.ftpsMode == 1);
+    CHECK_TRUE(switched.portNumber == 990);
+    CHECK_TRUE(SessionUsesImplicitTls(switched));
+}
+
+/*
+ * The SHA-256 host key pin a '-hostkey=' value becomes for curl. The
+ * conversion has to accept the forms people paste (hex, OpenSSH's
+ * SHA256:base64, curl's sha256//base64) and refuse anything else, because
+ * a pin that is silently not applied is worse than no pin.
+ */
+void TestHostKeyPinConversion()
+{
+    std::string pin;
+    const std::string digest =
+        "1f2e3d4c5b6a79887766554433221100ffeeddccbbaa99887766554433221100";
+    /* The same 32 bytes in the spelling curl compares against. */
+    const std::string base64 = "Hy49TFtqeYh3ZlVEMyIRAP/u3cy7qpmId2ZVRDMiEQA";
+
+    CHECK_TRUE(HostKeySha256(digest, pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("1f:2e:3d:4c:5b:6a:79:88:77:66:55:44:33:22:11:00:"
+        "ff:ee:dd:cc:bb:aa:99:88:77:66:55:44:33:22:11:00", pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("1F2E3D4C5B6A79887766554433221100FFEEDDCCBBAA99887766554433"
+        "221100", pin));
+    CHECK_EQ(pin, base64);
+
+    /* OpenSSH prints the fingerprint without padding, curl may pass it
+     * with padding: both name the same pin. */
+    CHECK_TRUE(HostKeySha256("SHA256:" + base64, pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("SHA256:" + base64 + "=", pin));
+    CHECK_EQ(pin, base64);
+    CHECK_TRUE(HostKeySha256("sha256//" + base64 + "=", pin));
+    CHECK_EQ(pin, base64);
+
+    CHECK_FALSE(HostKeySha256("", pin));
+    CHECK_FALSE(HostKeySha256("not a fingerprint", pin));
+    CHECK_FALSE(HostKeySha256("SHA256:", pin));
+    /* An MD5 pin is a real pin, just not one this conversion produces. */
+    CHECK_FALSE(HostKeySha256("MD5:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", pin));
+    CHECK_FALSE(HostKeySha256("aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99", pin));
+}
+
+/*
+ * The WebDAV lock and dead-property pieces that can be checked without a
+ * server: the token a LOCK reply carries, the rules a property name
+ * follows, and the XML a PROPFIND or PROPPATCH sends. A token that is
+ * read wrongly locks a file nobody can release, and a property name that
+ * builds invalid XML looks like a server failure.
+ */
+void TestDavLockAndPropertyXml()
+{
+    std::string token;
+
+    /* The lockdiscovery body of a LOCK reply, with and without the
+     * namespace prefixes a server is free to choose. */
+    CHECK_TRUE(DavLockTokenFromXml(
+        "<?xml version=\"1.0\"?><D:prop xmlns:D=\"DAV:\"><D:lockdiscovery>"
+        "<D:activelock><D:locktoken><D:href>opaquelocktoken:1-2-3</D:href>"
+        "</D:locktoken></D:activelock></D:lockdiscovery></D:prop>", token));
+    CHECK_EQ(token, std::string("opaquelocktoken:1-2-3"));
+    CHECK_TRUE(DavLockTokenFromXml(
+        "<prop><lockdiscovery><activelock><locktoken><href>urn:uuid:abc"
+        "</href></locktoken></activelock></lockdiscovery></prop>", token));
+    CHECK_EQ(token, std::string("urn:uuid:abc"));
+    /* A bare token body, which some servers send. */
+    CHECK_TRUE(DavLockTokenFromXml("  urn:uuid:bare  ", token));
+    CHECK_EQ(token, std::string("urn:uuid:bare"));
+    /* No token means the caller has to report a failure: a lock nobody
+     * can release is worse than a lock that was not taken. */
+    CHECK_FALSE(DavLockTokenFromXml("<prop><lockdiscovery/></prop>", token));
+    CHECK_FALSE(DavLockTokenFromXml("", token));
+
+    std::string error;
+    CHECK_TRUE(DavValidPropertyName("author", error));
+    CHECK_TRUE(DavValidPropertyName("file_name-2.x", error));
+    CHECK_FALSE(DavValidPropertyName("", error));
+    CHECK_FALSE(DavValidPropertyName("2author", error));
+    CHECK_FALSE(DavValidPropertyName("a b", error));
+    CHECK_FALSE(DavValidPropertyName("a<b", error));
+    CHECK_FALSE(DavValidPropertyName("a/b", error));
+
+    /* The request bodies carry the property in this client's namespace,
+     * so a protected DAV: property is never the target. */
+    CHECK_TRUE(DavPropertyPropfindBody("author").find(
+        "xmlns:lscp=\"urn:linuxscp:properties\"") != std::string::npos);
+    CHECK_TRUE(DavPropertyPropfindBody("author").find(
+        "<lscp:author/>") != std::string::npos);
+    CHECK_TRUE(DavPropertyUpdateBody("author", "Ada").find(
+        "<lscp:author>Ada</lscp:author>") != std::string::npos);
+    /* A value is data: markup has to be escaped, or the request would not
+     * parse and the property would look refused. */
+    CHECK_TRUE(DavPropertyUpdateBody("note", "a & b <c> \"d\"").find(
+        "a &amp; b &lt;c&gt; &quot;d&quot;") != std::string::npos);
+
+    /* A PROPFIND answer: the value is the element's text, and an absent
+     * element is 'found' false rather than an empty string, because the
+     * two mean different things to the user. */
+    std::string value;
+    bool found = true;
+    CHECK_TRUE(DavPropertyValueFromXml(
+        "<d:multistatus xmlns:d=\"DAV:\" xmlns:lscp=\"urn:linuxscp:properties\">"
+        "<d:response><d:propstat><d:prop><lscp:author>Ada</lscp:author>"
+        "</d:prop></d:propstat></d:response></d:multistatus>", "author", value,
+        found));
+    CHECK_TRUE(found);
+    CHECK_EQ(value, std::string("Ada"));
+    found = true;
+    /* The element is absent: the function reports false and the caller
+     * reads 'found' - a property that is not set is an answer about the
+     * file, not a failure of the request. */
+    CHECK_FALSE(DavPropertyValueFromXml("<d:multistatus xmlns:d=\"DAV:\"/>",
+        "author", value, found));
+    CHECK_FALSE(found);
+    CHECK_EQ(value, std::string(""));
+    /* A property set to the empty string is set: the element is there. */
+    found = false;
+    CHECK_TRUE(DavPropertyValueFromXml(
+        "<lscp:author xmlns:lscp=\"urn:linuxscp:properties\"></lscp:author>",
+        "author", value, found));
+    CHECK_TRUE(found);
+    CHECK_EQ(value, std::string(""));
+}
+
 int main()
 {
     TestSplitCommandLine();
@@ -2623,6 +2904,9 @@ int main()
     TestSyncPlanOrder();
     TestSyncStateFile();
     TestProxySettings();
+    TestFtpAndTlsSettings();
+    TestHostKeyPinConversion();
+    TestDavLockAndPropertyXml();
     TestSessionStore();
     TestS3SigV4();
     TestEditorHelpers();

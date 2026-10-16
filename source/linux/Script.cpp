@@ -299,11 +299,11 @@ const char * const kCommandNames[] = {
     "!", "ascii", "attr", "binary", "bye", "call", "cd", "checksum", "chmod",
     "close", "copyid", "cp", "del", "delsession", "dir", "echo", "edit",
     "end", "exit", "get", "help", "keepuptodate", "lcd", "lls", "ln",
-    "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv", "open",
-    "option", "presets", "pwd", "put", "quit", "recv", "rename",
-    "rm", "rmdir", "rmsession", "rmspreset", "send", "session", "sessions",
-    "stat", "savepreset", "savesession", "show", "symlink", "sync",
-    "synchronize", "terminal", "?"
+    "lock", "lpwd", "ls", "man", "md", "mkdir", "mget", "mput", "mv",
+    "open", "option", "presets", "property", "pwd", "put", "quit", "recv",
+    "rename", "rm", "rmdir", "rmsession", "rmspreset", "send", "session",
+    "sessions", "stat", "savepreset", "savesession", "show", "symlink",
+    "sync", "synchronize", "terminal", "unlock", "?"
 };
 
 std::vector<std::string> CommandNames()
@@ -627,18 +627,20 @@ bool CollectRawSettings(const std::vector<std::string> & args, size_t & index,
 }
 
 /*
- * Applies collected settings to a proxy configuration. The first setting
- * this build does not apply stops it and is named, because a session that
- * silently ignores a proxy setting connects somewhere else than the user
- * asked for.
+ * Applies collected settings to a session: the proxy names it has always
+ * taken, plus the FTP and TLS policy of this build (FtpPasvMode,
+ * FtpUseMlsd, Ftps, MinTlsVersion, TlsCertificateFile, ...). The first
+ * setting this build does not apply stops it and is named, because a
+ * session that silently ignores a setting connects somewhere else than
+ * the user asked for.
  */
 bool ApplyRawSettings(const std::vector<RawSetting> & settings,
-    ProxySettings & proxy, std::string & error)
+    SessionOptions & options, std::string & error)
 {
     for (size_t i = 0; i < settings.size(); i++)
     {
-        if (!ApplyProxyRawSetting(settings[i].first, settings[i].second,
-                proxy, error))
+        if (!ApplySessionRawSetting(settings[i].first, settings[i].second,
+                options, error))
         {
             return false;
         }
@@ -671,7 +673,7 @@ bool ApplyOpenSwitches(const OpenSwitches & switches, SessionOptions & options,
     {
         options.privateKeyFile = switches.privateKeyFile;
     }
-    return ApplyRawSettings(switches.rawSettings, options.proxy, error);
+    return ApplyRawSettings(switches.rawSettings, options, error);
 }
 
 } // namespace
@@ -5579,12 +5581,20 @@ bool Script::SaveStoredSession(const std::vector<std::string> & args)
     if (!rawSettings.empty())
     {
         std::string rawError;
-        if (!ApplyRawSettings(rawSettings, session.proxy, rawError))
+        /* The settings land on a session built from what is being stored,
+         * so the ones this build applies join the site and the rest is
+         * refused by name - never stored and dropped at open time. */
+        SessionOptions scratch = SessionStore::ToSessionOptions(session,
+            SessionOptions());
+        if (!ApplyRawSettings(rawSettings, scratch, rawError))
         {
             console.Error(Texts::WrongArguments("savesession", rawError));
             mErrors++;
             return false;
         }
+        session.proxy = scratch.proxy;
+        session.ftp = scratch.ftp;
+        session.tls = scratch.tls;
         /* What the switch states replaces the stored value, so a
          * ciphertext nobody could read does not survive it. */
         session.proxyPasswordRaw.clear();
@@ -6362,6 +6372,204 @@ bool Script::ChecksumRemote(const std::vector<std::string> & args)
         Console::Instance().Status(note);
     }
     Console::Instance().WriteLine(hex + " " + path);
+    return true;
+}
+
+/*
+ * WebDAV locks and dead properties: 'lock' takes an exclusive write lock on
+ * one path, 'unlock' releases it, and 'property' reads or writes one dead
+ * property. Upstream's WebDAV backend sends no LOCK, UNLOCK or PROPPATCH at
+ * all, so these are LinSCP extensions; a server that does not implement one
+ * answers 405 and the command prints that instead of reporting a write
+ * that was never protected. The token of a lock this session holds travels
+ * with every later upload, delete and move of that path (the If header),
+ * which is what makes the server enforce the lock.
+ */
+bool Script::LockRemote(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    std::vector<std::string> paths;
+    int timeout = 0;
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        const std::string lower = ToLower(args[i]);
+        if (StartsWith(lower, "-timeout="))
+        {
+            const std::string value = args[i].substr(strlen("-timeout="));
+            bool digits = !value.empty();
+            for (size_t j = 0; digits && j < value.size(); j++)
+            {
+                digits = value[j] >= '0' && value[j] <= '9';
+            }
+            if (!digits || atoi(value.c_str()) <= 0)
+            {
+                Console::Instance().Error(Texts::WrongArguments("lock",
+                    "The value of '-timeout' is the number of seconds the "
+                    "server should keep the lock for."));
+                mErrors++;
+                return false;
+            }
+            timeout = atoi(value.c_str());
+        }
+        else if (args[i].size() > 1 && args[i][0] == '-')
+        {
+            Console::Instance().Error(Texts::WrongArguments("lock",
+                "Unknown switch '" + args[i] + "'."));
+            mErrors++;
+            return false;
+        }
+        else
+        {
+            paths.push_back(args[i]);
+        }
+    }
+    if (paths.size() != 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("lock",
+            "Syntax: lock <file> [-timeout=SECONDS]"));
+        mErrors++;
+        return false;
+    }
+    const std::string path = ResolveRemotePath(mRemoteDirectory, paths[0]);
+    std::string token;
+    std::string error;
+    if (!ProtocolClient::DavLock(mSession.Options(), path, timeout, token, error))
+    {
+        Console::Instance().Error(Texts::RemoteError("lock", path, error));
+        mErrors++;
+        return false;
+    }
+    mSession.SetDavLock(path, token);
+    Console::Instance().WriteLine("Locked " + path + " with token " + token + ".");
+    return true;
+}
+
+bool Script::UnlockRemote(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    if (args.size() != 1)
+    {
+        Console::Instance().Error(Texts::WrongArguments("unlock",
+            "Syntax: unlock <file> (releases the lock 'lock <file>' took)"));
+        mErrors++;
+        return false;
+    }
+    const std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
+    const std::string token = mSession.DavLockFor(path);
+    if (token.empty())
+    {
+        Console::Instance().Error(Texts::WrongArguments("unlock",
+            "This session holds no lock on '" + path + "'; take one with "
+            "'lock " + args[0] + "' first."));
+        mErrors++;
+        return false;
+    }
+    std::string error;
+    if (!ProtocolClient::DavUnlock(mSession.Options(), path, token, error))
+    {
+        Console::Instance().Error(Texts::RemoteError("unlock", path, error));
+        mErrors++;
+        return false;
+    }
+    mSession.ClearDavLock(path);
+    Console::Instance().WriteLine("Unlocked " + path + ".");
+    return true;
+}
+
+bool Script::DavPropertyCommand(const std::vector<std::string> & args)
+{
+    if (!RequireConnection())
+    {
+        return false;
+    }
+    std::vector<std::string> paths;
+    std::string getName;
+    std::string setName;
+    std::string setValue;
+    bool getGiven = false;
+    bool setGiven = false;
+    for (size_t i = 0; i < args.size(); i++)
+    {
+        const std::string lower = ToLower(args[i]);
+        if (StartsWith(lower, "-get="))
+        {
+            getName = args[i].substr(strlen("-get="));
+            getGiven = true;
+        }
+        else if (StartsWith(lower, "-set="))
+        {
+            const std::string pair = args[i].substr(strlen("-set="));
+            const size_t equals = pair.find('=');
+            if (equals == std::string::npos)
+            {
+                Console::Instance().Error(Texts::WrongArguments("property",
+                    "'-set' takes NAME=VALUE."));
+                mErrors++;
+                return false;
+            }
+            setName = pair.substr(0, equals);
+            setValue = pair.substr(equals + 1);
+            setGiven = true;
+        }
+        else if (args[i].size() > 1 && args[i][0] == '-')
+        {
+            Console::Instance().Error(Texts::WrongArguments("property",
+                "Unknown switch '" + args[i] + "'."));
+            mErrors++;
+            return false;
+        }
+        else
+        {
+            paths.push_back(args[i]);
+        }
+    }
+    if (paths.size() != 1 || getGiven == setGiven || (getGiven && getName.empty()))
+    {
+        Console::Instance().Error(Texts::WrongArguments("property",
+            "Syntax: property <file> -get=NAME | property <file> "
+            "-set=NAME=VALUE"));
+        mErrors++;
+        return false;
+    }
+    const std::string path = ResolveRemotePath(mRemoteDirectory, paths[0]);
+    std::string error;
+    if (setGiven)
+    {
+        if (!ProtocolClient::DavSetProperty(mSession.Options(), path, setName,
+            setValue, error))
+        {
+            Console::Instance().Error(Texts::RemoteError("set the property of",
+                path, error));
+            mErrors++;
+            return false;
+        }
+        Console::Instance().WriteLine("Set " + setName + " on " + path + ".");
+        return true;
+    }
+    std::string value;
+    bool found = false;
+    if (!ProtocolClient::DavGetProperty(mSession.Options(), path, getName, value,
+        found, error))
+    {
+        Console::Instance().Error(Texts::RemoteError("read the property of",
+            path, error));
+        mErrors++;
+        return false;
+    }
+    if (!found)
+    {
+        /* Not an error: the server answered that the property is not set,
+         * which is an answer about the file and not a failure. */
+        Console::Instance().WriteLine(getName + " is not set on " + path + ".");
+        return true;
+    }
+    Console::Instance().WriteLine(getName + "=" + value);
     return true;
 }
 
@@ -7487,12 +7695,17 @@ const struct ScriptCommandHelpEntry
             "        [-privatekey=FILE] [-rawsettings NAME=VALUE...]\n"
             "  Connects to a site given as a URL or a stored session name;\n"
             "  the switches apply to a stored site as well as to a URL.\n"
-            "  -rawsettings sets session settings by upstream's names: the\n"
-            "  proxy ones this build applies are ProxyMethod=None|SOCKS4|\n"
-            "  SOCKS5|HTTP|Telnet|Cmd, ProxyHost, ProxyPort, ProxyUsername,\n"
+            "  -rawsettings sets session settings by upstream's names. This\n"
+            "  build applies the proxy ones (ProxyMethod=None|SOCKS4|SOCKS5|\n"
+            "  HTTP|Telnet|Cmd, ProxyHost, ProxyPort, ProxyUsername,\n"
             "  ProxyPassword, ProxyTelnetCommand, ProxyLocalCommand,\n"
-            "  ProxyDNS=0|1|2, ProxyLocalhost=0|1 and ProxyExcludeList;\n"
-            "  any other setting is refused rather than dropped." },
+            "  ProxyDNS=0|1|2, ProxyLocalhost=0|1, ProxyExcludeList), the FTP\n"
+            "  engine's policy (FtpPasvMode=0|1, FtpForcePasvIp=0|1|2,\n"
+            "  FtpUseMlsd=0|1|2, FtpAccount) and the TLS policy (Ftps=0|1|2|3,\n"
+            "  MinTlsVersion, MaxTlsVersion, TlsCertificateFile,\n"
+            "  TlsCertificateKeyFile, CaCertificateFile, CaCertificateDir,\n"
+            "  PinnedPublicKey); any other setting is refused rather than\n"
+            "  dropped." },
         { "option", "option [ <name> [ <value> ] ]\n"
             "  Shows or changes a setting: echo, batch, confirm, resume,\n"
             "  transfer, include, exclude, failonnomatch, synchdelete,\n"
@@ -7536,8 +7749,9 @@ const struct ScriptCommandHelpEntry
             "  describe, under <name>; -preset=NAME also stores the\n"
             "  transfer preset the site should load (-preset= clears it),\n"
             "  and -rawsettings NAME=VALUE... stores session settings with\n"
-            "  it (the proxy ones 'open -rawsettings' applies; a proxy\n"
-            "  password is encrypted like a session password)." },
+            "  it (the ones 'open -rawsettings' applies: proxy, FTP engine\n"
+            "  and TLS policy; a proxy password is encrypted like a session\n"
+            "  password)." },
         { "show", "show\n"
             "  Not available in this build: the connection runs the SFTP\n"
             "  subsystem, so remote shell commands cannot be shown." },
@@ -7547,6 +7761,15 @@ const struct ScriptCommandHelpEntry
         { "sessions", "sessions [ NAME | list | export <file> | import <file> ]\n"
             "  Lists the stored sites, opens one by name, or exports and\n"
             "  imports the whole list." },
+        { "lock", "lock <file> [-timeout=SECONDS]\n"
+            "  Takes an exclusive WebDAV write lock on one file and\n"
+            "  remembers its token: uploads, deletes and moves of that\n"
+            "  path then carry it, so the server refuses a write the lock\n"
+            "  should prevent instead of accepting it." },
+        { "property", "property <file> -get=NAME | property <file> -set=NAME=VALUE\n"
+            "  Reads or writes one WebDAV dead property of a file, in this\n"
+            "  client's own namespace. '-get' prints 'NAME is not set' when\n"
+            "  the server says the property does not exist." },
         { "stat", "stat <file>\n"
             "  Prints the listing line of a remote path, as ls -l shows\n"
             "  it. The key/value breakdown of attr stays available there." },
@@ -7566,6 +7789,8 @@ const struct ScriptCommandHelpEntry
             "  Same as 'ln'." },
         { "terminal", "terminal\n"
             "  Opens an interactive shell terminal on the server." },
+        { "unlock", "unlock <file>\n"
+            "  Releases the lock 'lock <file>' took in this session." },
 };
 }
 
@@ -7883,6 +8108,21 @@ bool Script::ExecuteCommand(const std::string & line)
     if (command == "checksum")
     {
         ChecksumRemote(args);
+        return true;
+    }
+    if (command == "lock")
+    {
+        LockRemote(args);
+        return true;
+    }
+    if (command == "unlock")
+    {
+        UnlockRemote(args);
+        return true;
+    }
+    if (command == "property")
+    {
+        DavPropertyCommand(args);
         return true;
     }
     if (command == "call")

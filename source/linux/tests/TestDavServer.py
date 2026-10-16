@@ -62,6 +62,12 @@ class Store:
         self.items = {"/": {"kind": "dir", "mtime": _now()}}
         self.copy_count = 0
         self.reject_next_copy = False
+        # path -> token, and path -> {name: value} for the dead properties.
+        # Both are what a LOCK/UNLOCK/PROPPATCH implementation has to keep,
+        # and the If header is checked against the first of them.
+        self.locks = {}
+        self.properties = {}
+        self.lock_count = 0
 
     @staticmethod
     def normalize(path):
@@ -191,6 +197,55 @@ class Store:
         return "replaced" if replaced else "created"
 
 
+    def lock(self, path, timeout, owner):
+        """Takes an exclusive write lock; an existing one is a conflict.
+
+        The token is a real opaque token in the server's spelling, so the
+        client stores and sends back exactly what a compliant server
+        hands out.
+        """
+        path = self.normalize(path)
+        if path not in self.items:
+            return "missing", None
+        if path in self.locks:
+            return "locked", None
+        self.lock_count += 1
+        token = "opaquelocktoken:%08x-0000-0000-0000-lscpdavlock" % self.lock_count
+        self.locks[path] = {"token": token, "timeout": timeout, "owner": owner}
+        return "created", token
+
+    def unlock(self, path, token):
+        path = self.normalize(path)
+        entry = self.locks.get(path)
+        if entry is None:
+            return "missing"
+        if entry["token"] != token:
+            return "conflict"
+        del self.locks[path]
+        return "unlocked"
+
+    def lock_owner(self, path):
+        """The lock guarding a path: its own lock, or a parent's."""
+        path = self.normalize(path)
+        candidate = path
+        while True:
+            if candidate in self.locks:
+                return self.locks[candidate]
+            if candidate == "/":
+                return None
+            candidate = self.parent_of(candidate)
+
+    def set_property(self, path, name, value):
+        path = self.normalize(path)
+        if path not in self.items:
+            return "missing"
+        self.properties.setdefault(path, {})[name] = value
+        return "set"
+
+    def get_properties(self, path):
+        return self.properties.get(self.normalize(path), {})
+
+
 def _now():
     return calendar.timegm(
         datetime.datetime.now(datetime.timezone.utc).timetuple())
@@ -232,13 +287,32 @@ class DavHandler(BaseHTTPRequestHandler):
     def local_path(self):
         return urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
 
+    def if_tokens(self):
+        """The tokens of an 'If: (<token>)' (or tagged-list) header."""
+        header = self.headers.get("If", "")
+        return [part.strip().strip("<>") for part in
+                re.findall(r"\(([^)]*)\)", header) if part.strip()]
+
+    def locked_out(self, path):
+        """True when a lock guards this path and the request proves no
+        ownership: that is the 423 a real server answers, and it is what
+        makes a lock more than a stored token."""
+        entry = SERVER_STORE.lock_owner(path)
+        if entry is None:
+            return False
+        return entry["token"] not in self.if_tokens()
+
+    def send_locked(self):
+        self.send_error_text(423, "Locked: the path is locked by "
+                                 "another writer.")
+
     # -- verbs -------------------------------------------------------------
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("DAV", "1")
         self.send_header("Allow",
                          "OPTIONS, GET, HEAD, PUT, DELETE, MKCOL, "
-                         "PROPFIND, MOVE, COPY")
+                         "PROPFIND, MOVE, COPY, LOCK, UNLOCK, PROPPATCH")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -281,21 +355,114 @@ class DavHandler(BaseHTTPRequestHandler):
                 type_prop = "<d:resourcetype/>"
                 length_prop = ("<d:getcontentlength>%d</d:getcontentlength>"
                                % len(data))
+            # The dead properties this store holds, in the namespace the
+            # client wrote them in, next to the live ones.
+            dead = "".join(
+                "<lscp:%s xmlns:lscp=\"urn:linuxscp:properties\">%s</lscp:%s>"
+                % (name, xml_escape(value), name)
+                for name, value in sorted(
+                    SERVER_STORE.get_properties(target).items()))
             responses.append(
                 "<d:response><d:href>%s</d:href>"
                 "<d:propstat><d:prop>%s%s"
-                "<d:getlastmodified>%s</d:getlastmodified>"
+                "<d:getlastmodified>%s</d:getlastmodified>%s"
                 "</d:prop>"
                 "<d:status>HTTP/1.1 200 OK</d:status>"
                 "</d:propstat></d:response>"
                 % (xml_escape(href), type_prop, length_prop,
-                   http_date(entry["mtime"])))
+                   http_date(entry["mtime"]), dead))
         body = PROPFIND_BODY % "".join(responses)
         self.send_body(207, body, "application/xml; charset=utf-8")
 
     @staticmethod
     def normalize(path):
         return Store.normalize(path)
+
+    def do_LOCK(self):
+        length = int(self.headers.get("Content-Length") or "0")
+        body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        if not self.authorized():
+            return
+        path = self.local_path()
+        timeout = 0
+        header = self.headers.get("Timeout", "")
+        if header.lower().startswith("second-"):
+            timeout = int(header.split("-", 1)[1] or "0")
+        owner = re.search(r"<owner>.*?<href>(.*?)</href>", body, re.S)
+        status, token = SERVER_STORE.lock(
+            path, timeout, owner.group(1) if owner else "linuxscp")
+        if status == "missing":
+            self.send_error_text(404, "Not Found.")
+            return
+        if status == "locked":
+            self.send_error_text(423, "Already locked.")
+            return
+        href = urllib.parse.quote(SERVER_STORE.normalize(path), safe="/")
+        body_out = (
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<d:prop xmlns:d=\"DAV:\"><d:lockdiscovery><d:activelock>"
+            "<d:locktype><d:write/></d:locktype>"
+            "<d:lockscope><d:exclusive/></d:lockscope>"
+            "<d:depth>0</d:depth><d:timeout>Second-%d</d:timeout>"
+            "<d:locktoken><d:href>%s</d:href></d:locktoken>"
+            "</d:activelock></d:lockdiscovery></d:prop>" % (timeout, token))
+        self.send_body(200, body_out, "application/xml; charset=utf-8",
+                       extra=[("Lock-Token", "<%s>" % token)])
+
+    def do_UNLOCK(self):
+        self.drain_body()
+        if not self.authorized():
+            return
+        header = self.headers.get("Lock-Token", "").strip().strip("<>")
+        result = SERVER_STORE.unlock(self.local_path(), header)
+        if result == "unlocked":
+            self.send_response(204)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+        elif result == "conflict":
+            self.send_error_text(409, "That is not this lock's token.")
+        else:
+            self.send_error_text(404, "Not locked.")
+
+    def do_PROPPATCH(self):
+        length = int(self.headers.get("Content-Length") or "0")
+        body = self.rfile.read(length).decode("utf-8", "replace") if length else ""
+        if not self.authorized():
+            return
+        path = self.local_path()
+        if self.locked_out(path):
+            self.send_locked()
+            return
+        # <d:set><d:prop><prefix:name>value</prefix:name></d:prop></d:set>
+        stored = []
+        # A dead property is an element in the client's own namespace: the
+        # DAV: elements around it (set, prop, propertyupdate) are the
+        # request's own vocabulary, not properties.
+        for match in re.finditer(
+                r"<(?!d:|D:|DAV:)([A-Za-z0-9_.-]+):([A-Za-z_][A-Za-z0-9_.-]*)"
+                r"[^>]*>(.*?)</\1:\2>", body, re.S):
+            name, value = match.group(2), match.group(3)
+            status = SERVER_STORE.set_property(path, name, value)
+            if status == "missing":
+                self.send_error_text(404, "Not Found.")
+                return
+            stored.append(name)
+        if not stored:
+            self.send_error_text(400, "PROPPATCH needs one property to set.")
+            return
+        href = urllib.parse.quote(SERVER_STORE.normalize(path), safe="/")
+        propstats = "".join(
+            "<d:propstat><d:prop><lscp:%s/></d:prop>"
+            "<d:status>HTTP/1.1 200 OK</d:status></d:propstat>" % name
+            for name in stored)
+        self.send_body(
+            207,
+            "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+            "<d:multistatus xmlns:d=\"DAV:\" "
+            "xmlns:lscp=\"urn:linuxscp:properties\">"
+            "<d:response><d:href>%s</d:href>%s</d:response></d:multistatus>"
+            % (xml_escape(href), propstats),
+            "application/xml; charset=utf-8")
 
     def do_GET(self):
         parsed = urllib.parse.urlsplit(self.path)
@@ -304,8 +471,12 @@ class DavHandler(BaseHTTPRequestHandler):
             self.send_body(204, b"")
             return
         if parsed.path == "/__test__/state":
-            body = json.dumps({"copy_count": SERVER_STORE.copy_count}).encode(
-                "utf-8")
+            body = json.dumps({
+                "copy_count": SERVER_STORE.copy_count,
+                "locks": {path: entry["token"] for path, entry
+                          in SERVER_STORE.locks.items()},
+                "properties": SERVER_STORE.properties,
+            }).encode("utf-8")
             self.send_body(200, body, "application/json")
             return
         if not self.authorized():
@@ -354,6 +525,9 @@ class DavHandler(BaseHTTPRequestHandler):
         if item is None or item["kind"] != "dir":
             self.send_error_text(409, "The parent collection does not exist.")
             return
+        if self.locked_out(path):
+            self.send_locked()
+            return
         existed = SERVER_STORE.get(path) is not None
         SERVER_STORE.add_file(path, data)
         self.send_response(204 if existed else 201)
@@ -363,7 +537,11 @@ class DavHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         if not self.authorized():
             return
-        result = SERVER_STORE.delete(self.local_path())
+        path = self.local_path()
+        if self.locked_out(path):
+            self.send_locked()
+            return
+        result = SERVER_STORE.delete(path)
         if result == "deleted":
             self.send_response(204)
             self.send_header("Content-Length", "0")
@@ -400,6 +578,9 @@ class DavHandler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlsplit(destination)
         dest = urllib.parse.unquote(parsed.path or destination)
         overwrite = self.headers.get("Overwrite", "T").upper() != "F"
+        if self.locked_out(self.local_path()):
+            self.send_locked()
+            return
         result = SERVER_STORE.move(self.local_path(), dest, overwrite)
         if result in ("created", "replaced"):
             self.send_response(201 if result == "created" else 204)

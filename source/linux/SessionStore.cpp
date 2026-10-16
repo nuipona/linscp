@@ -128,6 +128,40 @@ std::string Lower(const std::string & text)
     return result;
 }
 
+/* The stored key of a site setting and the raw setting behind it. */
+struct SiteSettingKey
+{
+    const char * key;
+    const char * setting;
+};
+
+const SiteSettingKey kSiteSettingKeys[] = {
+    { "ftp_pasv_mode", "FtpPasvMode" },
+    { "ftp_force_pasv_ip", "FtpForcePasvIp" },
+    { "ftp_use_mlsd", "FtpUseMlsd" },
+    { "ftp_account", "FtpAccount" },
+    { "ftps", "Ftps" },
+    { "min_tls_version", "MinTlsVersion" },
+    { "max_tls_version", "MaxTlsVersion" },
+    { "tls_certificate_file", "TlsCertificateFile" },
+    { "tls_certificate_key_file", "TlsCertificateKeyFile" },
+    { "ca_certificate_file", "CaCertificateFile" },
+    { "ca_certificate_dir", "CaCertificateDir" },
+    { "pinned_public_key", "PinnedPublicKey" }
+};
+
+const char * SettingNameForSiteKey(const std::string & key)
+{
+    for (size_t i = 0; i < sizeof(kSiteSettingKeys) / sizeof(kSiteSettingKeys[0]); i++)
+    {
+        if (key == kSiteSettingKeys[i].key)
+        {
+            return kSiteSettingKeys[i].setting;
+        }
+    }
+    return NULL;
+}
+
 std::string ValueOf(const StoredSession & session, const std::string & key,
     bool * isNumber)
 {
@@ -177,6 +211,43 @@ std::string ValueOf(const StoredSession & session, const std::string & key,
             return std::string(session.proxy.evenLocalhost ? "1" : "0");
         }
     }
+    /* The FTP/TLS settings of the site: written only when they differ
+     * from what a connection would use without them. */
+    if (key == "ftp_pasv_mode")
+    {
+        return session.ftp.passiveMode ? std::string() : std::string("0");
+    }
+    if (key == "ftp_force_pasv_ip")
+    {
+        return session.ftp.forcePasvIp != 1 ?
+            std::to_string(session.ftp.forcePasvIp) : std::string();
+    }
+    if (key == "ftp_use_mlsd")
+    {
+        return session.ftp.useMlsd != 1 ?
+            std::to_string(session.ftp.useMlsd) : std::string();
+    }
+    if (key == "ftp_account") { return session.ftp.account; }
+    if (key == "ftps")
+    {
+        return session.tls.ftpsMode != 0 ?
+            std::to_string(session.tls.ftpsMode) : std::string();
+    }
+    if (key == "min_tls_version")
+    {
+        return session.tls.minVersion != 0 ?
+            std::to_string(session.tls.minVersion) : std::string();
+    }
+    if (key == "max_tls_version")
+    {
+        return session.tls.maxVersion != 0 ?
+            std::to_string(session.tls.maxVersion) : std::string();
+    }
+    if (key == "tls_certificate_file") { return session.tls.clientCertificate; }
+    if (key == "tls_certificate_key_file") { return session.tls.clientKey; }
+    if (key == "ca_certificate_file") { return session.tls.caFile; }
+    if (key == "ca_certificate_dir") { return session.tls.caDirectory; }
+    if (key == "pinned_public_key") { return session.tls.pinnedPublicKey; }
     if (key == "last_used")
     {
         *isNumber = true;
@@ -825,6 +896,27 @@ bool SessionStore::Load(std::string & error)
         {
             current.preset = value;
         }
+        else if (SettingNameForSiteKey(key) != NULL)
+        {
+            /* One parser for both doors: a stored setting and a
+             * '-rawsettings' one mean the same thing, and a value the
+             * parser refuses is reported the same way. */
+            SessionOptions scratch;
+            scratch.ftp = current.ftp;
+            scratch.tls = current.tls;
+            std::string settingError;
+            if (ApplySessionRawSetting(SettingNameForSiteKey(key), value,
+                scratch, settingError))
+            {
+                current.ftp = scratch.ftp;
+                current.tls = scratch.tls;
+            }
+            else if (current.settingError.empty())
+            {
+                current.settingError = "the stored setting '" + key +
+                    "' cannot be used: " + settingError;
+            }
+        }
         else if (key == "proxy_method")
         {
             ProxyMethod method = ProxyMethod::None;
@@ -1117,7 +1209,11 @@ bool SessionStore::Save(std::string & error) const
             "remote_directory", "local_directory", "password", "last_used",
             "preset", "proxy_method", "proxy_host", "proxy_port",
             "proxy_username", "proxy_password", "proxy_command",
-            "proxy_exclude", "proxy_dns", "proxy_localhost"
+            "proxy_exclude", "proxy_dns", "proxy_localhost",
+            "ftp_pasv_mode", "ftp_force_pasv_ip", "ftp_use_mlsd",
+            "ftp_account", "ftps", "min_tls_version", "max_tls_version",
+            "tls_certificate_file", "tls_certificate_key_file",
+            "ca_certificate_file", "ca_certificate_dir", "pinned_public_key"
         };
         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
         {
@@ -1248,6 +1344,8 @@ SessionOptions SessionStore::ToSessionOptions(const StoredSession & session,
     {
         options.proxy = session.proxy;
     }
+    options.ftp = session.ftp;
+    options.tls = session.tls;
     return options;
 }
 
@@ -1266,6 +1364,8 @@ StoredSession SessionStore::FromSessionOptions(const std::string & name,
     session.remoteDirectory = remoteDirectory;
     session.localDirectory = localDirectory;
     session.proxy = options.proxy;
+    session.ftp = options.ftp;
+    session.tls = options.tls;
     session.lastUsed = static_cast<unsigned long long>(time(NULL));
     return session;
 }

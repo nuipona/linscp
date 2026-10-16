@@ -1,0 +1,67 @@
+/*
+ * ListingParse: the directory-entry type and the listing lines the
+ * protocols hand back.
+ *
+ * There are three producers and they must agree, because the console
+ * prints one listing format and the synchronizer compares one entry type:
+ *
+ *   - the curl backend, whose FTPS/SCP/HTTP listings are text,
+ *   - the native FTP engine (FtpClient.cpp), which gets the same text
+ *     from LIST and structured facts from MLSD/MLST,
+ *   - the WebDAV backend, which builds entries from PROPFIND properties.
+ *
+ * A names-only listing leaves 'typeKnown' false: neither the type nor the
+ * size of the entry is known then, and a caller that needs to know has to
+ * ask the server something else.
+ */
+
+#ifndef LINUXSCP_LISTINGPARSE_H
+#define LINUXSCP_LISTINGPARSE_H
+
+#include <string>
+#include <vector>
+
+namespace linuxscp {
+
+struct ListingEntry
+{
+    std::string name;
+    std::string longname;
+    /* False for a names-only listing, where neither the type nor the
+     * size of the entry is known. */
+    bool typeKnown;
+    bool isDir;
+    unsigned long permissions;
+    unsigned long long size;
+    /* Set when the listing carried a usable date column. */
+    bool timeKnown;
+    unsigned long mtime;
+
+    ListingEntry();
+};
+
+/* Splits an 'ls -l'-style line into exactly 9 fields (the 9th keeps any
+ * spaces of the file name). Returns false for bare-name listings. */
+bool SplitLongListing(const std::string & line, std::vector<std::string> & fields);
+
+/* True when the first field of a listing line is a mode column. */
+bool LooksLikePermissions(const std::string & text);
+
+/* 'drwxr-xr-x' -> 0040755 (the type bits are included, so the result can
+ * be passed to the SFTP attribute conversion unchanged). */
+unsigned long PermissionsFromString(const std::string & text);
+
+/*
+ * One line of an 'ls -l'-style listing (what LIST returns) as an entry.
+ * Returns false when the line is not a long listing at all, in which case
+ * the caller may still treat the line as a bare file name.
+ */
+bool ParseUnixListingLine(const std::string & line, ListingEntry & entry);
+
+/* Formats mode bits the way 'ls -l' does ('-rw-r--r--'), which is what
+ * the console prints for a long listing. */
+std::string PermissionsString(unsigned long permissions);
+
+} // namespace linuxscp
+
+#endif /* LINUXSCP_LISTINGPARSE_H */

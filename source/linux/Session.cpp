@@ -719,6 +719,501 @@ bool ApplyProxyRawSetting(const std::string & name, const std::string & value,
     return false;
 }
 
+std::vector<std::string> SessionRawSettingNames()
+{
+    std::vector<std::string> names = ProxyRawSettingNames();
+    /* The FTP engine's policy, under upstream's names. */
+    names.push_back("FtpPasvMode");
+    names.push_back("FtpForcePasvIp");
+    names.push_back("FtpUseMlsd");
+    names.push_back("FtpAccount");
+    /* TLS policy. 'Ftps', 'MinTlsVersion' and 'TlsCertificateFile' are
+     * upstream's names; the remaining three are what a client without a
+     * linked TLS library can verify with, and curl takes files, so they
+     * are this build's own spelling. */
+    names.push_back("Ftps");
+    names.push_back("MinTlsVersion");
+    names.push_back("MaxTlsVersion");
+    names.push_back("TlsCertificateFile");
+    names.push_back("TlsCertificateKeyFile");
+    names.push_back("CaCertificateFile");
+    names.push_back("CaCertificateDir");
+    names.push_back("PinnedPublicKey");
+    return names;
+}
+
+bool IsSessionRawSettingName(const std::string & name)
+{
+    const std::string lower = LowerAscii(TrimAscii(name));
+    const std::vector<std::string> names = SessionRawSettingNames();
+    for (size_t i = 0; i < names.size(); i++)
+    {
+        if (lower == LowerAscii(names[i]))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Upstream's TTlsVersion: 10..13, with 'default' keeping the library's
+ * own floor. Names in the forms people write are accepted. */
+bool ParseTlsVersion(const std::string & text, int & version)
+{
+    std::string lower = LowerAscii(TrimAscii(text));
+    if (lower.empty() || lower == "default" || lower == "auto" || lower == "0")
+    {
+        version = 0;
+        return true;
+    }
+    if (lower.compare(0, 3, "tls") == 0)
+    {
+        lower.erase(0, 3);
+    }
+    if (lower.size() == 1 && lower[0] == 'v')
+    {
+        return false;
+    }
+    if (!lower.empty() && lower[0] == 'v')
+    {
+        lower.erase(0, 1);
+    }
+    int major = 0;
+    int minor = 0;
+    const size_t dot = lower.find('.');
+    if (dot == std::string::npos)
+    {
+        if (lower.size() == 2)
+        {
+            /* Upstream's two-digit form: 12 is TLS 1.2. */
+            major = lower[0] - '0';
+            minor = lower[1] - '0';
+        }
+        else
+        {
+            return false;
+        }
+    }
+    else
+    {
+        if (lower.substr(0, dot) != "1" || dot + 1 >= lower.size())
+        {
+            return false;
+        }
+        major = 1;
+        minor = lower[dot + 1] - '0';
+    }
+    if (major != 1 || minor < 0 || minor > 3)
+    {
+        return false;
+    }
+    version = 10 + minor;
+    return true;
+}
+
+/* Upstream's TFtps, by name or number. */
+bool ParseFtpsMode(const std::string & text, int & mode)
+{
+    const std::string lower = LowerAscii(TrimAscii(text));
+    if (lower == "0" || lower == "none" || lower == "off" || lower == "no")
+    {
+        mode = 0;
+        return true;
+    }
+    if (lower == "1" || lower == "implicit")
+    {
+        mode = 1;
+        return true;
+    }
+    if (lower == "2" || lower == "explicit" || lower == "explicits" ||
+        lower == "explicits sl" || lower == "explicitsel")
+    {
+        mode = 2;
+        return true;
+    }
+    if (lower == "3" || lower == "explicittls" || lower == "tls")
+    {
+        mode = 3;
+        return true;
+    }
+    return false;
+}
+
+bool ApplySessionRawSetting(const std::string & name, const std::string & value,
+    SessionOptions & options, std::string & error)
+{
+    error.clear();
+    const std::string lower = LowerAscii(TrimAscii(name));
+    const std::string text = TrimAscii(value);
+
+    /* The proxy names keep their own table: they were here first, they
+     * have their own validation, and the messages they produce are the
+     * ones the sessions in the field already quote. */
+    if (lower.compare(0, 5, "proxy") == 0)
+    {
+        return ApplyProxyRawSetting(name, value, options.proxy, error);
+    }
+
+    if (lower == "ftppasvmode")
+    {
+        bool passive = true;
+        if (!ParseToggle(text, passive))
+        {
+            error = "The value of 'FtpPasvMode' must be 0 (active) or 1 "
+                "(passive), not '" + value + "'.";
+            return false;
+        }
+        options.ftp.passiveMode = passive;
+        return true;
+    }
+    if (lower == "ftpforcepasvip")
+    {
+        int mode = 1;
+        if (!ParseAutoSwitch(text, mode))
+        {
+            error = "The value of 'FtpForcePasvIp' must be 0 (off), 1 "
+                "(automatic) or 2 (on), not '" + value + "'.";
+            return false;
+        }
+        options.ftp.forcePasvIp = mode;
+        return true;
+    }
+    if (lower == "ftpusemlsd")
+    {
+        int mode = 1;
+        if (!ParseAutoSwitch(text, mode))
+        {
+            error = "The value of 'FtpUseMlsd' must be 0 (off), 1 "
+                "(automatic) or 2 (on), not '" + value + "'.";
+            return false;
+        }
+        options.ftp.useMlsd = mode;
+        return true;
+    }
+    if (lower == "ftpaccount")
+    {
+        options.ftp.account = text;
+        return true;
+    }
+    if (lower == "ftps")
+    {
+        int mode = 0;
+        if (!ParseFtpsMode(text, mode))
+        {
+            error = "The value of 'Ftps' must be 0 (none), 1 (implicit), "
+                "2 (explicit SSL) or 3 (explicit TLS), not '" + value + "'.";
+            return false;
+        }
+        options.tls.ftpsMode = mode;
+        return true;
+    }
+    if (lower == "mintlsversion" || lower == "maxtlsversion")
+    {
+        int version = 0;
+        if (!ParseTlsVersion(text, version))
+        {
+            error = "The value of '" + name + "' must be a TLS version "
+                "(1.0, 1.1, 1.2, 1.3, or 'default'), not '" + value + "'.";
+            return false;
+        }
+        if (lower == "mintlsversion")
+        {
+            options.tls.minVersion = version;
+        }
+        else
+        {
+            options.tls.maxVersion = version;
+        }
+        return true;
+    }
+    if (lower == "tlscertificatefile")
+    {
+        options.tls.clientCertificate = text;
+        return true;
+    }
+    if (lower == "tlscertificatekeyfile")
+    {
+        options.tls.clientKey = text;
+        return true;
+    }
+    if (lower == "cacertificatefile")
+    {
+        options.tls.caFile = text;
+        return true;
+    }
+    if (lower == "cacertificatedir")
+    {
+        options.tls.caDirectory = text;
+        return true;
+    }
+    if (lower == "pinnedpublickey")
+    {
+        options.tls.pinnedPublicKey = text;
+        return true;
+    }
+
+    error = "The session setting '" + name + "' is not one this build "
+        "applies (it applies " + JoinNames(SessionRawSettingNames()) +
+        "); it would be dropped.";
+    return false;
+}
+
+/* Decodes the base64 of an OpenSSH or 'sha256//' hash into its bytes. */
+bool Base64ToBytes(const std::string & text, std::string & out)
+{
+    static const char * alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    out.clear();
+    int accumulator = 0;
+    int bits = 0;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        const char c = text[i];
+        if (c == '=')
+        {
+            break;
+        }
+        const char * found = strchr(alphabet, c);
+        if (found == NULL)
+        {
+            return false;
+        }
+        accumulator = (accumulator << 6) | static_cast<int>(found - alphabet);
+        bits += 6;
+        if (bits >= 8)
+        {
+            bits -= 8;
+            out += static_cast<char>((accumulator >> bits) & 0xFF);
+        }
+    }
+    return true;
+}
+
+/*
+ * The SHA-256 host key pin of a '-hostkey=' value, as curl's
+ * '--hostpubsha256' wants it: the base64 spelling of the digest. Accepted
+ * forms are the hex digest with optional ':' separators, OpenSSH's
+ * 'SHA256:base64' and curl's own 'sha256//base64'. All of them are the
+ * digest of the same host key, so the conversion decodes and re-encodes
+ * instead of hashing the key again; the pin is only ever compared with
+ * what curl computed, never derived from the host key here.
+ */
+bool HostKeySha256(const std::string & hostKey, std::string & base64)
+{
+    base64.clear();
+    std::string text = hostKey;
+    std::string prefix;
+    const size_t colon = text.find(':');
+    if (colon != std::string::npos)
+    {
+        prefix = LowerAscii(text.substr(0, colon));
+    }
+    if (prefix == "sha256")
+    {
+        text.erase(0, colon + 1);
+    }
+    else if (text.size() > 8 && LowerAscii(text.substr(0, 8)) == "sha256//")
+    {
+        text.erase(0, 8);
+    }
+
+    std::string compact;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        if (text[i] != ':' && text[i] != ' ' && text[i] != '-')
+        {
+            compact += text[i];
+        }
+    }
+
+    std::string bytes;
+    const bool looksHex = compact.size() == 64;
+    if (looksHex)
+    {
+        for (size_t i = 0; i < compact.size(); i++)
+        {
+            if (!isxdigit(static_cast<unsigned char>(compact[i])))
+            {
+                return false;
+            }
+        }
+        for (size_t i = 0; i < compact.size(); i += 2)
+        {
+            const unsigned char high = static_cast<unsigned char>(compact[i]);
+            const unsigned char low = static_cast<unsigned char>(compact[i + 1]);
+            const int hi = high <= '9' ? high - '0' : (high | 0x20) - 'a' + 10;
+            const int lo = low <= '9' ? low - '0' : (low | 0x20) - 'a' + 10;
+            bytes += static_cast<char>((hi << 4) | lo);
+        }
+    }
+    else if (!Base64ToBytes(compact, bytes) || bytes.size() != 32)
+    {
+        /* Neither a hex digest nor the base64 of one: an MD5 fingerprint
+         * or a plain typo, and a pin that cannot be applied is worse than
+         * no pin, so the caller has to notice. */
+        return false;
+    }
+
+    static const char kAlphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    for (size_t i = 0; i < bytes.size(); i += 3)
+    {
+        const unsigned int group =
+            (static_cast<unsigned char>(bytes[i]) << 16) |
+            ((i + 1 < bytes.size() ? static_cast<unsigned char>(bytes[i + 1]) : 0) << 8) |
+            (i + 2 < bytes.size() ? static_cast<unsigned char>(bytes[i + 2]) : 0);
+        const int remaining = static_cast<int>(bytes.size() - i);
+        base64 += kAlphabet[(group >> 18) & 0x3f];
+        base64 += kAlphabet[(group >> 12) & 0x3f];
+        if (remaining > 1)
+        {
+            base64 += kAlphabet[(group >> 6) & 0x3f];
+        }
+        if (remaining > 2)
+        {
+            base64 += kAlphabet[group & 0x3f];
+        }
+    }
+    return true;
+}
+
+bool SessionUsesImplicitTls(const SessionOptions & options)
+{
+    const std::string protocol = LowerAscii(options.protocol);
+    if (protocol == "ftps")
+    {
+        return true;
+    }
+    return protocol == "ftp" && options.tls.ftpsMode == 1;
+}
+
+int SessionDefaultPort(const std::string & protocol, int ftpsMode)
+{
+    const std::string lower = LowerAscii(protocol);
+    if (lower == "ftp")
+    {
+        return ftpsMode == 1 ? 990 : 21;
+    }
+    if (lower == "ftps")
+    {
+        return 990;
+    }
+    if (lower == "http" || lower == "dav")
+    {
+        return 80;
+    }
+    if (lower == "https" || lower == "s3" || lower == "webdav")
+    {
+        return 443;
+    }
+    return 22;
+}
+
+bool SessionUsesTls(const SessionOptions & options)
+{
+    const std::string lower = LowerAscii(options.protocol);
+    if (lower == "ftps")
+    {
+        return true;
+    }
+    if (lower == "ftp")
+    {
+        return options.tls.ftpsMode != 0;
+    }
+    return lower == "https" || lower == "s3" || lower == "webdav";
+}
+
+/* A certificate fingerprint (the 64 hex digits of a SHA-256, with or
+ * without separators) cannot be checked by this build: getting the
+ * server's certificate would need a TLS library. Saying so beats
+ * connecting as if it had been verified. */
+bool LooksLikeCertificateFingerprint(const std::string & text)
+{
+    std::string hex;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        const char c = text[i];
+        if (c == ':' || c == ' ' || c == '-')
+        {
+            continue;
+        }
+        if (!isxdigit(static_cast<unsigned char>(c)))
+        {
+            return false;
+        }
+        hex += c;
+    }
+    return hex.size() == 64 || hex.size() == 40 || hex.size() == 32;
+}
+
+bool ValidateSessionSettings(const SessionOptions & options, std::string & error)
+{
+    error.clear();
+    if (!ValidateProxySettings(options.proxy, error))
+    {
+        return false;
+    }
+    if (options.tls.minVersion != 0 && options.tls.maxVersion != 0 &&
+        options.tls.minVersion > options.tls.maxVersion)
+    {
+        error = "MinTlsVersion is higher than MaxTlsVersion: no version "
+            "would be acceptable.";
+        return false;
+    }
+    const bool tls = SessionUsesTls(options);
+    if (options.tls.ftpsMode != 0 && !tls)
+    {
+        error = "The 'Ftps' setting applies to ftp:// and ftps:// sessions, "
+            "not to '" + options.protocol + "'.";
+        return false;
+    }
+    if (!tls &&
+        (!options.tls.clientCertificate.empty() ||
+         !options.tls.clientKey.empty() ||
+         !options.tls.caFile.empty() ||
+         !options.tls.caDirectory.empty() ||
+         !options.tls.pinnedPublicKey.empty() ||
+         options.tls.minVersion != 0 || options.tls.maxVersion != 0))
+    {
+        error = "The TLS settings apply to a TLS session (ftps://, ftpes:// "
+            "or https://), and this is a '" + options.protocol + "' session.";
+        return false;
+    }
+    /*
+     * An SSH host key pinned by its SHA-256 fingerprint over curl: where
+     * the curl in use cannot check that pin (see CurlSupportsHostPubSha256)
+     * the value would be dropped and the session would verify less than it
+     * was asked to, so it is refused with what remains.
+     */
+    const std::string protocol = LowerAscii(options.protocol);
+    if (IsSshCurlProtocol(protocol) && !UseNativeSftp(protocol) &&
+        !options.hostKey.empty() && options.hostKey != "*")
+    {
+        std::string pin;
+        if (HostKeySha256(options.hostKey, pin) && !CurlSupportsHostPubSha256())
+        {
+            error = "The installed curl cannot check a SHA-256 host key pin "
+                "('--hostpubsha256' needs its libssh2 backend), so '" +
+                options.hostKey + "' would not be enforced. Use -hostkey=\"*\" "
+                "to accept any host key, an MD5 fingerprint, or a curl built "
+                "with libssh2; sftp:// sessions check the pin in this client "
+                "either way.";
+            return false;
+        }
+    }
+    if (tls && !options.hostKey.empty() && options.hostKey != "*" &&
+        LooksLikeCertificateFingerprint(options.hostKey))
+    {
+        error = "This build cannot check a TLS certificate fingerprint (" +
+            options.hostKey + "): that needs the server's certificate, and "
+            "no TLS library is linked. Pin the public key instead "
+            "(-rawsettings PinnedPublicKey=sha256//BASE64, or a PEM/DER "
+            "file), or accept any certificate with -hostkey=\"*\".";
+        return false;
+    }
+    return true;
+}
+
 bool ValidateProxySettings(const ProxySettings & proxy, std::string & error)
 {
     error.clear();
@@ -887,9 +1382,9 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
         scheme[i] = static_cast<char>(tolower(static_cast<unsigned char>(scheme[i])));
     }
     if (scheme != "sftp" && scheme != "ssh" && scheme != "scp" &&
-        scheme != "ftp" && scheme != "ftps" && scheme != "http" &&
-        scheme != "https" && scheme != "s3" && scheme != "dav" &&
-        scheme != "webdav")
+        scheme != "ftp" && scheme != "ftps" && scheme != "ftpes" &&
+        scheme != "http" && scheme != "https" && scheme != "s3" &&
+        scheme != "dav" && scheme != "webdav")
     {
         error = "Unsupported protocol '" + scheme + "'.";
         return false;
@@ -900,24 +1395,19 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
         return false;
     }
 
-    parsed.protocol = scheme;
-    int defaultPort = 22;
-    if (scheme == "ftp")
+    /* 'ftpes://' is upstream's explicit-TLS spelling of FTP and is the
+     * same protocol as 'ftp://' once the TLS mode is set. 'ftps://' means
+     * implicit TLS, as upstream's FtpsImplicitPortNumber does. */
+    parsed.protocol = scheme == "ftpes" ? "ftp" : scheme;
+    if (scheme == "ftps")
     {
-        defaultPort = 21;
+        parsed.tls.ftpsMode = 1;
     }
-    else if (scheme == "ftps")
+    else if (scheme == "ftpes")
     {
-        defaultPort = 990;
+        parsed.tls.ftpsMode = 3;
     }
-    else if (scheme == "http" || scheme == "dav")
-    {
-        defaultPort = 80;
-    }
-    else if (scheme == "https" || scheme == "s3" || scheme == "webdav")
-    {
-        defaultPort = 443;
-    }
+    int defaultPort = SessionDefaultPort(parsed.protocol, parsed.tls.ftpsMode);
     bool explicitPort = false;
 
     /* Query and fragment syntax is not meaningful for an SFTP site. */
@@ -1022,8 +1512,9 @@ bool ParseSiteUrl(const std::string & url, SessionOptions & options, std::string
 
     if (!explicitPort)
     {
-        if (hadScheme && (scheme == "ftp" || scheme == "ftps" || scheme == "http" ||
-                          scheme == "https" || scheme == "dav" || scheme == "webdav"))
+        if (hadScheme && (scheme == "ftp" || scheme == "ftps" || scheme == "ftpes" ||
+                          scheme == "http" || scheme == "https" ||
+                          scheme == "dav" || scheme == "webdav"))
         {
             parsed.portNumber = defaultPort;
         }
@@ -1263,6 +1754,35 @@ bool Session::HostKeyMatches(const char * const * fingerprints) const
         }
     }
     return false;
+}
+
+/*
+ * The lock tokens this session holds. They live with the session, not in
+ * a file: a lock belongs to the connection that took it, and a token
+ * remembered after the lock expired is worse than none because the
+ * server would refuse the write the token was supposed to allow.
+ */
+void Session::SetDavLock(const std::string & remotePath, const std::string & token)
+{
+    if (token.empty())
+    {
+        mOptions.davLocks.erase(remotePath);
+        return;
+    }
+    mOptions.davLocks[remotePath] = token;
+}
+
+void Session::ClearDavLock(const std::string & remotePath)
+{
+    mOptions.davLocks.erase(remotePath);
+}
+
+const std::string & Session::DavLockFor(const std::string & remotePath) const
+{
+    static const std::string none;
+    std::map<std::string, std::string>::const_iterator found =
+        mOptions.davLocks.find(remotePath);
+    return found == mOptions.davLocks.end() ? none : found->second;
 }
 
 bool Session::Open(const SessionOptions & options, std::string & error)

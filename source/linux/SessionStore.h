@@ -84,6 +84,19 @@ struct StoredSession
      * because connecting without the proxy the site was stored with would
      * send the session somewhere else than its user asked for. */
     std::string proxyError;
+    /*
+     * The FTP engine's policy and the TLS policy of the site, stored under
+     * the same names '-rawsettings' takes (FtpPasvMode, FtpUseMlsd, Ftps,
+     * MinTlsVersion, TlsCertificateFile, ...). Only the values that differ
+     * from the defaults are written, so a plain site keeps a plain file.
+     */
+    FtpSettings ftp;
+    TlsSettings tls;
+    /* Why a stored FTP/TLS setting cannot be used, if one cannot: the file
+     * then holds a value this build does not accept (a newer version's
+     * setting, or a typo), and 'open' says so instead of connecting with a
+     * policy nobody asked for. */
+    std::string settingError;
 
     StoredSession() : portNumber(0), passwordStored(false), lastUsed(0) {}
 };

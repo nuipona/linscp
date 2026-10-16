@@ -1,4 +1,6 @@
 #include "ProtocolClient.h"
+#include "FtpClient.h"
+#include "ListingParse.h"
 #include "S3Client.h"
 #include "S3SigV4.h"
 #include "LocalFs.h"
@@ -276,73 +278,14 @@ std::string CurlErrorWithoutProgress(const std::string & text)
     return result;
 }
 
-/* Splits an 'ls -l'-style line into exactly 9 fields (the 9th keeps any
- * spaces of the file name). Returns false for bare-name listings. */
-bool SplitLongListing(const std::string & line, std::vector<std::string> & fields)
-{
-    fields.clear();
-    std::istringstream stream(line);
-    std::string field;
-    while (fields.size() < 8 && (stream >> field))
-    {
-        fields.push_back(field);
-    }
-    if (fields.size() < 8)
-    {
-        return false;
-    }
-    std::string rest;
-    std::getline(stream, rest);
-    size_t first = rest.find_first_not_of(" \t");
-    if (first == std::string::npos)
-    {
-        return false;
-    }
-    fields.push_back(rest.substr(first));
-    return true;
-}
-
-bool LooksLikePermissions(const std::string & text)
-{
-    if (text.size() != 10)
-    {
-        return false;
-    }
-    const char types[] = "-dlbcps";
-    if (strchr(types, text[0]) == NULL)
-    {
-        return false;
-    }
-    for (size_t i = 1; i < 10; i++)
-    {
-        if (strchr("rwxstST-", text[i]) == NULL)
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-unsigned long PermissionsFromString(const std::string & text)
-{
-    unsigned long mode = text[0] == 'd' ? 0040000UL : 0100000UL;
-    static const unsigned long bits[9] = {
-        0400, 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001
-    };
-    for (size_t i = 0; i < 9 && i + 1 < text.size(); i++)
-    {
-        char c = text[i + 1];
-        if (c == 'r' || c == 'w' || c == 'x' || c == 's' || c == 't')
-        {
-            mode |= bits[i];
-        }
-    }
-    return mode;
-}
-
 std::string BuildUrl(const SessionOptions & options, const std::string & remotePath)
 {
     std::string proto = ToLower(options.protocol);
+    if (proto == "ftp" && SessionUsesImplicitTls(options))
+    {
+        /* 'Ftps=1' turns a plain FTP session into an implicit-TLS one. */
+        proto = "ftps";
+    }
     if (proto == "dav")
     {
         /* Plain WebDAV, with the port 80 default ParseSiteUrl gives it. */
@@ -389,9 +332,65 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
     return url;
 }
 
-bool IsSshCurlProtocol(const std::string & proto)
+
+/* The TLS policy of the session as curl arguments. Nothing is added for a
+ * plain session, and a policy curl cannot express is refused before the
+ * connection (see ValidateSessionSettings), never silently dropped. */
+void AddTlsCurlArgs(const SessionOptions & options, std::vector<std::string> & args)
 {
-    return proto == "sftp" || proto == "scp";
+    const std::string proto = ToLower(options.protocol);
+    const bool ftpFamily = proto == "ftp" || proto == "ftps";
+    if (!SessionUsesTls(options))
+    {
+        return;
+    }
+
+    /* An explicit-TLS FTP session is curl's 'ftps' scheme in explicit
+     * mode, which is what --ssl-reqd asks for on an ftp:// URL. */
+    if (ftpFamily && !SessionUsesImplicitTls(options) &&
+        options.tls.ftpsMode != 0)
+    {
+        args.push_back("--ssl-reqd");
+    }
+
+    static const char * const kVersionFlags[4] = {
+        "--tlsv1.0", "--tlsv1.1", "--tlsv1.2", "--tlsv1.3"
+    };
+    static const char * const kMaxValues[4] = { "1.0", "1.1", "1.2", "1.3" };
+    if (options.tls.minVersion >= 10 && options.tls.minVersion <= 13)
+    {
+        args.push_back(kVersionFlags[options.tls.minVersion - 10]);
+    }
+    if (options.tls.maxVersion >= 10 && options.tls.maxVersion <= 13)
+    {
+        args.push_back("--tls-max");
+        args.push_back(kMaxValues[options.tls.maxVersion - 10]);
+    }
+    if (!options.tls.clientCertificate.empty())
+    {
+        args.push_back("--cert");
+        args.push_back(options.tls.clientCertificate);
+    }
+    if (!options.tls.clientKey.empty())
+    {
+        args.push_back("--key");
+        args.push_back(options.tls.clientKey);
+    }
+    if (!options.tls.caFile.empty())
+    {
+        args.push_back("--cacert");
+        args.push_back(options.tls.caFile);
+    }
+    if (!options.tls.caDirectory.empty())
+    {
+        args.push_back("--capath");
+        args.push_back(options.tls.caDirectory);
+    }
+    if (!options.tls.pinnedPublicKey.empty())
+    {
+        args.push_back("--pinnedpubkey");
+        args.push_back(options.tls.pinnedPublicKey);
+    }
 }
 
 void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string> & args,
@@ -451,31 +450,51 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     }
     else if (!options.hostKey.empty() && IsSshCurlProtocol(ToLower(options.protocol)))
     {
-        /* curl pins SSH host keys by MD5 fingerprint (--hostpubmd5).
-         * A SHA256 pin cannot be expressed for curl; host verification
-         * then falls back to the OpenSSH known_hosts file, exactly as
-         * with the system ssh/sftp clients. */
-        std::string md5;
-        for (size_t i = 0; i < options.hostKey.size(); i++)
+        /* curl pins SSH host keys by fingerprint: SHA-256 hex or base64
+         * for --hostpubsha256, MD5 hex for --hostpubmd5. A value that is
+         * neither keeps the OpenSSH known_hosts file as the check, which
+         * is what the system ssh/sftp clients use too. */
+        std::string sha256;
+        if (HostKeySha256(options.hostKey, sha256))
         {
-            if (options.hostKey[i] != ':')
+            args.push_back("--hostpubsha256");
+            args.push_back(sha256);
+        }
+        else
+        {
+            std::string md5;
+            for (size_t i = 0; i < options.hostKey.size(); i++)
             {
-                md5 += options.hostKey[i];
+                if (options.hostKey[i] != ':')
+                {
+                    md5 += options.hostKey[i];
+                }
+            }
+            bool hex = md5.size() == 32;
+            for (size_t i = 0; hex && i < md5.size(); i++)
+            {
+                char c = md5[i];
+                hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                    (c >= 'A' && c <= 'F');
+            }
+            if (hex)
+            {
+                args.push_back("--hostpubmd5");
+                args.push_back(md5);
             }
         }
-        bool hex = md5.size() == 32;
-        for (size_t i = 0; hex && i < md5.size(); i++)
-        {
-            char c = md5[i];
-            hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
-                (c >= 'A' && c <= 'F');
-        }
-        if (hex)
-        {
-            args.push_back("--hostpubmd5");
-            args.push_back(md5);
-        }
     }
+
+    /* 'FtpPasvMode=0' means an active data connection: curl sends PORT
+     * instead of PASV/EPSV, reusing the control connection's address. */
+    const std::string ftpProto = ToLower(options.protocol);
+    if ((ftpProto == "ftp" || ftpProto == "ftps") && !options.ftp.passiveMode)
+    {
+        args.push_back("-P");
+        args.push_back("-");
+    }
+
+    AddTlsCurlArgs(options, args);
 
     if (!options.privateKeyFile.empty())
     {
@@ -560,21 +579,6 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     }
 }
 
-struct ListingEntry
-{
-    std::string name;
-    std::string longname;
-    /* False for a names-only listing, where neither the type nor the
-     * size of the entry is known. */
-    bool typeKnown;
-    bool isDir;
-    unsigned long permissions;
-    unsigned long long size;
-    /* Set when the listing carried a usable date column. */
-    bool timeKnown;
-    unsigned long mtime;
-};
-
 /*
  * Runs one directory listing and parses it. Both the long 'ls -l' format
  * (what FTP servers and curl's own SFTP engine produce) and a names-only
@@ -651,33 +655,9 @@ bool FetchListing(const SessionOptions & options, const std::string & remotePath
         }
 
         ListingEntry entry;
-        entry.typeKnown = false;
-        entry.isDir = false;
-        entry.permissions = 0100644;
-        entry.size = 0;
-        entry.timeKnown = false;
-        entry.mtime = 0;
         entry.longname = line;
 
-        std::vector<std::string> fields;
-        if (SplitLongListing(line, fields) && LooksLikePermissions(fields[0]))
-        {
-            entry.name = fields[8];
-            entry.typeKnown = true;
-            entry.isDir = fields[0][0] == 'd';
-            entry.permissions = PermissionsFromString(fields[0]);
-            try
-            {
-                entry.size = std::stoull(fields[4]);
-            }
-            catch (...)
-            {
-                entry.size = 0;
-            }
-            entry.mtime = ParseListingDate(fields[5], fields[6], fields[7]);
-            entry.timeKnown = entry.mtime != 0;
-        }
-        else
+        if (!ParseUnixListingLine(line, entry))
         {
             entry.name = line;
             if (!entry.name.empty() && entry.name.back() == '/')
@@ -1001,7 +981,8 @@ struct DavResult
 bool DavInvoke(const SessionOptions & options, const std::string & method,
     const std::string & remotePath,
     const std::vector<std::pair<std::string, std::string> > & headers,
-    const std::string & body, DavResult & result, std::string & error)
+    const std::string & body, DavResult & result, std::string & error,
+    const std::string & ifToken = std::string())
 {
     result.curlCode = -1;
     result.httpCode = 0;
@@ -1013,6 +994,11 @@ bool DavInvoke(const SessionOptions & options, const std::string & method,
     args.push_back("--anyauth");
     args.push_back("-X");
     args.push_back(method);
+    if (!ifToken.empty())
+    {
+        args.push_back("-H");
+        args.push_back("If: (" + ifToken + ")");
+    }
     for (size_t i = 0; i < headers.size(); i++)
     {
         args.push_back("-H");
@@ -1119,6 +1105,94 @@ bool DavPropfindOnce(const SessionOptions & options, const std::string & path,
     return true; /* the server answered; 'error' says what it said */
 }
 
+/*
+ * WebDAV locks and dead properties: what upstream's WebDAV backend does
+ * not have at all, and therefore a LinSCP extension. A lock is what keeps
+ * two writers from racing over the same path, the If header is what makes
+ * the server enforce it, and a dead property is what a WebDAV server lets
+ * a client store next to a file's content. Everything here reports the
+ * server's answer: a 405 says the server has no LOCK, and the command
+ * prints that rather than reporting a write that was never protected.
+ */
+
+const char * const kDavPropertyNamespace = "urn:linuxscp:properties";
+const char * const kDavPropertyPrefix = "lscp";
+
+/* The lock token this session holds for a path, or an empty string: the
+ * If header that makes the server enforce the lock. */
+std::string DavTokenFor(const SessionOptions & options, const std::string & remotePath)
+{
+    std::map<std::string, std::string>::const_iterator found =
+        options.davLocks.find(remotePath);
+    return found == options.davLocks.end() ? std::string() : found->second;
+}
+
+std::string DavTrimmed(const std::string & text)
+{
+    size_t begin = 0;
+    while (begin < text.size() && isspace(static_cast<unsigned char>(text[begin])))
+    {
+        begin++;
+    }
+    size_t end = text.size();
+    while (end > begin && isspace(static_cast<unsigned char>(text[end - 1])))
+    {
+        end--;
+    }
+    return text.substr(begin, end - begin);
+}
+
+std::string DavXmlEscape(const std::string & text)
+{
+    std::string out;
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        switch (text[i])
+        {
+        case '&': out += "&amp;"; break;
+        case '<': out += "&lt;"; break;
+        case '>': out += "&gt;"; break;
+        case '"': out += "&quot;"; break;
+        default: out += text[i]; break;
+        }
+    }
+    return out;
+}
+
+
+
+
+
+
+/* The first failing status inside a 207 reply, for PROPPATCH answers: a
+ * multi-status can carry one propstat per property, and a property the
+ * server refused has to be reported rather than counted as stored. */
+std::string DavMultiStatusFailure(const std::string & xml)
+{
+    size_t at = 0;
+    while ((at = xml.find("status", at)) != std::string::npos)
+    {
+        const size_t gt = xml.find('>', at);
+        if (gt == std::string::npos)
+        {
+            break;
+        }
+        const size_t lt = xml.find('<', gt + 1);
+        const std::string text = lt == std::string::npos ?
+            std::string() : DavTrimmed(xml.substr(gt + 1, lt - gt - 1));
+        const size_t space = text.find(' ');
+        const std::string code = space == std::string::npos ?
+            std::string() : text.substr(0, space);
+        if (code.size() == 3 && isdigit(static_cast<unsigned char>(code[0])) &&
+            code[0] >= '4')
+        {
+            return text;
+        }
+        at = lt == std::string::npos ? xml.size() : lt;
+    }
+    return std::string();
+}
+
 /* PROPFIND into listing entries. 'self' (the requested path) is not an
  * entry of its own. */
 bool DavFetchListing(const SessionOptions & options,
@@ -1177,16 +1251,21 @@ bool DavFetchListing(const SessionOptions & options,
     return true;
 }
 
+
+
+
+
 /* DELETE with the statuses that mean something. 'emptyDirectory' shapes
  * the 409 message: for rmdir, a conflict is the server saying the
  * directory still has children. */
 int DavDelete(const SessionOptions & options, const std::string & remotePath,
     bool emptyDirectory, std::string & error)
 {
+    const std::string davLockToken = DavTokenFor(options, remotePath);
     DavResult deleted;
     if (!DavInvoke(options, "DELETE", remotePath,
         std::vector<std::pair<std::string, std::string> >(),
-        std::string(), deleted, error))
+        std::string(), deleted, error, davLockToken))
     {
         return -1;
     }
@@ -1226,6 +1305,24 @@ int RunCurlCaptureWithProgress(const std::vector<std::string> & args,
         progressCtx, upload);
 }
 
+bool CurlSupportsHostPubSha256()
+{
+    /* Asked once: the curl binary does not change under a running process. */
+    static const bool supported = [] {
+        std::vector<std::string> args;
+        args.push_back(CurlExecutable());
+        args.push_back("--version");
+        std::string outStr;
+        std::string errStr;
+        if (RunCurl(args, outStr, errStr) != 0)
+        {
+            return false;
+        }
+        return outStr.find("libssh2/") != std::string::npos;
+    }();
+    return supported;
+}
+
 bool IsCurlEndpointUnreachable(int code)
 {
     return IsEndpointUnreachable(code);
@@ -1256,12 +1353,67 @@ void ProtocolClient::FreeNames(LscpNames * names)
     names->count = 0;
 }
 
+/* One place that turns listing entries into the names array the rest of
+ * the client (and the SFTP path) hands around. */
+bool FillNames(const std::vector<ListingEntry> & entries, LscpNames * names,
+    std::string & error)
+{
+    names->count = 0;
+    names->names = NULL;
+    names->count = static_cast<int>(entries.size());
+    if (names->count == 0)
+    {
+        return true;
+    }
+    names->names = static_cast<LscpName *>(calloc(names->count, sizeof(LscpName)));
+    if (names->names == NULL)
+    {
+        error = "Out of memory allocating directory entries.";
+        names->count = 0;
+        return false;
+    }
+    for (int i = 0; i < names->count; i++)
+    {
+        names->names[i].filename = DupString(entries[i].name);
+        names->names[i].longname = DupString(entries[i].longname);
+        names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
+        names->names[i].attrs.permissions = entries[i].permissions;
+        names->names[i].attrs.size = entries[i].size;
+        if (entries[i].timeKnown)
+        {
+            names->names[i].attrs.flags |= LSCP_ATTR_ACMODTIME;
+            names->names[i].attrs.atime = entries[i].mtime;
+            names->names[i].attrs.mtime = entries[i].mtime;
+        }
+    }
+    return true;
+}
+
 bool ProtocolClient::List(const SessionOptions & options, const std::string & remotePath,
     LscpNames * names, std::string & error)
 {
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::List(options, remotePath, names, error);
+    }
+    if (FtpClient::Handles(options))
+    {
+        /* Plain FTP goes to the native engine, which speaks MLSD/MLST and
+         * honours FtpPasvMode/FtpUseMlsd; the curl path below keeps the
+         * TLS FTP sessions and the servers whose listing needs it. */
+        if (names == NULL)
+        {
+            error = "Null output pointer.";
+            return false;
+        }
+        names->count = 0;
+        names->names = NULL;
+        std::vector<ListingEntry> nativeEntries;
+        if (!FtpClient::List(options, remotePath, nativeEntries, error))
+        {
+            return false;
+        }
+        return FillNames(nativeEntries, names, error);
     }
     if (names == NULL)
     {
@@ -1284,42 +1436,20 @@ bool ProtocolClient::List(const SessionOptions & options, const std::string & re
         return false;
     }
 
-    names->count = static_cast<int>(entries.size());
-    if (names->count == 0)
-    {
-        names->names = NULL;
-        return true;
-    }
-
-    names->names = static_cast<LscpName *>(calloc(names->count, sizeof(LscpName)));
-    if (names->names == NULL)
-    {
-        error = "Out of memory allocating directory entries.";
-        names->count = 0;
-        return false;
-    }
-
-    for (int i = 0; i < names->count; i++)
-    {
-        names->names[i].filename = DupString(entries[i].name);
-        names->names[i].longname = DupString(entries[i].longname);
-        names->names[i].attrs.flags = LSCP_ATTR_PERMISSIONS | LSCP_ATTR_SIZE;
-        names->names[i].attrs.permissions = entries[i].permissions;
-        names->names[i].attrs.size = entries[i].size;
-        if (entries[i].timeKnown)
-        {
-            names->names[i].attrs.flags |= LSCP_ATTR_ACMODTIME;
-            names->names[i].attrs.atime = entries[i].mtime;
-            names->names[i].attrs.mtime = entries[i].mtime;
-        }
-    }
-
-    return true;
+    return FillNames(entries, names, error);
 }
 
 bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
     const std::string & remotePath, std::string & error)
 {
+    /* The curl protocols have no connection of their own, so this is where
+     * a policy this build cannot carry out - a TLS certificate fingerprint
+     * it cannot check, a TLS setting on a plain session - is refused
+     * before anything is sent. */
+    if (!ValidateSessionSettings(options, error))
+    {
+        return false;
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::CheckEndpoint(options, remotePath, error);
@@ -1380,6 +1510,30 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
         error.clear();
         return true;
     }
+    if (FtpClient::Handles(options))
+    {
+        /* The native FTP engine opens its own control connection, so this
+         * is a real connection test: a refused login or an unreachable
+         * host fails the open here, while a directory the server will not
+         * list is left to the command that asks for it. */
+        std::vector<ListingEntry> nativeEntries;
+        int ftpCode = 0;
+        if (FtpClient::List(options, path, nativeEntries, error, &ftpCode))
+        {
+            return true;
+        }
+        if (ftpCode != kFtpTransportFailure)
+        {
+            error.clear();
+            return true;
+        }
+        if (error.empty())
+        {
+            error = "The FTP server could not be reached.";
+        }
+        return false;
+    }
+
     std::vector<ListingEntry> entries;
     int code = 0;
     if (FetchListing(options, path, entries, error, &code))
@@ -1418,6 +1572,10 @@ int ProtocolClient::Stat(const SessionOptions & options, const std::string & rem
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Stat(options, remotePath, attrs, error);
+    }
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::Stat(options, remotePath, attrs, error);
     }
     if (attrs != NULL)
     {
@@ -1687,6 +1845,16 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
         args.push_back(std::to_string(speedKBytesPerSecond) + "k");
     }
 
+    /* A locked path: the token proves this writer owns the lock, and a
+     * lock that expired or was broken makes the server refuse the
+     * upload (412) instead of writing over somebody else's change. */
+    const std::string davLockToken = DavTokenFor(options, remotePath);
+    if (!davLockToken.empty())
+    {
+        args.push_back("-H");
+        args.push_back("If: (" + davLockToken + ")");
+    }
+
     args.push_back("-T");
     args.push_back(localPath);
     args.push_back(BuildUrl(options, remotePath));
@@ -1718,6 +1886,10 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 int ProtocolClient::Remove(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::Remove(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Remove(options, remotePath, error);
@@ -1763,6 +1935,10 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
 int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::RemoveDir(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::RemoveDir(options, remotePath, error);
@@ -1824,6 +2000,10 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
 int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::MakeDir(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::MakeDir(options, remotePath, error);
@@ -1975,6 +2155,10 @@ int ProtocolClient::Copy(const SessionOptions & options,
 int ProtocolClient::Move(const SessionOptions & options, const std::string & fromPath,
     const std::string & toPath, std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::Move(options, fromPath, toPath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Move(options, fromPath, toPath, error);
@@ -1991,8 +2175,9 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
             std::string("T")));
         DavResult moved;
         std::string moveError;
+        const std::string davLockToken = DavTokenFor(options, fromPath);
         if (!DavInvoke(options, "MOVE", fromPath, headers, std::string(),
-            moved, moveError))
+            moved, moveError, davLockToken))
         {
             error = moveError;
             return -1;
@@ -2058,6 +2243,10 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
 int ProtocolClient::SetPermissions(const SessionOptions & options,
     const std::string & remotePath, int permissions, std::string & error)
 {
+    if (FtpClient::Handles(options))
+    {
+        return FtpClient::SetPermissions(options, remotePath, permissions, error);
+    }
     std::vector<std::string> args;
     BuildCommonCurlArgs(options, args);
 
@@ -2090,6 +2279,287 @@ int ProtocolClient::SetPermissions(const SessionOptions & options,
         return -1;
     }
     return 0;
+}
+
+
+/*
+ * The token of a LOCK reply. Servers answer with a lockdiscovery body
+ * ('...<locktoken><href>opaquelocktoken:...</href></locktoken>...'), and a
+ * few send the token on its own, so both are accepted and anything else
+ * (including a reply with no token at all) is a failure: without a token
+ * the lock cannot be released or used.
+ */
+bool DavLockTokenFromXml(const std::string & xml, std::string & token)
+{
+    token.clear();
+    const std::string key = "locktoken";
+    const size_t at = xml.find(key);
+    if (at == std::string::npos)
+    {
+        const std::string text = DavTrimmed(xml);
+        if (!text.empty() && text.find('<') == std::string::npos)
+        {
+            token = text;
+            return true;
+        }
+        return false;
+    }
+    size_t cursor = xml.find('>', at + key.size());
+    if (cursor == std::string::npos)
+    {
+        return false;
+    }
+    const size_t textStart = xml.find('>', cursor + 1);
+    if (textStart == std::string::npos)
+    {
+        return false;
+    }
+    const size_t end = xml.find('<', textStart + 1);
+    if (end == std::string::npos)
+    {
+        return false;
+    }
+    token = DavTrimmed(xml.substr(textStart + 1, end - textStart - 1));
+    return !token.empty();
+}
+
+/* An XML element name has to start with a letter or '_' and hold no
+ * whitespace or markup; anything else would build a request the server
+ * cannot parse, which would look like a server failure. */
+bool DavValidPropertyName(const std::string & name, std::string & error)
+{
+    if (name.empty())
+    {
+        error = "The property name is empty.";
+        return false;
+    }
+    const char first = name[0];
+    if (!(isalpha(static_cast<unsigned char>(first)) || first == '_'))
+    {
+        error = "The property name '" + name + "' has to start with a letter "
+            "or '_'.";
+        return false;
+    }
+    for (size_t i = 1; i < name.size(); i++)
+    {
+        const char c = name[i];
+        if (!(isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '-' ||
+            c == '.'))
+        {
+            error = "The property name '" + name + "' may only hold letters, "
+                "digits, '_', '-' and '.'.";
+            return false;
+        }
+    }
+    return true;
+}
+
+std::string DavPropertyPropfindBody(const std::string & name)
+{
+    return std::string("<?xml version=\"1.0\" encoding=\"utf-8\"?>") +
+        "<D:propfind xmlns:D=\"DAV:\" xmlns:" + kDavPropertyPrefix + "=\"" +
+        kDavPropertyNamespace + "\"><D:prop><" + kDavPropertyPrefix + ":" +
+        name + "/></D:prop></D:propfind>";
+}
+
+/*
+ * The value of a dead property in a PROPFIND answer, and whether the
+ * server carried it. A 404 propstat (the property is not set) is 'found'
+ * false, which is an answer and not an error; the element's text is the
+ * value, so an empty element means the property is set to "".
+ */
+bool DavPropertyValueFromXml(const std::string & xml, const std::string & name,
+    std::string & value, bool & found)
+{
+    value.clear();
+    found = false;
+    if (!DavFindText(xml, name, 0, value))
+    {
+        return false;
+    }
+    found = true;
+    return true;
+}
+
+/* LOCK one path with an exclusive write lock and return its token. */
+bool ProtocolClient::DavLock(const SessionOptions & options,
+    const std::string & remotePath, int timeoutSeconds, std::string & token,
+    std::string & error)
+{
+    token.clear();
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Locks are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Depth"), std::string("0")));
+    headers.push_back(std::make_pair(std::string("Timeout"),
+        timeoutSeconds > 0 ? ("Second-" + std::to_string(timeoutSeconds)) :
+            std::string("Infinite")));
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    const std::string body =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<lockinfo xmlns=\"DAV:\"><lockscope><exclusive/></lockscope>"
+        "<locktype><write/></locktype>"
+        "<owner><href>linuxscp</href></owner></lockinfo>";
+    DavResult result;
+    if (!DavInvoke(options, "LOCK", remotePath, headers, body, result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 200 && result.httpCode != 201)
+    {
+        error = result.httpCode == 405 ?
+            "The WebDAV server does not implement LOCK." :
+            DavHttpFailure(result, "Lock");
+        return false;
+    }
+    if (!DavLockTokenFromXml(result.out, token))
+    {
+        error = "The server's LOCK reply carried no lock token.";
+        return false;
+    }
+    return true;
+}
+
+/* UNLOCK the path with the token the LOCK returned. The token is the
+ * proof of ownership, so a lock taken by somebody else cannot be
+ * released and the server answers 409 or 403 instead. */
+bool ProtocolClient::DavUnlock(const SessionOptions & options,
+    const std::string & remotePath, const std::string & token, std::string & error)
+{
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Locks are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    if (token.empty())
+    {
+        error = "There is no lock token to release.";
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Lock-Token"),
+        "<" + token + ">"));
+    DavResult result;
+    if (!DavInvoke(options, "UNLOCK", remotePath, headers, std::string(),
+        result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 204 && result.httpCode != 200)
+    {
+        error = result.httpCode == 405 ?
+            "The WebDAV server does not implement UNLOCK." :
+            DavHttpFailure(result, "Unlock");
+        return false;
+    }
+    return true;
+}
+
+/* PROPPATCH one dead property in this client's own namespace, so that a
+ * protected property (getlastmodified and friends) is never the target
+ * and the value a client stores cannot be confused with the server's. */
+bool ProtocolClient::DavSetProperty(const SessionOptions & options,
+    const std::string & remotePath, const std::string & name,
+    const std::string & value, std::string & error)
+{
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Dead properties are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    std::string nameError;
+    if (!DavValidPropertyName(name, nameError))
+    {
+        error = nameError;
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    DavResult result;
+    if (!DavInvoke(options, "PROPPATCH", remotePath, headers,
+        DavPropertyUpdateBody(name, value), result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 207 && result.httpCode != 200)
+    {
+        error = result.httpCode == 405 ?
+            "The WebDAV server does not implement PROPPATCH." :
+            DavHttpFailure(result, "Set property");
+        return false;
+    }
+    /* A 207 can still hold a refused property: the server answers one
+     * propstat per property it was asked about. */
+    const std::string refusal = DavMultiStatusFailure(result.out);
+    if (!refusal.empty())
+    {
+        error = "The server refused to store '" + name + "': " + refusal;
+        return false;
+    }
+    return true;
+}
+
+/* PROPFIND one dead property of one path. 'found' false means the server
+ * answered a 404 propstat: the property is not set, which is an answer. */
+bool ProtocolClient::DavGetProperty(const SessionOptions & options,
+    const std::string & remotePath, const std::string & name,
+    std::string & value, bool & found, std::string & error)
+{
+    value.clear();
+    found = false;
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "Dead properties are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    std::string nameError;
+    if (!DavValidPropertyName(name, nameError))
+    {
+        error = nameError;
+        return false;
+    }
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Depth"), std::string("0")));
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    DavResult result;
+    if (!DavInvoke(options, "PROPFIND", remotePath, headers,
+        DavPropertyPropfindBody(name), result, error))
+    {
+        return false;
+    }
+    if (result.httpCode != 207 && result.httpCode != 200)
+    {
+        error = DavHttpFailure(result, "Get property");
+        return false;
+    }
+    DavPropertyValueFromXml(result.out, name, value, found);
+    return true;
+}
+
+
+std::string DavPropertyUpdateBody(const std::string & name,
+    const std::string & value)
+{
+    return std::string("<?xml version=\"1.0\" encoding=\"utf-8\"?>") +
+        "<D:propertyupdate xmlns:D=\"DAV:\" xmlns:" + kDavPropertyPrefix +
+        "=\"" + kDavPropertyNamespace + "\"><D:set><D:prop><" +
+        kDavPropertyPrefix + ":" + name + ">" + DavXmlEscape(value) + "</" +
+        kDavPropertyPrefix + ":" + name + "></D:prop></D:set></D:propertyupdate>";
+}
+
+bool IsSshCurlProtocol(const std::string & proto)
+{
+    return proto == "sftp" || proto == "scp";
 }
 
 } // namespace linuxscp

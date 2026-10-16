@@ -75,14 +75,23 @@ work.
 
 Protocol URL acceptance is not proof of complete support: WebDAV lists and
 stats through PROPFIND, moves with MOVE, and file copies with COPY (falling
-back to a streamed copy when the server refuses COPY); locking, dead
-properties and conditional requests remain gaps. Amazon S3 signs with
+back to a streamed copy when the server refuses COPY); `lock`/`unlock` take
+an exclusive write lock whose token every later upload, delete and move of
+that path carries (the `If` header), and `property -get`/`-set` reads and
+writes dead properties. Upstream's WebDAV backend has no locking or dead
+properties at all, so those are LinSCP extensions; collection-level
+preconditions beyond the lock token remain gaps. Amazon S3 signs with
 Signature Version 4, lists and stats objects, uses CopyObject for remote
 copies, and switches uploads larger than 16 MiB to multipart requests.
 Interrupted multipart uploads restart from the first part; ACLs, versioning,
 storage classes and server-side encryption options remain unsupported.
 
-Scripting covers the WinSCP transfer switches (file masks, `-transfer=`,
+Host keys are verified rather than accepted: `-hostkey=` takes a SHA-256 pin
+(hex, `SHA256:base64` or `sha256//base64`) or an MD5 one, and where the
+installed curl cannot enforce a SHA-256 pin (its `--hostpubsha256` needs the
+libssh2 backend, not libssh) the session is refused with that statement
+instead of being used with the pin dropped. Scripting covers the WinSCP
+transfer switches (file masks, `-transfer=`,
 `-resume`, `-append`, `-speed=`, `-resumesupport=`, `-preservetime`) with
 upstream's `.filepart` staging for resume-capable transfers, named and
 rule-based transfer presets, unambiguous command and option abbreviations,
@@ -99,7 +108,7 @@ remain open gaps.
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 and its [Linux capability matrix](docs/linux-feature-inventory.md) for the
 pinned upstream baseline, named test evidence, limitations and remaining gaps.
-The matrix currently has 84 scoped capabilities across 15 areas; it is not
+The matrix currently has 87 scoped capabilities across 15 areas; it is not
 an exhaustive behavioral parity certification. Refresh it after changing
 `docs/upstream-parity.json` with
 `python3 tools/check_upstream_parity.py --write-report`.

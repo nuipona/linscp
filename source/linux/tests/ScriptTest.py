@@ -891,6 +891,54 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("speed", result.stderr)
 
 
+    def test_a_host_key_pin_curl_cannot_check_is_refused(self):
+        """A host key pin is enforced or refused, never silently dropped.
+
+        curl checks '--hostpubsha256' in its libssh2 backend; a build that
+        links libssh (Debian 13, Ubuntu 24.04) accepts the option and
+        ignores it, and the session would then verify less than the pin
+        asked for. The client asks the curl it is about to use, and where
+        the answer is no, it refuses and says what remains - so a fake
+        curl whose version names libssh stands in for those systems.
+        """
+        real_curl = shutil.which("curl")
+        if real_curl is None:
+            self.skipTest("curl is not installed")
+        with tempfile.TemporaryDirectory(prefix="linscp-curl-") as temp:
+            fake = pathlib.Path(temp) / "curl"
+            fake.write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = \"--version\" ]; then\n"
+                "  echo \"curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0 \"\n"
+                "  echo \"OpenSSL/3.0.13 zlib/1.3 libssh/0.10.6/openssl/zlib\"\n"
+                "  echo \"Protocols: scp sftp file ftp ftps http https\"\n"
+                "  exit 0\n"
+                "fi\n"
+                "exec " + real_curl + " \"$@\"\n",
+                encoding="utf-8")
+            fake.chmod(0o755)
+            env = {"PATH": temp + os.pathsep + os.environ.get("PATH", "")}
+
+            # 43 base64 characters are a 32-byte digest: the pin is real,
+            # this curl is the part that cannot honour it.
+            pin = "SHA256:" + "A" * 43
+            refused = self.run_commands(
+                "open scp://alice@127.0.0.1:1/ -hostkey=%s ; echo SHOULD_NOT_RUN"
+                % pin, env=env)
+            self.assertEqual(refused.returncode, 1,
+                             refused.stdout + refused.stderr)
+            self.assertIn("hostpubsha256", refused.stderr)
+            self.assertNotIn("SHOULD_NOT_RUN", refused.stdout)
+
+            # An MD5 pin is a form this curl can check, so the session is
+            # refused only for its connection - the pin message is not what
+            # the user gets.
+            md5 = self.run_commands(
+                "open scp://alice@127.0.0.1:1/ -hostkey=" + "ab" * 16 +
+                " ; echo SHOULD_NOT_RUN", env=env)
+            self.assertNotIn("hostpubsha256", md5.stderr)
+            self.assertNotIn("SHOULD_NOT_RUN", md5.stdout)
+
     def test_rawsettings_refuse_a_setting_this_build_would_drop(self):
         """Upstream's '-rawsettings' names session settings. One this build
         does not apply is refused by name - with the names it does apply -
