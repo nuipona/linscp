@@ -53,7 +53,7 @@ build on any of them:
 * A platform record without a `how`, a dated `date` and described suites is an
   error, because evidence nobody can reproduce is not evidence.
 
-As it stands: **111/148** entries cite Linux test evidence, and **79/148**
+As it stands: **114/148** entries cite Linux test evidence, and **79/148**
 are `verified` (37/61 command/addition/broad-area rows plus 42/87 capability
 rows). The 24 broad and 45 capability rows with gaps remain `partial` or
 `missing` for functional reasons. Entries that used to be held at `partial`
@@ -79,8 +79,8 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 | Area | Current implementation and remaining work |
 | --- | --- |
 | SFTP | The native PuTTY transport, not a curl session. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Multi-source and recursive `cp` paths pass through the streamed fallback, while native copy-data and check-file-name replies are exercised by extension-enabled test-server modes. Remaining: metadata policies. |
-| SCP | curl-dependent transfer path, not WinSCP's remote-shell filesystem engine. Listing and directory operations need a real SCP implementation. |
-| FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
+| SCP | curl-dependent transfer path, not WinSCP's remote-shell filesystem engine. Authenticated get/put work when curl has SCP support; downloads stage locally, while automatic uploads use the final remote name because curl's SCP backend has no remote rename and explicit upload resume is refused (`LiveCurlTest.py`). Listing and directory operations still need a real SCP implementation. |
+| FTP/FTPS | curl and a text listing parser. `LiveCurlTest.py` verifies authenticated FTP and implicit FTPS upload/download against throwaway servers, including FTP `.filepart` completion. Verify MLSD, active/passive mode, explicit TLS, certificate policy, resume and varied-server compatibility. |
 | WebDAV | A PROPFIND filesystem: Depth 0/1 listings parsed from the 207 multi-status (type, size, date - namespace prefix agnostic), stat with real sizes/times and proper missing-path reporting, MKCOL with named refusals, MOVE with an absolute-URI Destination, COPY with Destination/Overwrite for single-file `cp` (streamed fallback when COPY is refused; both paths checked live), DELETE with 409 as 'not empty' and `rmdir` checking children first because DAV collection deletes are recursive; `open` probes with PROPFIND and refuses a 401 after the `--anyauth` challenge or a 405 that means the server is not DAV (`LiveDavTest.py` against a stdlib mock). URL paths and href comparisons preserve filenames containing spaces, literal `%`, `?` and `#` (also tested live). Missing: LOCK/UNLOCK, dead properties, collection-level precondition handling and `If` headers. |
 | S3 | AWS SigV4 over curl with path-style bucket access: `s3://` URLs (region from `AWS_REGION`/`AWS_DEFAULT_REGION`/the hostname/us-east-1), ListBuckets, ListObjectsV2 with delimiter and continuation, HEAD stat, get with range resume and `Last-Modified` preservation, PutObject for small files, multipart initiation/part upload/completion for files over 16 MiB, directory markers with bucket-aware `mkdir`/`rmdir`, CopyObject for `cp` and rename-as-copy-plus-delete, and refusal of unsigned or wrongly signed requests - signed vectors pinned to botocore in the unit suite and the whole loop against a TLS mock that re-derives signatures itself, including synthetic HTTP-200 Error bodies and abort cleanup (`LiveS3Test.py`, Linux-only evidence). On a handled failure the client attempts to abort; a retry restarts from part one because upload IDs/parts are not persisted. Multipart copy is not implemented. Missing: ACLs, versioning, storage classes, SSE options and object metadata beyond content. |
 | Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. Resume-capable transfers stage through upstream's `.filepart` name and are renamed into place only when complete - `option resume automatic` (default) from upstream's 100 KB threshold, `on` always, `off` never - so an interrupted transfer never leaves a truncated file under the final name and a continuation reads the staging file instead of splicing the existing destination; the live suite covers both directions, the stale-staging-file restart and `option resume off`. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live. The Linux curl wrapper now streams in-flight byte progress from its child into the same callback as SFTP; compatibility coverage for each curl protocol and queue cancellation/data-integrity cases remain. |
@@ -222,8 +222,10 @@ python3 tools/check_upstream_parity.py   # the inventory and its evidence rules
 
 `check-live` runs `ScriptTest.py` (server-free), `LiveSftpTest.py` (skips
 itself, loudly, without `paramiko`), `LiveS3Test.py` (standard library only;
-`botocore` is an optional extra one test skips without), `LiveDavTest.py` and
-the four GUI Python suites (remote search, local editor, browser uploads and desktop URL startup). CMake registers the same suites with CTest, and CI
+`botocore` is an optional extra one test skips without), `LiveDavTest.py`,
+`LiveCurlTest.py` (FTP/FTPS with optional `pyftpdlib`/`pyOpenSSL`, SCP with a
+local `sshd` when available) and the four GUI Python suites (remote search,
+local editor, browser uploads and desktop URL startup). CMake registers the same suites with CTest, and CI
 runs both builds plus a job that builds the `.deb`, installs it and starts the
 console and graphical clients from the installed paths. A suite that cannot
 run prints its skip count on its evidence line, so a green run that did less

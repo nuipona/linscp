@@ -99,6 +99,11 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME live-dav-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveDavTest.py
     $<TARGET_FILE:linuxscp>)
+  # FTP/FTPS use optional pyftpdlib and SCP uses the local sshd when present;
+  # the suite reports those dependency limits as skips.
+  add_test(NAME live-curl-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveCurlTest.py
+    $<TARGET_FILE:linuxscp>)
   add_test(NAME gui-search-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/RemoteSearchTest.py)
   add_test(NAME gui-local-editor-tests COMMAND ${Python3_EXECUTABLE}

@@ -20,7 +20,7 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 
 | Capability | Linux status | Automated evidence | Scope / remaining gap |
 | --- | --- | --- | --- |
-| `scp.curl-file-transfer` | partial | — | An scp:// URL selects curl for file transfers when curl is built with SCP. **Next:** Add a live SCP-server test for authentication, upload/download and resume; curl is not the WinSCP SCP engine. |
+| `scp.curl-file-transfer` | partial | live-curl | An scp:// URL selects curl for authenticated file transfers when curl is built with SCP. Downloads retain local .filepart staging; automatic uploads go directly to the final remote name because curl's SCP backend has no remote rename, and explicit upload resume is refused rather than silently pretending to resume. **Next:** Implement a safe resume contract only if the backend can provide remote staging, because curl is not the WinSCP SCP engine. |
 | `scp.shell-directory-engine` | missing | — | No WinSCP-style remote shell filesystem engine or SCP directory listing. **Next:** Implement and test remote-shell listing, stat and directory operations before claiming SCP parity. |
 | `scp.command-and-metadata` | missing | — | No SCP-specific remote command and metadata semantics matching upstream. **Next:** Implement and test SCP shell commands and metadata with an actual SCP server. |
 
@@ -28,10 +28,10 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 
 | Capability | Linux status | Automated evidence | Scope / remaining gap |
 | --- | --- | --- | --- |
-| `ftp.curl-transfer` | partial | — | curl handles FTP/FTPS basic transfers and attempts FTP directory operations. **Next:** Run a live FTP/FTPS compatibility matrix covering auth, transfers, resume and errors. |
+| `ftp.curl-transfer` | partial | live-curl | curl handles authenticated FTP/FTPS downloads and uploads and attempts FTP directory operations; the Linux live suite covers throwaway FTP and implicit FTPS endpoints with final-byte checks. **Next:** Broaden the live FTP/FTPS compatibility matrix to cover resume, errors and varied server implementations. |
 | `ftp.listings-and-mlsd` | partial | — | A text listing parser extracts names, dates, sizes and permissions when a server supplies them. **Next:** Implement and verify MLSD/MLST and non-Unix listing dialects instead of relying on ls -l parsing. |
 | `ftp.active-passive` | missing | — | No explicit active/passive connection policy or tests. **Next:** Expose and verify FTP active/passive settings against controlled servers. |
-| `ftp.tls-policy` | partial | — | FTPS uses curl TLS defaults and hostkey=* disables certificate checks. **Next:** Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit/implicit modes. |
+| `ftp.tls-policy` | partial | live-curl | FTPS uses curl TLS defaults and hostkey=* disables certificate checks. **Next:** Expose and test FTPS TLS validation, certificate pinning, client certificates and explicit mode in addition to the implicit smoke case. |
 
 ## WebDAV
 
@@ -68,7 +68,7 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 | `transfer.speed-and-append` | partial | — | Native SFTP supports append and paced transfers; curl uses --limit-rate and refuses append. **Next:** Automate timing and append tests across the supported native and curl protocol matrix. |
 | `transfer.presets` | verified | live-dav, script | Named, per-site and rule-selected presets change live transfer settings. |
 | `transfer.desktop-queue` | partial | gui-browser-upload | GUI task queue supports pause, cancel and retry; browser-originated files are privately staged. **Next:** Add queue priorities and live cancellation/data-integrity tests for curl-backed tasks. |
-| `transfer.curl-progress` | partial | unit | curl-backed downloads and uploads stream curl's progress meter from the Linux child process and translate it into the same byte-progress callback used by native SFTP; credentials stay in argv only in the child and both output pipes are drained concurrently. A manual local smoke run also authenticated downloads/uploads against throwaway FTP, implicit FTPS and OpenSSH SCP endpoints; that run is not a checked-in suite. **Next:** Add a checked-in live suite that asserts intermediate callbacks and protocol-specific resume/cancellation behavior; the S3 small-object and multipart paths now report progress, while generic curl coverage is currently a manual smoke result. |
+| `transfer.curl-progress` | partial | unit | curl-backed downloads and uploads stream curl's progress meter from the Linux child process and translate it into the same byte-progress callback used by native SFTP; credentials stay in argv only in the child and both output pipes are drained concurrently. LiveCurlTest now checks authenticated FTP/FTPS/SCP transfers and the SCP upload-resume refusal, while the unit suite exercises both meter columns. **Next:** Add a direct live assertion of intermediate progress callbacks and cancellation/data-integrity behavior; the S3 small-object and multipart paths report progress, but the CLI live suite currently proves final bytes and protocol policy rather than observing the callback itself. |
 
 ## Synchronization
 

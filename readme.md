@@ -39,9 +39,11 @@ CMake builds the same client, and registers the test suites with CTest:
     ctest --test-dir build --output-on-failure
     python3 tools/check_upstream_parity.py # evidence/report drift check
 
-Live SFTP tests require `paramiko`, and an S3 signature-reference test uses
-`botocore`; their evidence lines report skipped cases when these optional
-test dependencies are missing. CI installs them.
+Live SFTP tests require `paramiko`, the S3 signature-reference test uses
+`botocore`, and the FTP/FTPS live tests use `pyftpdlib` plus `pyOpenSSL`;
+the SCP case additionally uses a local `sshd` when available. Their evidence
+lines report skipped cases when optional dependencies are missing. CI installs
+the Python dependencies.
 
 To build a Debian package:
 
