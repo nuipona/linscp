@@ -174,6 +174,7 @@ MAIN_OBJ := $(OBJDIR)/linux/main.o
 # Everything but main(), so that the unit tests can use the front end.
 APP_LIB_OBJS := $(filter-out $(MAIN_OBJ),$(APP_OBJS))
 TEST_OBJS := $(OBJDIR)/linux/tests/UnitTest.o
+SBSCGEN := $(BINDIR)/sbcsgen
 
 PUTTY_LIB := $(BUILD)/libputty.a
 
@@ -225,8 +226,15 @@ $(BINDIR)/unittest: $(TEST_OBJS) $(APP_LIB_OBJS) $(PUTTY_LIB)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS_APP) -Itests -o $@ $(TEST_OBJS) $(APP_LIB_OBJS) $(PUTTY_LIB) $(LDFLAGS) $(LIBS)
 
-check: $(BINDIR)/unittest
+# Build the charset table maintainer tool only for checks, not for the client.
+$(SBSCGEN): $(TOP)/libs/putty/charset/sbcsgen.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) -std=gnu++17 $(OPT) -g $(WARN) $(CXXFLAGS) -o $@ $< $(LDFLAGS)
+
+check: $(BINDIR)/unittest $(SBSCGEN)
 	$(BINDIR)/unittest
+	$(SBSCGEN) --check --input $(TOP)/libs/putty/charset/sbcs.dat \
+		--expected $(TOP)/libs/putty/charset/sbcsdat.c
 
 # Transfers against the servers in tests/, which take seconds rather than
 # milliseconds: ScriptTest is server-free, LiveSftpTest skips itself without

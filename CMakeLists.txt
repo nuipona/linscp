@@ -76,10 +76,17 @@ target_include_directories(linscp-frontend PUBLIC ${FRONTEND})
 add_executable(linscp ${FRONTEND}/main.cpp)
 target_link_libraries(linscp PRIVATE linscp-frontend)
 
+# Maintainer utility for regenerating and validating PuTTY's checked-in
+# single-byte charset tables. It is not installed or needed at runtime.
+add_executable(sbcsgen libs/putty/charset/sbcsgen.cpp)
+
 enable_testing()
 add_executable(linscp-unittest ${FRONTEND}/tests/UnitTest.cpp)
 target_link_libraries(linscp-unittest PRIVATE linscp-frontend)
 add_test(NAME unit-tests COMMAND linscp-unittest)
+add_test(NAME charset-generator COMMAND sbcsgen --check
+  --input ${CMAKE_CURRENT_SOURCE_DIR}/libs/putty/charset/sbcs.dat
+  --expected ${CMAKE_CURRENT_SOURCE_DIR}/libs/putty/charset/sbcsdat.c)
 
 # Server-free script regressions and the offline upstream gap inventory.
 # Python is optional for a C++-only build; CI always provides it.
