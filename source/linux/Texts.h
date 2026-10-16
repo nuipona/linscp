@@ -3,7 +3,8 @@
  *
  * Upstream keeps its strings in resource files so that they can be
  * translated; the console client keeps the same discipline with one
- * module holding every message, in English.
+ * module holding shared messages, with compiled UTF-8 catalogs for a subset.
+ * See docs/localization.md for supported scope and locale selection.
  */
 
 #ifndef LINUXSCP_TEXTS_H
@@ -11,6 +12,8 @@
 
 #include <cstdint>
 #include <string>
+#include <initializer_list>
+#include <utility>
 
 namespace linuxscp {
 namespace Texts {
@@ -18,6 +21,10 @@ namespace Texts {
 extern const char * const ProductName;
 extern const char * const ProductVersion;
 
+// Translate only explicitly identified human-facing messages, never arbitrary
+// command output, paths or wire protocol data. Values are substituted once.
+std::string Translate(const char * message,
+    std::initializer_list<std::pair<const char *, std::string>> values = {});
 std::string VersionLine();
 std::string Usage();
 

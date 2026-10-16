@@ -53,6 +53,11 @@ To build a Debian package:
 See [`docs/debian.md`](docs/debian.md) for details, usage and the verified
 feature list. The manual page is [`docs/linuxscp.1`](docs/linuxscp.1).
 
+For English/Spanish browser and shared CLI localization, language selection
+and catalog development, see
+[`docs/localization.md`](docs/localization.md). Remaining upstream-parity work
+is tracked in [`docs/remaining-parity-plan.md`](docs/remaining-parity-plan.md).
+
 ## Usage
 
     linuxscp -batch -script=script.txt
@@ -109,8 +114,10 @@ remote-shell SCP directory engine remain intentional non-goals on Linux.
 See [the upstream parity audit and completion plan](docs/upstream-parity.md)
 and its [Linux capability matrix](docs/linux-feature-inventory.md) for the
 pinned upstream baseline, named test evidence, limitations and remaining gaps.
-The matrix currently has 87 scoped capabilities across 15 areas; it is not
-an exhaustive behavioral parity certification. Refresh it after changing
+The generated inventory covers upstream registrations, Linux additions,
+feature areas, granular capabilities and linked evidence; its companion plan
+lists acceptance criteria for every tracked gap. Neither is an exhaustive
+behavioral parity certification. Refresh both after changing
 `docs/upstream-parity.json` with
 `python3 tools/check_upstream_parity.py --write-report`.
 Unsupported compatibility options fail explicitly instead of silently doing

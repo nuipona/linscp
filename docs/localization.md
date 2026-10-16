@@ -1,0 +1,117 @@
+# Linux localization
+
+## Supported languages and coverage
+
+English (`en`) and Spanish (`es`) catalogs ship with the application. There
+are 89 CLI catalog entries and 387 browser entries (including whole help
+messages and plural variants). They are embedded at build time; there are no
+runtime downloads, gettext dependencies or installed OS locale requirements.
+
+Translated surfaces:
+
+- Browser menus, toolbars, dialogs, help, ARIA labels, tooltips, placeholders,
+  host-key verification, queue states and controls, synchronization summaries
+  and reasons, search results, editor states and confirmation/error messages.
+- Shared CLI `Texts` messages, `-help` and option errors, connection status,
+  host-key warnings, client-side key passphrase prompts, overwrite/delete
+  confirmations and confirmation-answer hints.
+- Browser plural forms and decimal/date presentation. CLI/protocol numbers
+  remain locale independent.
+
+**This is not complete upstream language coverage.** Command-specific help,
+human-facing status and argument/engine errors still exist in `Script.cpp`
+outside the shared `Texts`
+API. The inventory therefore retains `locale.translations` as **partial**.
+Server-provided SSH challenges, protocol data, core/OS diagnostic details,
+command-console output and logs are deliberately retained verbatim. A browser
+operation failure shows a translated explanation with the diagnostic detail;
+file contents, filenames, session names, paths, host-key fingerprints, command
+names and API enum values must never be translated.
+
+## CLI selection
+
+```sh
+LINUXSCP_LANGUAGE=es linuxscp -help
+LINUXSCP_LANGUAGE=es linuxscp -batch -command='nosuchcommand'
+```
+
+The first nonempty variable wins: `LINUXSCP_LANGUAGE`, `LC_ALL`, `LC_MESSAGES`,
+then `LANG`. An exact catalog is preferred; `es_MX.UTF-8` and `es_ES@formal`
+fall back to `es`. Unknown locales and `C`/`POSIX` use English. Selection changes
+messages only, not the process's numeric locale or protocol serialization.
+
+Spanish confirmation hints use `[S/n]` or `[s/N]`. `s`/`S` are accepted in
+Spanish, with `y`/`Y` retained for compatibility. Noninteractive destructive
+actions still fail closed; translating a prompt does not authorize an action.
+
+## Browser selection
+
+Use the **Language / Idioma** selector on the toolbar to choose English,
+Spanish, or the system default. The preference is saved in browser local
+storage. A change reloads only the page: backend sessions and queued transfers
+continue. Unsaved editor changes require confirmation before reloading.
+
+Without a saved preference, the served page uses the backend's locale selection
+(the same environment precedence as the CLI). A standalone page without backend
+configuration chooses the first supported browser language, then English.
+Browser region tags such as `es-MX` are supported. When storage is unavailable,
+the default still works; a preference change reports the storage failure rather
+than silently losing it.
+
+The GUI always runs its internal CLI subprocesses with
+`LINUXSCP_LANGUAGE=en`. The browser localizes their structured presentation
+separately. This is essential: language-dependent messages must not change the
+machine protocol, parsed sync plans, progress reports or error handling.
+
+## Catalog development
+
+1. Edit `source/linux/locales/{en,es}.json` for CLI messages, or
+   `source/gui/locales/{en,es}.json` for browser messages. Both are UTF-8 JSON
+   objects; English is an identity catalog and every language must have the
+   same keys.
+2. Use named placeholders such as `{path}`. Preserve spelling and occurrence
+   counts; translations may reorder them. Runtime values are substituted once
+   and cannot become more placeholders or format directives.
+3. Use `Texts::Translate` for identified CLI messages; use `t` for dynamic
+   browser messages. Use `tn(one, other, count, values)` for English/Spanish
+   singular/plural forms. Static page text and `title`, `aria-label` and
+   `placeholder` attributes are translated before startup. `code` and `kbd`
+   text and input values are not rewritten. Dynamic file/session data is
+   never walked or translated.
+4. Run `python3 tools/compile_translations.py`. Commit the catalogs together
+   with `source/linux/Translations.inc` and the generated inline catalog block
+   in `source/gui/web/index.html`. Do not hand-edit generated blocks.
+5. Run the tests below. CI also checks generated-output drift, untranslated
+   static browser text, literal `t`/`tn` keys and literal CLI `Translate` keys.
+
+The compiler rejects duplicate/missing keys and malformed/mismatched
+placeholders. Inline JSON escapes HTML-significant characters and Unicode line
+separators so catalog text cannot close a script tag. Translated dynamic markup
+is escaped separately; ordinary translated text uses text nodes.
+
+Adding languages beyond English/Spanish also requires reviewing plural rules,
+confirmation answers and the supported-language selector. These Linux catalogs
+are independent of upstream's Windows resource catalogs; they do not claim to
+reproduce all upstream translations.
+
+## Reproducible checks
+
+```sh
+python3 tools/compile_translations.py --check
+python3 tools/tests/test_translations.py
+make -C source/linux all check
+python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
+# Optional test dependency, not an application runtime dependency:
+npm install --no-save --package-lock=false jsdom@26
+node source/gui/tests/ClientTest.js
+node source/gui/tests/LocalizationTest.js
+python3 source/gui/tests/BrowserUploadTest.py
+# Requires paramiko in the interpreter used:
+python3 source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp
+python3 tools/check_upstream_parity.py
+```
+
+CMake/CTest registers the catalog tests with Python and the browser workflow
+tests when node and jsdom are available. Makefile, CMake, relocatable installs
+and Debian packages all contain the same embedded translations without needing
+catalog files at runtime.

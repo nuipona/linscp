@@ -385,7 +385,20 @@ def core_command_line(session):
 # Running the console client
 # ---------------------------------------------------------------------------
 
+def ui_language(environment=None):
+    """Messages only: never call setlocale or change protocol number formats."""
+    environment = os.environ if environment is None else environment
+    value = next((environment.get(key) for key in
+                  ("LINUXSCP_LANGUAGE", "LC_ALL", "LC_MESSAGES", "LANG")
+                  if environment.get(key)), "en")
+    base = re.split(r"[-_.@]", value.lower())[0]
+    return "es" if base == "es" else "en"
+
+
 def popen_kwargs():
+    # These processes speak an internal machine protocol. Browser messages
+    # are localized separately; changing these diagnostics breaks parsers.
+    environment = dict(os.environ, LINUXSCP_LANGUAGE="en")
     kwargs = {
         "stdout": subprocess.PIPE,
         "stderr": subprocess.PIPE,
@@ -393,6 +406,7 @@ def popen_kwargs():
         "text": True,
         "encoding": "utf-8",
         "errors": "replace",
+        "env": environment,
     }
     return kwargs
 
@@ -1392,9 +1406,13 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_error(500, "Cannot read %s: %s" % (name, exc))
                 return
             marker = b"</head>"
-            snippet = (b'<script>window.LSCP_TOKEN = "' +
-                       API_TOKEN.encode("utf-8") + b'";</script>')
-            if marker in page and API_TOKEN:
+            # Both values are JSON strings rather than executable source.
+            config = json.dumps({"token": API_TOKEN, "language": ui_language()})
+            config = config.replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+            snippet = ("<script>const LSCP_CONFIG = " + config +
+                       ";window.LSCP_TOKEN = LSCP_CONFIG.token;" +
+                       "window.LSCP_LANGUAGE = LSCP_CONFIG.language;</script>").encode("utf-8")
+            if marker in page:
                 page = page.replace(marker, snippet + marker, 1)
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

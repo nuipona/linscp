@@ -274,7 +274,7 @@ SeatPromptResult seat_confirm_ssh_host_key(Seat * seat, const char * host, int p
         return make_spr_sw_abort_static(
             "The host key is not cached; use -hostkey to accept it");
     }
-    if (console.Confirm("Continue connecting and cache the host key?", false))
+    if (console.Confirm(Texts::Translate("Continue connecting and cache the host key?"), false))
     {
         store_host_key(seat, host, port, keytype, keystr);
         return SPR_OK;
@@ -286,8 +286,8 @@ SeatPromptResult seat_confirm_weak_crypto_primitive(Seat * seat, SeatDialogText 
     void (*callback)(void * ctx, SeatPromptResult result), void * ctx,
     const char * algtype, const char * algname, int wcr)
 {
-    Console::Instance().Error(std::string("Warning: the server only offers a weak ") +
-        algtype + " algorithm (" + algname + "). Continuing.");
+    Console::Instance().Error(Texts::Translate("Warning: the server only offers a weak {type} algorithm ({name}). Continuing.",
+        {{"type", algtype}, {"name", algname}}));
     return SPR_OK;
 }
 
@@ -295,7 +295,7 @@ SeatPromptResult seat_confirm_weak_cached_hostkey(Seat * seat, SeatDialogText * 
     void (*callback)(void * ctx, SeatPromptResult result), void * ctx)
 {
     Console::Instance().Error(
-        "Warning: the cached host key uses a weak algorithm. Continuing.");
+        Texts::Translate("Warning: the cached host key uses a weak algorithm. Continuing."));
     return SPR_OK;
 }
 

@@ -212,7 +212,7 @@ bool Console::Confirm(const std::string & prompt, bool defaultYes)
         return false;
     }
     std::string answer;
-    std::string full = prompt + (defaultYes ? " [Y/n]: " : " [y/N]: ");
+    std::string full = prompt + Texts::Translate(defaultYes ? " [Y/n]: " : " [y/N]: ");
     if (!ReadLine(full, answer))
     {
         return false;
@@ -221,7 +221,9 @@ bool Console::Confirm(const std::string & prompt, bool defaultYes)
     {
         return defaultYes;
     }
-    return (answer[0] == 'y' || answer[0] == 'Y');
+    return (answer[0] == 'y' || answer[0] == 'Y' ||
+        ((answer[0] == 's' || answer[0] == 'S') &&
+         Texts::Translate("yes") == "sí"));
 }
 
 bool Console::SetLogFile(const std::string & path, std::string & error)

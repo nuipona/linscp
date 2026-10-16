@@ -735,3 +735,7 @@ table.file-table tr.selected td { color: var(--selection-text); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
 }
+
+/* Language names remain readable at longer translated label lengths. */
+.language-control { display:flex; align-items:center; gap:6px; font-size:12px; }
+.language-control select { max-width:150px; font:inherit; }

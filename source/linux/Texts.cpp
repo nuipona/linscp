@@ -3,6 +3,9 @@
 #include "Platform.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <initializer_list>
+#include <utility>
 
 /* from source/putty/utils/version.c (puttyexp.h) */
 extern "C" const char * get_putty_version(void);
@@ -15,12 +18,60 @@ const char * const ProductVersion = "1.0";
 
 namespace {
 
-std::string Join(const std::string & left, const std::string & right)
-{
-    return left + right;
-}
+#include "Translations.inc"
 
 } // namespace
+
+// Locale selection affects messages only: protocol output, numeric parsing and
+// filenames must not inherit locale-dependent transformations. C/POSIX keep
+// English output; an explicit LinSCP override is useful without installed OS
+// locale data. Unknown locales fall back to English.
+std::string Translate(const char * message,
+    std::initializer_list<std::pair<const char *, std::string>> values)
+{
+    const char * selected = std::getenv("LINUXSCP_LANGUAGE");
+    if (!selected || !*selected) selected = std::getenv("LC_ALL");
+    if (!selected || !*selected) selected = std::getenv("LC_MESSAGES");
+    if (!selected || !*selected) selected = std::getenv("LANG");
+    std::string locale = selected ? selected : "en";
+    const auto suffix = locale.find_first_of(".@");
+    if (suffix != std::string::npos) locale.resize(suffix);
+    const char * text = message;
+    bool found = false;
+    for (int pass = 0; pass < 2 && !found; ++pass)
+    {
+        for (const auto & entry : translations)
+            if (locale == entry.locale && std::string(message) == entry.message)
+            {
+                text = entry.text;
+                found = true;
+                break;
+            }
+        const auto region = locale.find('_');
+        if (region == std::string::npos) break;
+        locale.resize(region);
+    }
+    // Substitute in one pass: a filename containing another placeholder must
+    // never be interpreted as catalog syntax (nor as a printf format string).
+    std::string result;
+    for (size_t i = 0; text[i]; )
+    {
+        bool replaced = false;
+        if (text[i] == '{') for (const auto & value : values)
+        {
+            const std::string token = "{" + std::string(value.first) + "}";
+            if (std::string(text + i).compare(0, token.size(), token) == 0)
+            {
+                result += value.second;
+                i += token.size();
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) result += text[i++];
+    }
+    return result;
+}
 
 std::string VersionLine()
 {
@@ -33,8 +84,8 @@ std::string VersionLine()
 
 std::string Usage()
 {
-    return
-"LinSCP " + std::string(ProductVersion) + " - secure file transfer client\n"
+    return Translate(
+"LinSCP {version} - secure file transfer client\n"
 "\n"
 "  linuxscp [options] [sftp://[user[:password]@]host[:port]/[path]]\n"
 "\n"
@@ -112,130 +163,114 @@ std::string Usage()
 "                    transfer preset the default, 'option preset off' clears)\n"
 "  binary / ascii    select the transfer mode of the following commands\n"
 "  help              list the commands (alias: man)\n"
-"  exit              end the session\n";
+"  exit              end the session\n", {{"version", ProductVersion}});
 }
 
 std::string CannotOpenSession(const std::string & host, const std::string & reason)
 {
-    return "Cannot open session to " + host + ": " + reason;
+    return Translate("Cannot open session to {host}: {reason}", {{"host", host}, {"reason", reason}});
 }
 
 std::string ConnectionClosed()
 {
-    return "Connection has been unexpectedly closed.";
+    return Translate("Connection has been unexpectedly closed.");
 }
 
 std::string HostKeyUnknown(const std::string & host, int port,
     const std::string & keyType, const std::string & fingerprint)
 {
-    char portText[16];
-    snprintf(portText, sizeof(portText), "%d", port);
-    return "The host key of " + host + " (port " + portText + ") is not cached.\n" +
-        "  " + keyType + " key fingerprint: " + fingerprint + "\n" +
-        "If you expected a different fingerprint, do not continue.";
+    return Translate("The host key of {host} (port {port}) is not cached.\n  {type} key fingerprint: {fingerprint}\nIf you expected a different fingerprint, do not continue.",
+        {{"host", host}, {"port", std::to_string(port)}, {"type", keyType},
+        {"fingerprint", fingerprint}});
 }
 
 std::string HostKeyMismatch(const std::string & host, int port,
     const std::string & keyType, const std::string & fingerprint)
 {
-    char portText[16];
-    snprintf(portText, sizeof(portText), "%d", port);
-    return "The host key of " + host + " (port " + portText + ") does not match the cached key.\n" +
-        "  " + keyType + " key fingerprint: " + fingerprint + "\n" +
-        "The connection may be intercepted; refusing to continue.";
+    return Translate("The host key of {host} (port {port}) does not match the cached key.\n  {type} key fingerprint: {fingerprint}\nThe connection may be intercepted; refusing to continue.",
+        {{"host", host}, {"port", std::to_string(port)}, {"type", keyType},
+        {"fingerprint", fingerprint}});
 }
 
 std::string HostKeyUnexpected(const std::string & host, int port,
     const std::string & keyType, const std::string & fingerprint,
     const std::string & expected)
 {
-    char portText[16];
-    snprintf(portText, sizeof(portText), "%d", port);
-    return "The host key of " + host + " (port " + portText + ") is not the expected one.\n" +
-        "  " + keyType + " key fingerprint: " + fingerprint + "\n" +
-        "  expected fingerprint:           " + expected + "\n" +
-        "The connection may be intercepted; refusing to continue.";
+    return Translate("The host key of {host} (port {port}) is not the expected one.\n  {type} key fingerprint: {fingerprint}\n  expected fingerprint:           {expected}\nThe connection may be intercepted; refusing to continue.",
+        {{"host", host}, {"port", std::to_string(port)}, {"type", keyType},
+        {"fingerprint", fingerprint}, {"expected", expected}});
 }
 
 std::string HostKeyCached(const std::string & host, int port)
 {
-    char portText[16];
-    snprintf(portText, sizeof(portText), "%d", port);
-    return Join("Host key of " + host + " (port " + portText + ") verified from cache.", "");
+    return Translate("Host key of {host} (port {port}) verified from cache.", {{"host", host}, {"port", std::to_string(port)}});
 }
 
 std::string PasswordPrompt(const std::string & userName, const std::string & host)
 {
-    std::string result = userName;
-    result += "@" + host + "'s password: ";
-    return result;
+    return Translate("{user}@{host}'s password: ", {{"user", userName}, {"host", host}});
 }
 
 std::string NotConnected()
 {
-    return "Not connected. Use 'open' to connect to a site first.";
+    return Translate("Not connected. Use 'open' to connect to a site first.");
 }
 
 std::string ReadingDirectory(const std::string & path)
 {
-    return "Reading directory " + path + "...";
+    return Translate("Reading directory {path}...", {{"path", path}});
 }
 
 std::string DirectoryRead(int count)
 {
-    char buffer[32];
-    snprintf(buffer, sizeof(buffer), "%d entries", count);
-    return std::string(buffer);
+    return Translate(count == 1 ? "{count} entry" : "{count} entries", {{"count", std::to_string(count)}});
 }
 
 std::string CannotReadDirectory(const std::string & path, const std::string & reason)
 {
-    return "Cannot read directory '" + path + "'. " + reason;
+    return Translate("Cannot read directory '{path}'. {reason}", {{"path", path}, {"reason", reason}});
 }
 
 std::string RetrievingFile(const std::string & remote, const std::string & local)
 {
-    return "Retrieving " + remote + " to " + local;
+    return Translate("Retrieving {remote} to {local}", {{"remote", remote}, {"local", local}});
 }
 
 std::string UploadingFile(const std::string & local, const std::string & remote)
 {
-    return "Uploading " + local + " to " + remote;
+    return Translate("Uploading {local} to {remote}", {{"local", local}, {"remote", remote}});
 }
 
 std::string FileTransferred(const std::string & name, uint64_t size)
 {
-    char buffer[64];
-    snprintf(buffer, sizeof(buffer), " [%llu bytes]",
-        static_cast<unsigned long long>(size));
-    return Join(name, buffer);
+    return name + Translate(" [{size} bytes]", {{"size", std::to_string(size)}});
 }
 
 std::string TransferFailed(const std::string & name, const std::string & reason)
 {
-    return "Transfer of '" + name + "' failed. " + reason;
+    return Translate("Transfer of '{name}' failed. {reason}", {{"name", name}, {"reason", reason}});
 }
 
 std::string RemoteError(const std::string & operation, const std::string & path,
     const std::string & reason)
 {
-    return "Cannot " + operation + " '" + path + "'. " + reason;
+    return Translate("Cannot {operation} '{path}'. {reason}", {{"operation", Translate(operation.c_str())}, {"path", path}, {"reason", reason}});
 }
 
 std::string LocalError(const std::string & operation, const std::string & path,
     const std::string & reason)
 {
-    return "Local " + operation + " of '" + path + "' failed. " + reason;
+    return Translate("Local {operation} of '{path}' failed. {reason}", {{"operation", Translate(operation.c_str())}, {"path", path}, {"reason", reason}});
 }
 
 std::string UnknownCommand(const std::string & command)
 {
-    return "Unknown command '" + command + "'. Type 'help' for a list of commands.";
+    return Translate("Unknown command '{command}'. Type 'help' for a list of commands.", {{"command", command}});
 }
 
 std::string WrongArguments(const std::string & command, const std::string & hint)
 {
-    return "Wrong arguments of '" + command + "' command. " + hint;
+    return Translate("Wrong arguments of '{command}' command. {hint}", {{"command", command}, {"hint", hint}});
 }
 
 } // namespace Texts

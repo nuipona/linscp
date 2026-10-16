@@ -26,6 +26,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 import zlib
 
 BINARY = str(pathlib.Path(sys.argv.pop(1)).resolve())
@@ -327,6 +328,24 @@ class LiveSftpTests(unittest.TestCase):
         result = self.run_script("copyid %s" % public_file)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(authorized_keys.read_text().splitlines(), lines)
+
+    def test_spanish_transfer_and_host_key_refusal(self):
+        name = "localization {path}.txt"
+        data = "Contenido UTF-8: áéíóú\n".encode("utf-8")
+        (self.root / name).write_bytes(data)
+        target = self.local / name
+        with mock.patch.dict(os.environ, {"LINUXSCP_LANGUAGE": "es"}):
+            result = self.run_script('get "%s" "%s"' % (name, target))
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(target.read_bytes(), data)
+            self.assertIn("Conectado, el directorio remoto es", result.stdout)
+            result = self.run_script("echo SHOULD_NOT_RUN", extra_args=[
+                "-hostkey=ssh-ed25519 256 SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"])
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertNotIn("SHOULD_NOT_RUN", result.stdout)
+        self.assertIn("no es la esperada", result.stderr)
+        self.assertIn("se rechaza continuar", result.stderr)
+        self.assertIn("SHA256:aaaaaaaa", result.stderr)
 
     def test_open_with_a_wrong_password_is_refused(self):
         argv = [BINARY, "-batch", "-hostkey=*",

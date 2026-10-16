@@ -509,15 +509,15 @@ ConfirmationResult ConfirmDestructiveAction(const std::string & question)
     Console & console = Console::Instance();
     if (!console.IsInteractive())
     {
-        console.Error("Cannot confirm this action without a terminal; run "
-            "interactively or use 'option confirm off' in a trusted script.");
+        console.Error(Texts::Translate("Cannot confirm this action without a terminal; run "
+            "interactively or use 'option confirm off' in a trusted script."));
         return ConfirmationResult::Unavailable;
     }
     if (console.Confirm(question, false))
     {
         return ConfirmationResult::Accepted;
     }
-    console.Status("Cancelled.");
+    console.Status(Texts::Translate("Cancelled."));
     return ConfirmationResult::Declined;
 }
 
@@ -1286,7 +1286,7 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         options.userName = CurrentUserName();
     }
 
-    Console::Instance().Status("Connecting to " + options.hostName + "...");
+    Console::Instance().Status(Texts::Translate("Connecting to {host}...", {{"host", options.hostName}}));
     if (!mSession.Open(options, error))
     {
         Console::Instance().Error(Texts::CannotOpenSession(options.hostName, error));
@@ -1344,7 +1344,7 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         "\" user=\"" + Console::EscapeActionText(options.userName) +
         "\" directory=\"" + Console::EscapeActionText(mRemoteDirectory) + "\"");
 
-    Console::Instance().Status("Connected, the remote directory is " + mRemoteDirectory);
+    Console::Instance().Status(Texts::Translate("Connected, the remote directory is {path}", {{"path", mRemoteDirectory}}));
     return true;
 }
 
@@ -1709,8 +1709,8 @@ bool Script::ConfirmObsolete(const std::string & side, const std::string & path,
         return true;
     }
     const ConfirmationResult confirmation = ConfirmDestructiveAction(
-        "Delete obsolete " + side + (isDirectory ? " directory '" : " file '") +
-        path + "'?");
+        Texts::Translate("Delete obsolete {side} {kind} '{path}'?", {{"side", Texts::Translate(side.c_str())},
+            {"kind", Texts::Translate(isDirectory ? "directory" : "file")}, {"path", path}}));
     if (confirmation == ConfirmationResult::Accepted)
     {
         return true;
@@ -1937,7 +1937,7 @@ bool Script::DownloadDirectoryRecursive(const std::string & remoteDir,
             if (mConfirm && localInfo.exists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
-                    "Overwrite local file '" + childLocal + "'?");
+                    Texts::Translate("Overwrite local file '{path}'?", {{"path", childLocal}}));
                 if (confirmation != ConfirmationResult::Accepted)
                 {
                     if (confirmation == ConfirmationResult::Unavailable)
@@ -2176,7 +2176,7 @@ bool Script::UploadDirectoryRecursive(const std::string & localDir,
             if (mConfirm && remoteExists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
-                    "Overwrite remote file '" + childRemote + "'?");
+                    Texts::Translate("Overwrite remote file '{path}'?", {{"path", childRemote}}));
                 if (confirmation != ConfirmationResult::Accepted)
                 {
                     if (confirmation == ConfirmationResult::Unavailable)
@@ -3582,7 +3582,7 @@ bool Script::GetFiles(const std::vector<std::string> & args)
             if (mConfirm && localInfo.exists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
-                    "Overwrite local file '" + localPath + "'?");
+                    Texts::Translate("Overwrite local file '{path}'?", {{"path", localPath}}));
                 if (confirmation != ConfirmationResult::Accepted)
                 {
                     if (confirmation == ConfirmationResult::Unavailable)
@@ -3902,7 +3902,7 @@ bool Script::PutFiles(const std::vector<std::string> & args)
             if (mConfirm && remoteExists && !stage.continuing && !flags.append)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
-                    "Overwrite remote file '" + remotePath + "'?");
+                    Texts::Translate("Overwrite remote file '{path}'?", {{"path", remotePath}}));
                 if (confirmation != ConfirmationResult::Accepted)
                 {
                     if (confirmation == ConfirmationResult::Unavailable)
@@ -5480,8 +5480,7 @@ bool Script::OpenStoredSite(const std::string & name,
             "' cannot be used: " + stored->passwordError +
             ". Continuing without it.");
     }
-    console.Status("Connecting to " + options.hostName + " (stored session '" +
-        stored->name + "')...");
+    console.Status(Texts::Translate("Connecting to {host} (stored session '{name}')...", {{"host", options.hostName}, {"name", stored->name}}));
     if (!mSession.Open(options, error))
     {
         console.Error(Texts::CannotOpenSession(options.hostName, error));
@@ -5528,7 +5527,7 @@ bool Script::OpenStoredSite(const std::string & name,
     }
 
     mStoredSessionName = stored->name;
-    console.Status("Connected, the remote directory is " + mRemoteDirectory);
+    console.Status(Texts::Translate("Connected, the remote directory is {path}", {{"path", mRemoteDirectory}}));
 
     /* Remember when this session was last used; a failure to record it
      * does not break the connection. */
@@ -5948,7 +5947,7 @@ bool Script::RemoveRemote(const std::vector<std::string> & args)
             if (mConfirm)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
-                    "Delete remote file '" + paths[n] + "'?");
+                    Texts::Translate("Delete remote file '{path}'?", {{"path", paths[n]}}));
                 if (confirmation != ConfirmationResult::Accepted)
                 {
                     if (confirmation == ConfirmationResult::Unavailable)
@@ -5991,7 +5990,7 @@ bool Script::RemoveRemoteDirectory(const std::vector<std::string> & args)
         if (mConfirm)
         {
             ConfirmationResult confirmation = ConfirmDestructiveAction(
-                "Delete remote directory '" + path + "'?");
+                Texts::Translate("Delete remote directory '{path}'?", {{"path", path}}));
             if (confirmation != ConfirmationResult::Accepted)
             {
                 if (confirmation == ConfirmationResult::Unavailable)
@@ -6116,7 +6115,7 @@ bool Script::MoveRemote(const std::vector<std::string> & args)
             if (targetStat == LSCP_SFTP_STAT_EXISTS)
             {
                 ConfirmationResult confirmation = ConfirmDestructiveAction(
-                    "Overwrite remote file '" + target + "'?");
+                    Texts::Translate("Overwrite remote file '{path}'?", {{"path", target}}));
                 if (confirmation != ConfirmationResult::Accepted)
                 {
                     if (confirmation == ConfirmationResult::Unavailable)
@@ -6425,7 +6424,7 @@ bool Script::CopyRemoteOneFile(const std::string & from,
         if (statRes == LSCP_SFTP_STAT_EXISTS)
         {
             const ConfirmationResult confirmation = ConfirmDestructiveAction(
-                "Overwrite remote file '" + to + "'?");
+                Texts::Translate("Overwrite remote file '{path}'?", {{"path", to}}));
             if (confirmation != ConfirmationResult::Accepted)
             {
                 if (confirmation == ConfirmationResult::Unavailable)

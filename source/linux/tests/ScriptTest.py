@@ -72,6 +72,38 @@ class ScriptTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stderr)
                     self.assertIn("SOURCE_TREE_GUI", result.stdout)
 
+    def test_translation_locale_selection_and_literal_placeholders(self):
+        for locale in ("es", "es_MX.UTF-8", "es_ES@formal"):
+            result = self.run_commands("{reason}", env={"LINUXSCP_LANGUAGE": locale})
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Orden desconocida '{reason}'", result.stdout + result.stderr)
+        for locale in ("en", "C", "POSIX", "zz_ZZ.UTF-8", "../../es"):
+            result = self.run_commands("nosuchcommand", env={"LINUXSCP_LANGUAGE": locale})
+            self.assertIn("Unknown command", result.stdout + result.stderr)
+
+    def test_translation_locale_environment_precedence(self):
+        env = {"LINUXSCP_LANGUAGE": "", "LC_ALL": "C", "LC_MESSAGES": "es", "LANG": "es"}
+        result = self.run_commands("nosuchcommand", env=env)
+        self.assertIn("Unknown command", result.stdout + result.stderr)
+        env["LC_ALL"] = ""
+        result = self.run_commands("nosuchcommand", env=env)
+        self.assertIn("Orden desconocida", result.stdout + result.stderr)
+        env["LINUXSCP_LANGUAGE"] = "en"
+        result = self.run_commands("nosuchcommand", env=env)
+        self.assertIn("Unknown command", result.stdout + result.stderr)
+
+    def test_translated_help_and_option_errors_preserve_command_syntax(self):
+        for arguments, expected in [(["-help"], "Órdenes:"),
+                                    (["-port=bad"], "Puerto no válido"),
+                                    (["-unknown"], "Opción desconocida")]:
+            result = subprocess.run([BINARY] + arguments,
+                                    capture_output=True, text=True, timeout=10,
+                                    env=self.environment({"LINUXSCP_LANGUAGE": "es"}))
+            self.assertIn(expected, result.stdout + result.stderr)
+            self.assertEqual(result.returncode, 0 if arguments == ["-help"] else 1)
+        result = self.run_commands("echo Delete %1%", env={"LINUXSCP_LANGUAGE": "es"})
+        self.assertIn("Delete", result.stdout)
+
     def test_default_abort(self):
         for file in (False, True):
             with self.subTest(file=file):
@@ -405,6 +437,14 @@ class ScriptTests(unittest.TestCase):
         result = self.run_commands("edit /tmp/file.txt")
         self.assertEqual(result.returncode, 1)
         self.assertIn("Not connected", result.stderr)
+
+    def test_help_and_delsession_aliases(self):
+        result = self.run_commands("?")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, self.run_commands("help").stdout)
+        result = self.run_commands("savesession alias-site -host=example.com; delsession alias-site; sessions")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("no stored sessions", result.stdout)
 
     def test_stored_sessions(self):
         result = self.run_commands("sessions")

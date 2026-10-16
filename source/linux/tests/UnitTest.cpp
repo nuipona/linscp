@@ -26,6 +26,7 @@
 #include "Session.h"
 #include "Script.h"
 #include "Console.h"
+#include "Texts.h"
 #include "Editor.h"
 #include "SessionStore.h"
 #include "S3SigV4.h"
@@ -3119,8 +3120,44 @@ void TestDavLockAndPropertyXml()
     CHECK_EQ(value, std::string(""));
 }
 
+void TestLocalization()
+{
+    const char * oldValue = std::getenv("LINUXSCP_LANGUAGE");
+    const bool hadValue = oldValue != NULL;
+    const std::string saved = oldValue ? oldValue : "";
+    setenv("LINUXSCP_LANGUAGE", "es_MX.UTF-8", 1);
+    CHECK_EQ(Texts::DirectoryRead(0), std::string("0 entradas"));
+    CHECK_EQ(Texts::DirectoryRead(1), std::string("1 entrada"));
+    CHECK_EQ(Texts::DirectoryRead(2), std::string("2 entradas"));
+    CHECK_TRUE(Texts::Usage().find("Órdenes:") != std::string::npos);
+    CHECK_TRUE(Texts::Usage().find("-command=CMD") != std::string::npos);
+    CHECK_TRUE(Texts::Usage().find("{version}") == std::string::npos);
+    const std::string fingerprint = "SHA256:abc%n{host}";
+    CHECK_TRUE(Texts::HostKeyUnknown("host.example", 22, "ed25519", fingerprint)
+        .find("no está guardada") != std::string::npos);
+    CHECK_TRUE(Texts::HostKeyMismatch("host.example", 22, "ed25519", fingerprint)
+        .find("se rechaza continuar") != std::string::npos);
+    const std::string warning = Texts::HostKeyUnexpected("host.example", 22,
+        "ed25519", fingerprint, "SHA256:expected");
+    CHECK_TRUE(warning.find(fingerprint) != std::string::npos);
+    CHECK_TRUE(warning.find("SHA256:expected") != std::string::npos);
+    CHECK_TRUE(warning.find("no es la esperada") != std::string::npos);
+    CHECK_TRUE(warning.find("se rechaza continuar") != std::string::npos);
+    CHECK_EQ(Texts::PasswordPrompt("user", "host"), std::string("Contraseña de user@host: "));
+    CHECK_EQ(Texts::Translate("Overwrite remote file '{path}'?", {{"path", "{path}%n"}}),
+        std::string("¿Sobrescribir el archivo remoto '{path}%n'?"));
+    CHECK_EQ(Texts::Translate(" [y/N]: "), std::string(" [s/N]: "));
+    setenv("LINUXSCP_LANGUAGE", "unsupported", 1);
+    CHECK_EQ(Texts::ConnectionClosed(), std::string("Connection has been unexpectedly closed."));
+    setenv("LINUXSCP_LANGUAGE", "C", 1);
+    CHECK_EQ(Texts::DirectoryRead(2), std::string("2 entries"));
+    if (hadValue) setenv("LINUXSCP_LANGUAGE", saved.c_str(), 1);
+    else unsetenv("LINUXSCP_LANGUAGE");
+}
+
 int main()
 {
+    TestLocalization();
     TestSplitCommandLine();
     TestSplitCommands();
     TestRemotePaths();

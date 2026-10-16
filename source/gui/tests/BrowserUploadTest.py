@@ -6,6 +6,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import sys
 import tempfile
 import threading
@@ -49,6 +50,46 @@ class BrowserUploadTests(unittest.TestCase):
                     os.unlink(path)
                 except OSError:
                     pass
+
+    def test_ui_locale_selection_and_core_protocol_isolation(self):
+        self.assertEqual(gui.ui_language({"LANG": "es_MX.UTF-8"}), "es")
+        self.assertEqual(gui.ui_language({"LC_ALL": "C", "LANG": "es"}), "en")
+        self.assertEqual(gui.ui_language({"LC_ALL": "", "LC_MESSAGES": "es"}), "es")
+        self.assertEqual(gui.ui_language({"LINUXSCP_LANGUAGE": "en", "LANG": "es"}), "en")
+        self.assertEqual(gui.ui_language({"LANG": "xx"}), "en")
+        with mock.patch.dict(os.environ, {"LINUXSCP_LANGUAGE": "es", "LC_ALL": "es_ES.UTF-8"}):
+            kwargs = gui.popen_kwargs()
+            self.assertEqual(kwargs["env"]["LINUXSCP_LANGUAGE"], "en")
+            self.assertEqual(os.environ["LINUXSCP_LANGUAGE"], "es")
+            self.assertEqual(kwargs["encoding"], "utf-8")
+
+    def test_served_page_has_safe_locale_and_token_data(self):
+        class QuietHandler(gui.LinuxScpGuiHandler):
+            def log_message(self, *args):
+                pass
+        server = ThreadingHTTPServer(("127.0.0.1", 0), QuietHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            token = '</script><script>alert("injection")</script>'
+            with mock.patch.object(gui, "API_TOKEN", token), \
+                 mock.patch.dict(os.environ, {"LINUXSCP_LANGUAGE": "es"}):
+                conn = http.client.HTTPConnection("127.0.0.1", server.server_port)
+                try:
+                    conn.request("GET", "/")
+                    response = conn.getresponse()
+                    self.assertEqual(response.status, 200)
+                    page = response.read().decode("utf-8")
+                finally:
+                    conn.close()
+            config = re.search(r'const LSCP_CONFIG = (.*?);window.LSCP_TOKEN', page)[1]
+            self.assertNotIn('<', config)
+            self.assertEqual(json.loads(config), {"token": token, "language": "es"})
+            self.assertIn('const GUI_CATALOGS = ', page)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_upload_stages_bytes_and_queues_the_exact_remote_path(self):
         stream = io.BytesIO(b"binary\x00payload")

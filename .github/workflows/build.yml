@@ -84,6 +84,8 @@ jobs:
               printf '::notice::%s\n' "${line//]/%5D}"; done; } || :
       - name: Validate upstream gap inventory (not full parity)
         run: |
+          python3 tools/compile_translations.py --check
+          python3 tools/tests/test_translations.py
           python3 tools/check_upstream_parity.py
           python3 tools/tests/test_parity_inventory.py
       - name: Smoke test
@@ -165,6 +167,7 @@ jobs:
           npm install jsdom@26 --no-audit --no-fund
           node "$GITHUB_WORKSPACE/source/gui/tests/ClientTest.js" \
             "$GITHUB_WORKSPACE/source/gui/web/index.html"
+          node "$GITHUB_WORKSPACE/source/gui/tests/LocalizationTest.js"
       - name: Live curl protocol regressions
         run: |
           # The suite's evidence lines are surfaced as annotations whatever
