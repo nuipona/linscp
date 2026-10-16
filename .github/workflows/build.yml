@@ -230,6 +230,11 @@ jobs:
           # find_package(Python3) resolves the tests to it.
           python3 -m venv "$RUNNER_TEMP/live-test-venv"
           "$RUNNER_TEMP/live-test-venv/bin/pip" install --quiet paramiko botocore pyftpdlib pyOpenSSL
+          # The venv has to be the interpreter find_package(Python3)
+          # resolves at configure time, because ctest bakes that
+          # absolute path into every test command; GITHUB_PATH
+          # alone would only reach the steps after this one.
+          export PATH="$RUNNER_TEMP/live-test-venv/bin:$PATH"
           echo "$RUNNER_TEMP/live-test-venv/bin" >> "$GITHUB_PATH"
           cmake -S . -B build
           cmake --build build -j
