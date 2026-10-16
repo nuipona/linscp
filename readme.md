@@ -86,7 +86,12 @@ copies, and switches uploads larger than 16 MiB to multipart requests.
 Interrupted multipart uploads restart from the first part; ACLs, versioning,
 storage classes and server-side encryption options remain unsupported.
 
-Scripting covers the WinSCP transfer switches (file masks, `-transfer=`,
+Host keys are verified rather than accepted: `-hostkey=` takes a SHA-256 pin
+(hex, `SHA256:base64` or `sha256//base64`) or an MD5 one, and where the
+installed curl cannot enforce a SHA-256 pin (its `--hostpubsha256` needs the
+libssh2 backend, not libssh) the session is refused with that statement
+instead of being used with the pin dropped. Scripting covers the WinSCP
+transfer switches (file masks, `-transfer=`,
 `-resume`, `-append`, `-speed=`, `-resumesupport=`, `-preservetime`) with
 upstream's `.filepart` staging for resume-capable transfers, named and
 rule-based transfer presets, unambiguous command and option abbreviations,

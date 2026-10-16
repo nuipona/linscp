@@ -15,7 +15,20 @@ namespace linuxscp {
  * 'open' must not second-guess. Shared with S3Client.cpp, whose
  * requests are signed but whose transport is the same curl.
  */
+/* True for the SSH protocols curl can serve ('sftp', 'scp'). */
+bool IsSshCurlProtocol(const std::string & proto);
+
 bool IsCurlEndpointUnreachable(int code);
+
+/*
+ * Whether the curl in use can check an SSH host key against a SHA-256
+ * fingerprint. curl implements '--hostpubsha256' in its libssh2 backend;
+ * a build that links libssh (what Debian 13 and Ubuntu 24.04 ship) accepts
+ * the option and ignores it, so the option list is not the question - the
+ * backend named in 'curl --version' is. Anything unrecognised answers
+ * false: a pin that cannot be enforced has to fail, not pass unnoticed.
+ */
+bool CurlSupportsHostPubSha256();
 
 /*
  * The pieces of the WebDAV lock and dead-property extensions that can be

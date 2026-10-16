@@ -332,10 +332,6 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
     return url;
 }
 
-bool IsSshCurlProtocol(const std::string & proto)
-{
-    return proto == "sftp" || proto == "scp";
-}
 
 /* The TLS policy of the session as curl arguments. Nothing is added for a
  * plain session, and a policy curl cannot express is refused before the
@@ -1307,6 +1303,24 @@ int RunCurlCaptureWithProgress(const std::vector<std::string> & args,
 {
     return RunCurlCaptureWithProgressInternal(args, out, error, progress,
         progressCtx, upload);
+}
+
+bool CurlSupportsHostPubSha256()
+{
+    /* Asked once: the curl binary does not change under a running process. */
+    static const bool supported = [] {
+        std::vector<std::string> args;
+        args.push_back(CurlExecutable());
+        args.push_back("--version");
+        std::string outStr;
+        std::string errStr;
+        if (RunCurl(args, outStr, errStr) != 0)
+        {
+            return false;
+        }
+        return outStr.find("libssh2/") != std::string::npos;
+    }();
+    return supported;
 }
 
 bool IsCurlEndpointUnreachable(int code)
@@ -2541,6 +2555,11 @@ std::string DavPropertyUpdateBody(const std::string & name,
         "=\"" + kDavPropertyNamespace + "\"><D:set><D:prop><" +
         kDavPropertyPrefix + ":" + name + ">" + DavXmlEscape(value) + "</" +
         kDavPropertyPrefix + ":" + name + "></D:prop></D:set></D:propertyupdate>";
+}
+
+bool IsSshCurlProtocol(const std::string & proto)
+{
+    return proto == "sftp" || proto == "scp";
 }
 
 } // namespace linuxscp

@@ -345,6 +345,18 @@ class LiveCurlTests(unittest.TestCase):
             settings = " -rawsettings " + " ".join(rawsettings)
         return "open %s%s ; %s" % (url, settings, commands)
 
+    def curl_has_sha256_hostkey_pins(self):
+        """Whether the installed curl can check a SHA-256 host key pin.
+
+        curl implements '--hostpubsha256' in its libssh2 backend; a build
+        that links libssh (Debian 13, Ubuntu 24.04) accepts the option and
+        ignores it, so the question is the backend named in 'curl
+        --version', not the option list.
+        """
+        result = subprocess.run(["curl", "--version"],
+                                capture_output=True, text=True)
+        return "libssh2/" in result.stdout
+
     def run_client_without_hostkey(self, url, commands, extra=(), rawsettings=()):
         """Like run_client, but nothing accepts the server blindly."""
         args = [BINARY, "-batch", "-timeout=15"]
@@ -392,31 +404,53 @@ class LiveCurlTests(unittest.TestCase):
         downloaded = self.local / "scp-download.txt"
         uploaded = pathlib.Path(self.workdir.name) / "scp-uploaded.txt"
         extra = ["-privatekey=" + str(private_key)]
-        # The host key is pinned by its SHA-256 fingerprint rather than
-        # accepted blindly: the pin is this build's conversion of the
-        # OpenSSH spelling into curl's --hostpubsha256.
-        result = self.run_client(
-            "scp://%s@127.0.0.1:%d/" % (user, port),
-            "get %s %s ; put %s %s ; exit" %
-            (remote, downloaded, local_upload, uploaded), extra=extra,
-            hostkey=fingerprint)
-        self.assertEqual(result.returncode, 0,
-                         "hostkey pin %s: %s%s" %
-                         (fingerprint, result.stdout, result.stderr))
-        self.assertEqual(downloaded.read_bytes(), payload)
-        self.assertEqual(uploaded.read_bytes(), upload)
+        url = "scp://%s@127.0.0.1:%d/" % (user, port)
+        transfers = ("get %s %s ; put %s %s ; exit" %
+                     (remote, downloaded, local_upload, uploaded))
 
-        wrong = self.run_client(
-            "scp://%s@127.0.0.1:%d/" % (user, port),
-            "ls ; exit", extra=extra,
-            hostkey="SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
-        self.assertNotEqual(wrong.returncode, 0,
-                            wrong.stdout + wrong.stderr)
+        if not self.curl_has_sha256_hostkey_pins():
+            # This curl's SSH backend cannot check a SHA-256 pin, so the
+            # client has to refuse the session rather than drop the pin and
+            # verify less than it was asked to. The transfer still works
+            # with an explicitly accepted host key.
+            refused = self.run_client(url, transfers, extra=extra,
+                                      hostkey=fingerprint)
+            self.assertNotEqual(refused.returncode, 0,
+                                "hostkey pin %s: %s%s" %
+                                (fingerprint, refused.stdout, refused.stderr))
+            message = refused.stdout + refused.stderr
+            self.assertIn("hostpubsha256", message)
+            self.assertFalse(downloaded.exists())
+            self.assertFalse(uploaded.exists())
+
+            accepted = self.run_client(url, transfers, extra=extra)
+            self.assertEqual(accepted.returncode, 0,
+                             accepted.stdout + accepted.stderr)
+            self.assertEqual(downloaded.read_bytes(), payload)
+            self.assertEqual(uploaded.read_bytes(), upload)
+        else:
+            # The host key is pinned by its SHA-256 fingerprint rather than
+            # accepted blindly: the pin is this build's conversion of the
+            # OpenSSH spelling into curl's --hostpubsha256, and a different
+            # key's pin is refused.
+            result = self.run_client(url, transfers, extra=extra,
+                                     hostkey=fingerprint)
+            self.assertEqual(result.returncode, 0,
+                             "hostkey pin %s: %s%s" %
+                             (fingerprint, result.stdout, result.stderr))
+            self.assertEqual(downloaded.read_bytes(), payload)
+            self.assertEqual(uploaded.read_bytes(), upload)
+
+            wrong = self.run_client(
+                url, "ls ; exit", extra=extra,
+                hostkey="SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+            self.assertNotEqual(wrong.returncode, 0,
+                                wrong.stdout + wrong.stderr)
 
         refused = pathlib.Path(self.workdir.name) / "scp-resume-refused.txt"
         result = self.run_client(
-            "scp://%s@127.0.0.1:%d/" % (user, port),
-            "put -resume %s %s ; exit" % (local_upload, refused), extra=extra)
+            url, "put -resume %s %s ; exit" % (local_upload, refused),
+            extra=extra, hostkey="*")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("cannot resume", (result.stdout + result.stderr).lower())
         self.assertFalse(refused.exists())

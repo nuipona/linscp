@@ -1179,6 +1179,28 @@ bool ValidateSessionSettings(const SessionOptions & options, std::string & error
             "or https://), and this is a '" + options.protocol + "' session.";
         return false;
     }
+    /*
+     * An SSH host key pinned by its SHA-256 fingerprint over curl: where
+     * the curl in use cannot check that pin (see CurlSupportsHostPubSha256)
+     * the value would be dropped and the session would verify less than it
+     * was asked to, so it is refused with what remains.
+     */
+    const std::string protocol = LowerAscii(options.protocol);
+    if (IsSshCurlProtocol(protocol) && !UseNativeSftp(protocol) &&
+        !options.hostKey.empty() && options.hostKey != "*")
+    {
+        std::string pin;
+        if (HostKeySha256(options.hostKey, pin) && !CurlSupportsHostPubSha256())
+        {
+            error = "The installed curl cannot check a SHA-256 host key pin "
+                "('--hostpubsha256' needs its libssh2 backend), so '" +
+                options.hostKey + "' would not be enforced. Use -hostkey=\"*\" "
+                "to accept any host key, an MD5 fingerprint, or a curl built "
+                "with libssh2; sftp:// sessions check the pin in this client "
+                "either way.";
+            return false;
+        }
+    }
     if (tls && !options.hostKey.empty() && options.hostKey != "*" &&
         LooksLikeCertificateFingerprint(options.hostKey))
     {
