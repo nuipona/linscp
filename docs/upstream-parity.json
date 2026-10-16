@@ -13,17 +13,19 @@
   "policy": "A status of 'verified' means the behavior was checked, not that it looked right while somebody was reading the code. So an entry carries 'verified_on': for each platform LinSCP ships on, the suites whose tests cover it. LinSCP ships on Linux alone - the Windows port was removed - so an entry may be 'verified' only when 'linux' appears in that map naming the suites that actually ran it. The rule is still written for any number of platforms, and a suite that is not listed under a platform cannot be cited for it, because evidence nobody can reproduce is not evidence. The notes stay authoritative about what is missing either way - evidence for the parts that are covered does not certify the rest, which is why --require-full fails while any entry is not verified.",
   "platforms": {
    "linux": {
-    "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs",
+    "how": "make -C source/linux all check && make -C source/linux check-live (the same suites also run under CMake/CTest: cmake -S . -B build && cmake --build build && ctest --test-dir build); dpkg-buildpackage -b -us -uc builds the .deb that CI installs; `make -C source/linux check-live` includes the browser upload regression suite",
     "date": "2026-10-15",
     "suites": {
-     "unit": "source/linux/tests/UnitTest.cpp - 965 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
+     "unit": "source/linux/tests/UnitTest.cpp - 967 checks of the parts that need no I/O: permission and mode parsing, masks, path handling, the transfer and synchronization planners (every word and list '-criteria=' takes, the ones it refuses, and a plan refused over a file nobody could hash), the proxy session settings, parameter and timestamp expansion, the stored-session file, the file-hash and HMAC helpers, and AWS Signature Version 4 signing (canonical request, derived signing key and Authorization header, pinned against botocore's vectors).",
      "script": "source/linux/tests/ScriptTest.py - the command line and script semantics against no server: abbreviations, switches, batch modes and exit codes, local listings, help, -log and -xmllog, and stored-session password encryption (a 'savesession -password' value\nwritten as 'lscp1$' ciphertext under sessions.key and preserved across a\nre-save without the key file). The transfer presets are checked here too: the savepreset/option preset/rmspreset lifecycle, a preset stored with a site and restored when it opens, -permissions on downloads, and -rawtransfersettings validation. So are the synchronization criteria (every word and list '-criteria=' takes, the values it refuses with the names it accepts, and the two the 'both' direction cannot honour) and the raw proxy settings of 'open' and 'savesession': each upstream name applied, an unknown one refused, an incomplete or unusable proxy refused, and the password masked in the echo and in the action log.",
-     "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader).",
+     "live-sftp": "source/linux/tests/LiveSftpTest.py against source/linux/tests/TestSftpServer.py - refused opens (wrong password, unexpected host key), operations the server denies, an interrupted download kept in '.filepart' and its resume (automatic and with -resume), the same for an interrupted upload, a continuation that must not splice an existing destination, a stale oversized staging file, resuming across a connection that died, option resume off disabling staging, and timestamps in both directions, a synchronization whose '-criteria=checksum' sees a change the timestamp and the size hide and brings the local copy back in line, sessions carried by a SOCKS5 proxy with and without credentials (TestProxyServer.py, a wrong password refused by the proxy rather than worked around) and a stored site that keeps its proxy, and the shared stored-password format (a password encrypted by the GUI\nmodule opening a stored session, a missing key file reported without losing\nthe value, and a core-written password decrypted by the GUI's reader). Recursive directory copy and multiple source files into an existing destination directory are tested over SFTP; the test server refuses the optional copy-data extension, so these prove the streamed fallback rather than the native extension. A second server mode implements copy-data and verifies the native extension path as well as exact copied bytes. The server can also refuse check-file-name, which proves the download-and-hash fallback for sha-256, sha-1, md5 and crc32, or implement the extension, which proves the native sha-256 digest and that the client does not fall back after a valid reply. It also proves that synchronize remote with a path exclusion ('-filemask=|skip/') leaves an excluded file untouched despite -delete and does not upload files from the excluded subtree. Recursive symbolic chmod is checked over a nested tree, including exact directory and file modes. copyid installs a generated OpenSSH public key into the test SFTP home, verifies the 0700/0600 permissions and proves that repeating the command does not duplicate the key.",
      "live-s3": "source/linux/tests/LiveS3Test.py against source/linux/tests/TestS3Server.py - a throwaway S3 endpoint over TLS (the fixtures are committed) that re-derives every SigV4 signature with its own hmac/hashlib code: missing and wrong credentials refused, bucket/object CRUD, resumed downloads using HTTP byte ranges, CopyObject for cp and rename, and a 20 MiB+123 upload checked as multipart initiation, three parts with returned ETags, completion, exact roundtrip checksum and no leftover upload. Synthetic HTTP-200 Error documents exercise CopyObject and multipart completion parsing, including abort cleanup after completion fails. The server also accepts a botocore-signed reference request. The client reaches it with curl over TLS on 127.0.0.1.",
      "gui": "source/gui/tests/ClientTest.js under node with jsdom - the real Commander page booted against a stubbed backend: rendering, selection, the editor, synchronization preview and run, filename and full-text search controls/results, the site manager, terminal, queue, host-key verification, synchronized browsing (the counterpart probe, following and refusing when the other side has no such folder) and drag and drop between the panes (payload, drop-target highlight, queued upload with the dragged names, same-pane drop ignored).",
      "live-dav": "source/linux/tests/LiveDavTest.py against source/linux/tests/TestDavServer.py - a throwaway WebDAV endpoint over plain HTTP with Basic challenge authentication: PROPFIND listings, stat with real size/time/missing-path handling, mkdir/rmdir/MOVE/DELETE, and upload/download; single-file cp uses COPY with an absolute Destination and Overwrite header, verified by a server-side operation counter and an exact readback while the source remains; a 405 refusal also verifies the streamed fallback byte-for-byte. It also checks upstream-shaped console output, aliases and transfer presets. keepuptodate uploads local files to the remote side, and a nested file arrival wakes the inotify watcher rather than waiting for the 30-second rescan. The suite is standard-library-only and needs nothing but curl.",
      "manual": "Hand-run against the same server, kept here because no automated test does it yet: 'chmod -recursive' octal and symbolic over a tree, 'copyid' with an OpenSSH .pub and with a private key, 'put -append', 'get -append', -resumesupport=64 across a partial file, -speed=40, -preservetime=all on a directory, -xmllog= with -parameter. Reproduce with source/linux/build/linuxscp -batch -hostkey='*' -command=\"open sftp://testuser:testpass@127.0.0.1:12765/ ; ...\" after starting the server.",
-     "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet."
+     "gui-search": "source/gui/tests/RemoteSearchTest.py - backend tests with a fake session covering literal UTF-8 content search, case sensitivity, filename-mask filtering, binary/non-UTF-8 and oversized-file skips, and scan-budget enforcement. The jsdom ClientTest.js also checks the GUI toggle, request payload, bounded-search summary and escaped result snippet.",
+     "gui-browser-upload": "source/gui/tests/BrowserUploadTest.py - exercises the authenticated HTTP upload endpoint, rejects a request without the run token, stages exact binary bytes into a private temporary file, queues the exact remote destination with progress metadata, and removes partial staging files when a request ends early. ClientTest.js checks the desktop drag/drop payload and target.",
+     "gui-desktop-uri": "source/gui/tests/DesktopUriTest.py - validates sftp://, ftp:// and ftps:// desktop URLs, default and explicit ports, escaped credentials and paths, IPv6 authorities, rejected malformed/query URLs, and startup creation/activation of the site tab without trusting an unknown host key."
     }
    }
   }
@@ -76,16 +78,22 @@
    }
   },
   "checksum": {
-   "status": "partial",
-   "notes": "Server-side check-file-name extension first, then a local sha-256/sha-1/md5/crc32 fallback through the PuTTY core; prints '<hash> <file>' like upstream. Verified live against a server without the extension (fallback path); the server-side path needs a server that implements check-file."
+   "status": "verified",
+   "notes": "For the four documented algorithms (sha-256, sha-1, md5, crc32), returns the lowercase digest and remote path. On SFTP it asks the check-file-name extension first for supported algorithms and falls back to downloading and hashing when the server declines; covered by live-sftp for all four fallback digests and the native sha-256 reply.",
+   "verified_on": {
+    "linux": [
+     "live-sftp"
+    ]
+   }
   },
   "chmod": {
    "status": "partial",
-   "notes": "Octal and symbolic modes ('u+x', 'a=r,go-w', 'u+s', 'X') and -recursive over a directory tree, symbolic links skipped; the mode is checked before the connection so a typo is reported even when offline. Upstream's script command passes an octal string only, so the symbolic forms and the recursion are an extension; verified against a live server that implements SETSTAT. Missing: owner and group changes, and upstream's per-site permission defaults.",
+   "notes": "Octal and symbolic modes ('u+x', 'a=r,go-w', 'u+s', 'X') and -recursive over a directory tree, symbolic links skipped; the mode is checked before the connection so a typo is reported even when offline. Upstream's script command passes an octal string only, so the symbolic forms and recursion are an extension; recursive symbolic 'g+w' is verified live across nested directories and files against a server that implements SETSTAT. Missing: owner and group changes, and upstream's per-site permission defaults.",
    "verified_on": {
     "linux": [
      "unit",
-     "manual"
+     "manual",
+     "live-sftp"
     ]
    }
   },
@@ -101,20 +109,22 @@
   },
   "copyid": {
    "status": "verified",
-   "notes": "Reads the session's private key (or the given key file: an OpenSSH public key, an OpenSSH private key or a PuTTY .ppk, foreign formats imported through the bundled PuTTY core) and appends its authorized_keys line to ~/.ssh/authorized_keys, creating the directory 0700 and the file 0600 and leaving an already installed key alone. Needs an sftp:// or scp:// session; an encrypted key asks for its passphrase in an interactive session and is refused in batch mode. Covered by the manual live evidence for a .pub file, a PEM private key and duplicate input; the upstream command takes exactly one argument, ours also accepts none.",
+   "notes": "Reads the session's private key (or the given key file: an OpenSSH public key, an OpenSSH private key or a PuTTY .ppk, foreign formats imported through the bundled PuTTY core) and appends its authorized_keys line to ~/.ssh/authorized_keys, creating the directory 0700 and the file 0600 and leaving an already installed key alone. Needs an sftp:// or scp:// session; an encrypted key asks for its passphrase in an interactive session and is refused in batch mode. Covered by live-sftp with a generated .pub file, exact ~/.ssh and authorized_keys permissions, and duplicate suppression; the manual evidence additionally checks a PEM private key; the upstream command takes exactly one argument, ours also accepts none.",
    "verified_on": {
     "linux": [
-     "manual"
+     "manual",
+     "live-sftp"
     ]
    }
   },
   "cp": {
-   "status": "partial",
-   "notes": "Server-side copy via native SFTP copy-data, WebDAV COPY, or S3 CopyObject; otherwise the file streams through the local host. Recursive directory trees, multiple sources into a directory, and confirm-on-overwrite are implemented. The WebDAV and S3 single-file server-side paths are covered by the live suites; recursive/multi-source and native copy-data behavior still need broader automated coverage.",
+   "status": "verified",
+   "notes": "Remote copy is checked through native SFTP copy-data when the server implements it, streamed SFTP fallback when it does not, WebDAV COPY (and streamed fallback on refusal), and S3 CopyObject. Recursive trees, multiple sources into an existing directory, overwrite refusal in batch mode, and explicit overwrite with confirm off are covered by the live-sftp, live-dav and live-s3 suites.",
    "verified_on": {
     "linux": [
      "live-dav",
-     "live-s3"
+     "live-s3",
+     "live-sftp"
     ]
    }
   },
@@ -375,7 +385,7 @@
   },
   "synchronize": {
    "status": "partial",
-   "notes": "Planner with direction, -criteria= (upstream's 'none', 'either' and 'both', or a comma-separated list of 'time', 'size' and 'checksum'; 'checksum' compares the contents through SHA-256, computed by the server when the transport can and from a downloaded copy otherwise, and a file that cannot be hashed stops the plan instead of counting as equal), -filemask=, -delete/-nodelete (default from option synchdelete), -mirror (rejects 'both', resolves any difference toward the source), -transfer=binary|ascii|automatic, -preview, -nonrecursive, -interval=, -count=; 'both' keeps a state record and decides from it, so it refuses the criteria it could not honour ('checksum' and 'none') rather than ignoring them the way upstream does. Verified live. Missing: upstream's richer conflict-resolution UI and some state/metadata cases. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
+   "notes": "Planner with direction, -criteria= (upstream's 'none', 'either' and 'both', or a comma-separated list of 'time', 'size' and 'checksum'; 'checksum' compares the contents through SHA-256, computed by the server when the transport can and from a downloaded copy otherwise, and a file that cannot be hashed stops the plan instead of counting as equal), -filemask=, -delete/-nodelete (default from option synchdelete), -mirror (rejects 'both', resolves any difference toward the source), -transfer=binary|ascii|automatic, -preview, -nonrecursive, -interval=, -count=; 'both' keeps a state record and decides from it, so it refuses the criteria it could not honour ('checksum' and 'none') rather than ignoring them the way upstream does. Verified live. The path exclusion '-filemask=|skip/' is checked live: it prunes that subtree and protects an excluded destination file from '-delete'. Missing: upstream's richer conflict-resolution UI and some state/metadata cases. Resume-capable transfers stage through upstream's '.filepart' name and are moved onto the destination only when complete, so an interrupted transfer never leaves a truncated file under the final name; a continuation reads the staging file only, never splices the existing destination, and 'option resume automatic' (the default) stages binary files from upstream's 100 KB threshold, 'on' stages everything and 'off' nothing; all three behaviors are exercised against a live SFTP server.",
    "verified_on": {
     "linux": [
      "unit",
@@ -389,7 +399,7 @@
   {
    "name": "SFTP",
    "status": "partial",
-   "notes": "Native PuTTY transport rather than a curl session. SYMLINK, copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were verified against a live in-process SFTP server; unknown extensions still fail explicitly rather than being ignored.",
+   "notes": "Native PuTTY transport rather than a curl session. SYMLINK, copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were verified against a live in-process SFTP server; unknown extensions still fail explicitly rather than being ignored. The native check-file-name reply is covered by the extension-enabled live test server; metadata policies remain.",
    "verified_on": {
     "linux": [
      "unit",
@@ -444,7 +454,7 @@
   {
    "name": "Synchronization",
    "status": "partial",
-   "notes": "Planner with direction, -criteria= (upstream's 'none', 'either' and 'both', or a list of 'time', 'size' and 'checksum'), -filemask=, -delete/-nodelete (option synchdelete as the default), -mirror (any difference resolves toward the source; rejected with 'both'), -transfer=binary|ascii|automatic applied to planned transfers, -preview, -nonrecursive, -interval=, -count= and keepuptodate -continue; 'both' keeps a state record to tell changes from conflicts and refuses the criteria that record cannot honour ('checksum', 'none'). '-criteria=checksum' reads both files - the server's checksum when the transport can ask for it, a downloaded copy otherwise - and a file that cannot be hashed refuses the plan instead of passing for equal; verified live against a server without the extension. Verified live. A recursive inotify watcher provides keepuptodate's local-change notification, whose local-to-remote direction and watcher assertion the live WebDAV suite passes. Missing: path exclusions and upstream's conflict resolution UI; planned transfers stage through '.filepart' like get/put when the resume setting and the transfer mode allow it.",
+   "notes": "Planner with direction, -criteria= (upstream's 'none', 'either' and 'both', or a list of 'time', 'size' and 'checksum'), -filemask=, -delete/-nodelete (option synchdelete as the default), -mirror (any difference resolves toward the source; rejected with 'both'), -transfer=binary|ascii|automatic applied to planned transfers, -preview, -nonrecursive, -interval=, -count= and keepuptodate -continue; 'both' keeps a state record to tell changes from conflicts and refuses the criteria that record cannot honour ('checksum', 'none'). '-criteria=checksum' reads both files - the server's checksum when the transport can ask for it, a downloaded copy otherwise - and a file that cannot be hashed refuses the plan instead of passing for equal; verified live against a server without the extension. Verified live. A recursive inotify watcher provides keepuptodate's local-change notification, whose local-to-remote direction and watcher assertion the live WebDAV suite passes. The path exclusion '-filemask=|skip/' prunes a subtree and protects an excluded remote file from '-delete', verified live against SFTP. Missing: upstream's conflict resolution UI; planned transfers stage through '.filepart' like get/put when the resume setting and the transfer mode allow it.",
    "verified_on": {
     "linux": [
      "unit",
@@ -468,7 +478,7 @@
   {
    "name": "Security/authentication",
    "status": "partial",
-   "notes": "Password, private-key and ssh-agent authentication and the host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration is in place under upstream's setting names - SOCKS 4 and 5, HTTP CONNECT, a telnet command or a local command through the PuTTY core, with its DNS, localhost and exclude-list policy - and the curl protocols translate the same settings to --proxy/--proxy-user/--noproxy, refusing a telnet or local-command proxy they cannot run; a proxy password is masked in the echo and in the action log. What the curl path cannot express is ProxyLocalhost=0: curl proxies every host, localhost included. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
+   "notes": "Password, private-key and ssh-agent authentication and the host-key policy exist; an unknown or changed key is refused and reported instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration is in place under upstream's setting names - SOCKS 4 and 5, HTTP CONNECT, a telnet command or a local command through the PuTTY core, with its DNS, localhost and exclude-list policy - and the curl protocols translate the same settings to --proxy/--proxy-user/--noproxy, refusing a telnet or local-command proxy they cannot run; a proxy password is masked in the echo and in the action log. The curl path honors ProxyLocalhost=0 by adding localhost, 127.0.0.0/8 and ::1/128 to --noproxy; ProxyLocalhost=1 leaves loopback destinations eligible for proxying. The graphical interface now verifies by default, pins on request and stores a pin rather than a wildcard, and its API is bound to loopback behind a per-run token with a Host check; there is still no user account; stored session passwords are encrypted at\nrest under sessions.key rather than kept in the clear.",
    "verified_on": {
     "linux": [
      "live-sftp",
@@ -481,10 +491,11 @@
   {
    "name": "GUI",
    "status": "partial",
-   "notes": "Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote filename and bounded UTF-8 content search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API behind a per-run token (Host-checked) over -server. Synchronized browsing (the toggle follows directory changes across both panes, refuses when the counterpart folder is missing, and keeps the pair aligned going up) and drag and drop between the panes (dragged entries carry a payload, the target pane highlights, dropping queues the upload/download with exactly those names, a same-pane drop does nothing) are implemented like WinSCP's Commander, both covered by the jsdom regression test. Still not upstream Commander/Explorer: custom commands, localization, and dragging from the operating system's file manager into the window.",
+   "notes": "Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote filename and bounded UTF-8 content search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API behind a per-run token (Host-checked) over -server. Synchronized browsing (the toggle follows directory changes across both panes, refuses when the counterpart folder is missing, and keeps the pair aligned going up) and drag and drop between the panes (dragged entries carry a payload, the target pane highlights, dropping queues the upload/download with exactly those names, a same-pane drop does nothing) are implemented like WinSCP's Commander, both covered by the jsdom regression test. Dropping individual files from the operating system's file manager onto the remote pane now queues authenticated, bounded uploads through the task queue (jsdom and BrowserUploadTest.py); folders and drops onto the local pane remain unsupported. Still not upstream Commander/Explorer: custom commands and localization.",
    "verified_on": {
     "linux": [
-     "gui"
+     "gui",
+     "gui-browser-upload"
     ]
    }
   },
@@ -512,7 +523,12 @@
   {
    "name": "Desktop integration",
    "status": "partial",
-   "notes": "Debian launcher/icons and terminal launch exist; no full upstream drag/drop, shell integration or extension system."
+   "notes": "The Debian desktop entry registers sftp://, ftp:// and ftps://; the GUI launcher parses those URLs, connects the requested site in a background tab, preserves the remote directory, and routes an unknown host key into the normal verification UI. URL parsing and tab startup are covered by gui-desktop-uri. Still missing: full OS drag-and-drop of folders, shell integration and extension system.",
+   "verified_on": {
+    "linux": [
+     "gui-desktop-uri"
+    ]
+   }
   },
   {
    "name": "Localization/accessibility",

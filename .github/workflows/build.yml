@@ -165,6 +165,10 @@ jobs:
           npm install jsdom --no-audit --no-fund
           node "$GITHUB_WORKSPACE/source/gui/tests/ClientTest.js" \
             "$GITHUB_WORKSPACE/source/gui/web/index.html"
+      - name: GUI integration regression tests
+        run: |
+          python3 source/gui/tests/BrowserUploadTest.py
+          python3 source/gui/tests/DesktopUriTest.py
 
   linux-cmake:
     name: Linux (CMake)

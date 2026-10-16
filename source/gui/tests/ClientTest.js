@@ -116,7 +116,7 @@ const dom = new JSDOM(html, {
     window.LSCP_TOKEN = TOKEN;
     window.fetch = (url, options) => {
       const path = String(url).replace('http://localhost:8080', '').split('?')[0];
-      calls.push({ path: path, options: options });
+      calls.push({ path: path, url: String(url), options: options });
       let body = responses[path];
       if (path === '/api/remote/search') {
         let request = {};
@@ -423,7 +423,7 @@ function options(id) {
     const raw = String(url).replace('http://localhost:8080', '');
     const parts = raw.split('?');
     const path = parts[0];
-    calls.push({ path: path, options: options });
+    calls.push({ path: path, url: String(url), options: options });
     browseCalls.push(raw);
     const params = new URLSearchParams(parts[1] || '');
     if (path === '/api/local/list' || path === '/api/remote/list') {
@@ -547,6 +547,35 @@ function options(id) {
   check('the highlight cleared after the drop',
     doc.getElementById('remotePane').className.indexOf('drop-target') < 0,
     doc.getElementById('remotePane').className);
+
+  // Files dragged from the operating system have no LinSCP text payload; a
+  // drop on the remote pane must post the actual File body to the upload API.
+  const desktopFile = new window.File(['desktop upload'], 'desktop.txt',
+    { type: 'text/plain' });
+  const desktopDt = { files: [desktopFile], types: ['Files'], dropEffect: '' };
+  const desktopOver = { dataTransfer: desktopDt,
+    preventDefault() { this.prevented = true; } };
+  window.dragOverPane('remote', desktopOver);
+  check('dragover accepts a file from the desktop',
+    desktopOver.prevented === true && desktopDt.dropEffect === 'copy');
+  await window.dropOnPane('remote', { dataTransfer: desktopDt,
+    preventDefault() {} });
+  await wait(100);
+  const desktopCalls = calls.filter(call =>
+    call.path === '/api/transfer/drop');
+  const desktopRequest = desktopCalls[desktopCalls.length - 1];
+  const desktopUrl = desktopRequest ? new URL(desktopRequest.url,
+    'http://localhost:8080') : null;
+  check('desktop file bytes are queued for remote upload',
+    !!desktopRequest && desktopRequest.options.body === desktopFile &&
+      desktopRequest.options.headers['Content-Type'] === 'application/octet-stream');
+  check('desktop upload targets the remote pane directory',
+    !!desktopUrl && desktopUrl.searchParams.get('name') === 'desktop.txt' &&
+      desktopUrl.searchParams.get('remote_dir') === '/tmp/slowremote' &&
+      desktopUrl.searchParams.get('tab') === '1',
+    desktopRequest ? desktopRequest.url + ' -> ' +
+      JSON.stringify(desktopUrl ? Array.from(desktopUrl.searchParams.entries()) : []) :
+      'no upload request');
 
   // A drop on the pane the items came from queues nothing.
   const sameDt = fakeTransfer();

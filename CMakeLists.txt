@@ -96,6 +96,10 @@ if(Python3_Interpreter_FOUND)
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/RemoteSearchTest.py)
   add_test(NAME gui-local-editor-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/LocalEditorTest.py)
+  add_test(NAME gui-browser-upload-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/BrowserUploadTest.py)
+  add_test(NAME gui-desktop-uri-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/DesktopUriTest.py)
   add_test(NAME parity-checker-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/tools/tests/test_parity_inventory.py)
   add_test(NAME parity-inventory COMMAND ${Python3_EXECUTABLE}

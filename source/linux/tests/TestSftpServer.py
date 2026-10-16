@@ -6,6 +6,7 @@ The SFTP "home" is ROOT (the server process chdir()s there, so relative paths
 resolve inside it and canonicalize() makes them absolute). Channel exec
 requests run locally (sandbox only) so 'call' works.
 """
+import hashlib
 import os
 import socket
 import stat
@@ -14,10 +15,12 @@ import sys
 import threading
 
 import paramiko
-from paramiko.sftp import SFTP_OP_UNSUPPORTED
+from paramiko.message import Message
+from paramiko.sftp import (CMD_EXTENDED, CMD_EXTENDED_REPLY, SFTP_BAD_MESSAGE,
+                           SFTP_NO_SUCH_FILE, SFTP_OK, SFTP_OP_UNSUPPORTED)
 from paramiko.sftp_attr import SFTPAttributes
-from paramiko.sftp import SFTP_OP_UNSUPPORTED  # noqa: F811
 from paramiko.sftp_handle import SFTPHandle
+from paramiko.sftp_server import SFTPServer
 
 HOST = "127.0.0.1"
 # A test runner that does not want to collide with another one, or that
@@ -25,6 +28,8 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("LSCP_TEST_PORT", "12765"))
 USER, PASSWORD = "testuser", "testpass"
 ROOT = os.environ.get("LSCP_TEST_ROOT", "/tmp/lscp-sftp-root")
+COPY_DATA = os.environ.get("LSCP_TEST_COPY_DATA") == "1"
+CHECK_FILE_NAME = os.environ.get("LSCP_TEST_CHECK_FILE_NAME") == "1"
 
 HOST_KEY = paramiko.RSAKey.generate(2048)
 
@@ -163,6 +168,99 @@ class SftpSI(paramiko.SFTPServerInterface):
     setstat = chattr  # older paramiko releases
 
 
+class CopyDataSFTPServer(SFTPServer):
+    """Test-only implementation of OpenSSH's copy-data extension."""
+
+    def _process(self, request_type, request_number, message):
+        if request_type != CMD_EXTENDED:
+            return super()._process(request_type, request_number, message)
+
+        extension = message.get_text()
+        if extension == "check-file-name" and CHECK_FILE_NAME:
+            path = message.get_text()
+            algorithm = message.get_text()
+            offset = message.get_int64()
+            length = message.get_int64()
+            block_size = message.get_int()
+            self._check_file_name(request_number, path, algorithm, offset,
+                                  length, block_size)
+            return
+
+        if extension == "copy-data":
+            source_handle = message.get_binary()
+            source_offset = message.get_int64()
+            length = message.get_int64()
+            target_handle = message.get_binary()
+            target_offset = message.get_int64()
+            source = self.file_table.get(source_handle)
+            target = self.file_table.get(target_handle)
+            if source is None or target is None:
+                self._send_status(request_number, SFTP_BAD_MESSAGE,
+                                  "Invalid copy-data handle")
+                return
+
+            copied = 0
+            while length == 0 or copied < length:
+                amount = 65536 if length == 0 else min(65536, length - copied)
+                data = source.read(source_offset + copied, amount)
+                if isinstance(data, int):
+                    self._send_status(request_number, data)
+                    return
+                if not data:
+                    break
+                status = target.write(target_offset + copied, data)
+                if status != SFTP_OK:
+                    self._send_status(request_number, status)
+                    return
+                copied += len(data)
+            self._send_status(request_number, SFTP_OK)
+            return
+
+        # Preserve Paramiko's existing extension support when intercepting
+        # CMD_EXTENDED so this test server still handles check-file and
+        # posix-rename requests as before.
+        if extension == "check-file":
+            self._check_file(request_number, message)
+        elif extension == "posix-rename@openssh.com":
+            oldpath = message.get_text()
+            newpath = message.get_text()
+            self._send_status(request_number,
+                              self.server.posix_rename(oldpath, newpath))
+        else:
+            self._send_status(request_number, SFTP_OP_UNSUPPORTED)
+
+    def _check_file_name(self, request_number, path, algorithm, offset,
+                         length, block_size):
+        """Implement the PuTTY/OpenSSH check-file-name extension for tests."""
+        algorithms = {"sha-256": "sha256", "sha-1": "sha1", "md5": "md5"}
+        digest_name = algorithms.get(algorithm.lower())
+        if digest_name is None or block_size != 0 or offset < 0 or length < 0:
+            self._send_status(request_number, SFTP_OP_UNSUPPORTED)
+            return
+        try:
+            filename = os.path.realpath(self.server._map(path))
+            root = os.path.realpath(ROOT)
+            if os.path.commonpath((root, filename)) != root:
+                self._send_status(request_number, SFTP_OP_UNSUPPORTED)
+                return
+            with open(filename, "rb") as source:
+                source.seek(offset)
+                data = source.read() if length == 0 else source.read(length)
+        except FileNotFoundError:
+            self._send_status(request_number, SFTP_NO_SUCH_FILE)
+            return
+        except (OSError, ValueError):
+            self._send_status(request_number, SFTP_BAD_MESSAGE)
+            return
+
+        response = Message()
+        response.add_int(request_number)
+        response.add_string(algorithm)
+        response.add_int(0)
+        response.add_string(hashlib.new(digest_name, data).digest())
+        self._send_packet(CMD_EXTENDED_REPLY, response)
+
+
 class Server(paramiko.ServerInterface):
     def check_auth_password(self, username, password):
         return paramiko.AUTH_SUCCESSFUL if (username == USER and password == PASSWORD) else paramiko.AUTH_FAILED
@@ -192,7 +290,9 @@ class Server(paramiko.ServerInterface):
 def handle(client):
     transport = paramiko.Transport(client)
     transport.add_server_key(HOST_KEY)
-    transport.set_subsystem_handler("sftp", paramiko.SFTPServer, SftpSI)
+    handler = (CopyDataSFTPServer if COPY_DATA or CHECK_FILE_NAME
+               else paramiko.SFTPServer)
+    transport.set_subsystem_handler("sftp", handler, SftpSI)
     server = Server()
     try:
         transport.start_server(server=server)
