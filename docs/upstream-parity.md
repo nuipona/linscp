@@ -31,7 +31,7 @@ entry; it does not implement the feature.
 
 ## Reconciliation findings
 
-The review corrected several stale claims without upgrading unimplemented work:
+The review corrected stale claims without upgrading unimplemented work:
 
 - S3 multipart upload state/restart, multipart copy and signed object-write
   options are implemented; S3 version-aware operations remain missing.
@@ -50,20 +50,14 @@ The review corrected several stale claims without upgrading unimplemented work:
   are now explicit capability rows rather than prose-only limitations.
 - `?`, `delsession`, `terminal`, `presets`, `savepreset` and `rmspreset` are
   explicitly inventoried rather than left outside the command ledger.
-
-- An `scp://` (or `ssh://`) session is served by this client's own SSH code: a
-  remote-shell engine for listings, `stat`, `cd` and the directory, permission,
-  time and link commands, and the rcp protocol for the bytes on the server's
-  own `scp -f`/`scp -t`. No SSH session asks the installed curl for anything,
-  so a host-key pin no longer depends on which SSH library that curl linked.
-  What the protocol cannot do is continue a partial transfer - it has no
-  offset - so a resume is refused by name and a stale staging file is
-  discarded rather than spliced onto.
+- `scp://` (and `ssh://`) sessions use this client's own SSH code, not curl, so
+  a host-key pin does not depend on which SSH library the curl build links.
+  The rcp protocol has no offset, so a resume is refused by name and a stale
+  staging file is discarded.
 
 Upstream Windows VCL forms, .NET assemblies, Explorer commands and shell
-extensions are not implicitly covered by a Linux substitute. GSSAPI and SSH
-tunnels, multi-user GUI isolation, automation APIs and desktop extensions
-remain in the plan.
+extensions have no Linux substitute. GSSAPI, SSH tunnels, multi-user GUI
+isolation, automation APIs and desktop extensions remain in the plan.
 
 ## Evidence and status rules
 

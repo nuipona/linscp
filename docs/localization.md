@@ -3,8 +3,8 @@
 ## Supported languages and coverage
 
 English (`en`) and Spanish (`es`) catalogs ship with the application. There
-are 89 CLI catalog entries and 387 browser entries (including whole help
-messages and plural variants). They are embedded at build time; there are no
+are 121 CLI catalog entries and 387 browser entries, including whole help
+messages and plural variants. They are embedded at build time; there are no
 runtime downloads, gettext dependencies or installed OS locale requirements.
 
 Translated surfaces:
@@ -19,9 +19,8 @@ Translated surfaces:
   remain locale independent.
 
 **This is not complete upstream language coverage.** Command-specific help,
-human-facing status and argument/engine errors still exist in `Script.cpp`
-outside the shared `Texts`
-API. The inventory therefore retains `locale.translations` as **partial**.
+human-facing status and argument/engine errors still exist in `Script.cpp`,
+outside the shared `Texts` API. The inventory therefore retains `locale.translations` as **partial**.
 Server-provided SSH challenges, protocol data, core/OS diagnostic details,
 command-console output and logs are deliberately retained verbatim. A browser
 operation failure shows a translated explanation with the diagnostic detail;
@@ -97,21 +96,16 @@ reproduce all upstream translations.
 ## Reproducible checks
 
 ```sh
-python3 tools/compile_translations.py --check
+python3 tools/compile_translations.py --check   # fails if generated output is stale
 python3 tools/tests/test_translations.py
-make -C source/linux all check
-python3 source/linux/tests/ScriptTest.py source/linux/build/linuxscp
-# Optional test dependency, not an application runtime dependency:
-npm install --no-save --package-lock=false jsdom@26
-node source/gui/tests/ClientTest.js
-node source/gui/tests/LocalizationTest.js
-python3 source/gui/tests/BrowserUploadTest.py
-# Requires paramiko in the interpreter used:
-python3 source/linux/tests/LiveSftpTest.py source/linux/build/linuxscp
-python3 tools/check_upstream_parity.py
+make -C source/linux check
 ```
 
-CMake/CTest registers the catalog tests with Python and the browser workflow
-tests when node and jsdom are available. Makefile, CMake, relocatable installs
-and Debian packages all contain the same embedded translations without needing
-catalog files at runtime.
+The browser tests in `source/gui/tests/` (`ClientTest.js`,
+`LocalizationTest.js`) need Node and `jsdom`, which is an optional test
+dependency. CMake registers them with CTest only when both are installed. The
+live SFTP suite needs `paramiko`. CI runs the drift check and the translation
+tests.
+
+The Makefile, CMake, relocatable installs and Debian packages all embed the same
+translations, so none of them needs catalog files at runtime.
