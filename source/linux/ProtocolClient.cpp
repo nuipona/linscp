@@ -76,6 +76,206 @@ int RunCurl(const std::vector<std::string> & args, std::string & outStr,
     return rc;
 }
 
+/*
+ * The curl command-line client owns the socket for the non-SFTP protocols.
+ * Its progress meter is the portable interface that remains available when
+ * LinSCP is built without linking libcurl: it writes rows to stderr, using
+ * carriage returns to redraw the same row. Parse those rows in the parent
+ * process and forward byte counts through the same callback used by native
+ * SFTP. This keeps the Linux conversion dependency-free while still making
+ * curl transfers observable to the console and GUI callers.
+ */
+struct CurlProgressParser
+{
+    LscpProgressFn callback;
+    void * callbackContext;
+    bool upload;
+    std::string pending;
+
+    CurlProgressParser() : callback(NULL), callbackContext(NULL), upload(false) {}
+};
+
+bool ParseCurlSize(const std::string & text, unsigned long long & value)
+{
+    if (text.empty() || text == "-")
+    {
+        return false;
+    }
+    size_t end = 0;
+    while (end < text.size() &&
+        ((text[end] >= '0' && text[end] <= '9') || text[end] == '.'))
+    {
+        end++;
+    }
+    if (end == 0)
+    {
+        return false;
+    }
+    const std::string numeric = text.substr(0, end);
+    char * numberEnd = NULL;
+    const double number = strtod(numeric.c_str(), &numberEnd);
+    if (numberEnd == NULL || *numberEnd != '\0' || number < 0)
+    {
+        return false;
+    }
+    double multiplier = 1.0;
+    if (end < text.size())
+    {
+        switch (text[end])
+        {
+        case 'k': case 'K': multiplier = 1024.0; break;
+        case 'm': case 'M': multiplier = 1024.0 * 1024.0; break;
+        case 'g': case 'G': multiplier = 1024.0 * 1024.0 * 1024.0; break;
+        case 't': case 'T': multiplier = 1024.0 * 1024.0 * 1024.0 * 1024.0; break;
+        default: return false;
+        }
+        /* Both 'k' and an explicit 'Ki' are accepted. Curl's human-readable
+         * meter uses the binary size convention for these suffixes. */
+    }
+    const double scaled = number * multiplier;
+    if (scaled > static_cast<double>(~0ULL))
+    {
+        return false;
+    }
+    value = static_cast<unsigned long long>(scaled + 0.5);
+    return true;
+}
+
+void ConsumeCurlProgressLine(CurlProgressParser & parser,
+    const std::string & line)
+{
+    if (parser.callback == NULL || line.empty())
+    {
+        return;
+    }
+    std::istringstream stream(line);
+    std::vector<std::string> fields;
+    std::string field;
+    while (stream >> field)
+    {
+        fields.push_back(field);
+    }
+    /* A curl meter row starts with: total%, total-size, received%,
+     * received-size, uploaded%, uploaded-size. Header and final speed
+     * lines do not have six fields with numeric sizes, so they are ignored. */
+    if (fields.size() < 6)
+    {
+        return;
+    }
+    unsigned long long total = 0;
+    unsigned long long received = 0;
+    unsigned long long uploaded = 0;
+    if (!ParseCurlSize(fields[1], total) ||
+        !ParseCurlSize(fields[3], received) ||
+        !ParseCurlSize(fields[5], uploaded))
+    {
+        return;
+    }
+    parser.callback(parser.upload ? uploaded : received, total,
+        parser.callbackContext);
+}
+
+void CurlProgressOutput(const void * data, size_t len, bool fromStderr,
+    void * context)
+{
+    if (!fromStderr || context == NULL || data == NULL || len == 0)
+    {
+        return;
+    }
+    CurlProgressParser & parser = *static_cast<CurlProgressParser *>(context);
+    const char * bytes = static_cast<const char *>(data);
+    for (size_t i = 0; i < len; i++)
+    {
+        if (bytes[i] == '\r' || bytes[i] == '\n')
+        {
+            ConsumeCurlProgressLine(parser, parser.pending);
+            parser.pending.clear();
+        }
+        else
+        {
+            parser.pending += bytes[i];
+        }
+    }
+}
+
+void FinishCurlProgress(CurlProgressParser & parser)
+{
+    if (!parser.pending.empty())
+    {
+        ConsumeCurlProgressLine(parser, parser.pending);
+        parser.pending.clear();
+    }
+}
+
+int RunCurlCaptureWithProgressInternal(const std::vector<std::string> & args,
+    std::string & outStr, std::string & errStr, LscpProgressFn callback,
+    void * callbackContext, bool upload)
+{
+    CurlProgressParser parser;
+    parser.callback = callback;
+    parser.callbackContext = callbackContext;
+    parser.upload = upload;
+    const int rc = RunCaptureWithOutput(args, outStr, errStr,
+        CurlProgressOutput, &parser);
+    FinishCurlProgress(parser);
+    if (rc == -1 && errStr.empty())
+    {
+        errStr = "Failed to run curl. Install curl (apt install curl) "
+            "and make sure it is on PATH.";
+    }
+    else if (rc == 127 && FindExecutableOnPath("curl").empty())
+    {
+        errStr = "curl was not found on PATH. Install curl (apt install "
+            "curl) to use this protocol.";
+    }
+    return rc;
+}
+
+/* The progress meter is useful while a transfer runs but should never be
+ * presented as the actual error if curl fails. Keep ordinary diagnostics and
+ * discard the carriage-returned meter/header rows. */
+std::string CurlErrorWithoutProgress(const std::string & text)
+{
+    std::string result;
+    size_t start = 0;
+    while (start <= text.size())
+    {
+        size_t end = text.find_first_of("\r\n", start);
+        if (end == std::string::npos)
+        {
+            end = text.size();
+        }
+        const std::string line = text.substr(start, end - start);
+        std::istringstream stream(line);
+        std::vector<std::string> fields;
+        std::string field;
+        while (stream >> field)
+        {
+            fields.push_back(field);
+        }
+        unsigned long long ignored = 0;
+        const bool meter = fields.size() >= 6 &&
+            ParseCurlSize(fields[1], ignored) &&
+            ParseCurlSize(fields[3], ignored) &&
+            ParseCurlSize(fields[5], ignored);
+        if (!meter && line.find("% Total") == std::string::npos &&
+            line.find("--:--:--") == std::string::npos && !line.empty())
+        {
+            if (!result.empty())
+            {
+                result += '\n';
+            }
+            result += line;
+        }
+        if (end == text.size())
+        {
+            break;
+        }
+        start = end + 1;
+    }
+    return result;
+}
+
 /* Splits an 'ls -l'-style line into exactly 9 fields (the 9th keeps any
  * spaces of the file name). Returns false for bare-name listings. */
 bool SplitLongListing(const std::string & line, std::vector<std::string> & fields)
@@ -195,11 +395,20 @@ bool IsSshCurlProtocol(const std::string & proto)
 }
 
 void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string> & args,
-    bool failOnError = true)
+    bool failOnError = true, bool showProgress = false)
 {
     args.push_back(CurlExecutable());
-    args.push_back("-s");
+    if (!showProgress)
+    {
+        args.push_back("-s");
+    }
     args.push_back("-S");
+    if (showProgress)
+    {
+        /* Do not use -s for a transfer with a progress callback: curl's
+         * meter is the byte-count stream parsed above. */
+        args.push_back("--progress-meter");
+    }
     /*
      * -f (--fail) turns a server-side error into a non-zero exit code
      * instead of a successful transfer of the error document. Without it
@@ -1009,6 +1218,14 @@ int DavDelete(const SessionOptions & options, const std::string & remotePath,
 
 } // namespace
 
+int RunCurlCaptureWithProgress(const std::vector<std::string> & args,
+    std::string & out, std::string & error, LscpProgressFn progress,
+    void * progressCtx, bool upload)
+{
+    return RunCurlCaptureWithProgressInternal(args, out, error, progress,
+        progressCtx, upload);
+}
+
 bool IsCurlEndpointUnreachable(int code)
 {
     return IsEndpointUnreachable(code);
@@ -1376,15 +1593,13 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
             preserveTime, size, progress, progressCtx, error,
             speedKBytesPerSecond);
     }
-    (void)progress;
-    (void)progressCtx;
     if (size != NULL)
     {
         *size = 0;
     }
 
     std::vector<std::string> args;
-    BuildCommonCurlArgs(options, args);
+    BuildCommonCurlArgs(options, args, true, progress != NULL);
 
     if (resumeOffset > 0)
     {
@@ -1411,14 +1626,21 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCurl(args, outStr, errStr);
+    int rc = progress != NULL ?
+        RunCurlCaptureWithProgress(args, outStr, errStr, progress, progressCtx, false) :
+        RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
+        errStr = CurlErrorWithoutProgress(errStr);
         error = errStr.empty() ? "Download failed with exit code " + std::to_string(rc) : errStr;
         return -1;
     }
 
     LocalFileInfo info = StatLocal(localPath);
+    if (progress != NULL && info.exists)
+    {
+        progress(info.size, info.size, progressCtx);
+    }
     if (info.exists && size != NULL)
     {
         *size = info.size;
@@ -1438,15 +1660,13 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
             speedKBytesPerSecond);
     }
     (void)permissions;
-    (void)progress;
-    (void)progressCtx;
     if (size != NULL)
     {
         *size = 0;
     }
 
     std::vector<std::string> args;
-    BuildCommonCurlArgs(options, args);
+    BuildCommonCurlArgs(options, args, true, progress != NULL);
 
     if (resumeOffset > 0)
     {
@@ -1473,14 +1693,21 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 
     std::string outStr;
     std::string errStr;
-    int rc = RunCurl(args, outStr, errStr);
+    int rc = progress != NULL ?
+        RunCurlCaptureWithProgress(args, outStr, errStr, progress, progressCtx, true) :
+        RunCurl(args, outStr, errStr);
     if (rc != 0)
     {
+        errStr = CurlErrorWithoutProgress(errStr);
         error = errStr.empty() ? "Upload failed with exit code " + std::to_string(rc) : errStr;
         return -1;
     }
 
     LocalFileInfo info = StatLocal(localPath);
+    if (progress != NULL && info.exists)
+    {
+        progress(info.size, info.size, progressCtx);
+    }
     if (info.exists && size != NULL)
     {
         *size = info.size;

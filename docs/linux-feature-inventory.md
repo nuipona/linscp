@@ -2,7 +2,7 @@
 
 Source: [upstream-parity.json](upstream-parity.json), pinned to winscp/winscp `69edabbe2dc2c62661a7d3fc7e2396b5f42d504d`. **This is not full WinSCP parity or an exhaustive upstream behavioral certification.** The 40 registered upstream script commands are tracked separately in [the parity audit](upstream-parity.md); these rows decompose the 15 feature areas into specific Linux behaviors and named gaps.
 
-84 capabilities: 39 verified for the stated behavior, 26 partial, 19 missing. `verified` means the **row's** behavior has an automated case on Linux, not that every upstream variant or protocol works. `partial` names a working subset and the next gap. `missing` has no implementation. Evidence skipped by a missing dependency is not a pass; consult each suite's `evidence:` line in CI.
+87 capabilities: 42 verified for the stated behavior, 27 partial, 18 missing. `verified` means the **row's** behavior has an automated case on Linux, not that every upstream variant or protocol works. `partial` names a working subset and the next gap. `missing` has no implementation. Evidence skipped by a missing dependency is not a pass; consult each suite's `evidence:` line in CI.
 
 Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --write-report`. The default check fails if this view or a cited test case drifts.
 
@@ -65,10 +65,10 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 | `transfer.filepart-resume` | verified | live-sftp | Interrupted uploads/downloads stage in .filepart and continue there rather than splicing the final destination. |
 | `transfer.resume-modes` | verified | live-sftp, script | Automatic/on/off and -resumesupport thresholds are parsed; resume-off transfers without staging. |
 | `transfer.time-permissions` | partial | live-sftp | SFTP preserves file times in both directions; -preservetime=all and -permissions are accepted. **Next:** Expand live directory timestamp/permission checks and test metadata semantics across curl transports. |
-| `transfer.speed-and-append` | partial | — | Native SFTP supports append and paced transfers; curl uses --limit-rate and refuses append. **Next:** Automate timing/append tests and provide per-file in-flight progress on curl paths. |
+| `transfer.speed-and-append` | partial | — | Native SFTP supports append and paced transfers; curl uses --limit-rate and refuses append. **Next:** Automate timing and append tests across the supported native and curl protocol matrix. |
 | `transfer.presets` | verified | live-dav, script | Named, per-site and rule-selected presets change live transfer settings. |
-| `transfer.desktop-queue` | partial | gui-browser-upload | GUI task queue supports pause, cancel and retry; browser-originated files are privately staged. **Next:** Add queue priorities, per-file curl progress and live cancellation/data-integrity tests. |
-| `transfer.curl-progress` | missing | — | curl-backed transfers do not report in-flight progress to the core callback. **Next:** Propagate byte progress for downloads/uploads through curl without exposing credentials or blocking pipes. |
+| `transfer.desktop-queue` | partial | gui-browser-upload | GUI task queue supports pause, cancel and retry; browser-originated files are privately staged. **Next:** Add queue priorities and live cancellation/data-integrity tests for curl-backed tasks. |
+| `transfer.curl-progress` | partial | unit | curl-backed downloads and uploads stream curl's progress meter from the Linux child process and translate it into the same byte-progress callback used by native SFTP; credentials stay in argv only in the child and both output pipes are drained concurrently. A manual local smoke run also authenticated downloads/uploads against throwaway FTP, implicit FTPS and OpenSSH SCP endpoints; that run is not a checked-in suite. **Next:** Add a checked-in live suite that asserts intermediate callbacks and protocol-specific resume/cancellation behavior; the S3 small-object and multipart paths now report progress, while generic curl coverage is currently a manual smoke result. |
 
 ## Synchronization
 
@@ -164,3 +164,6 @@ Regenerate after editing the JSON: `python3 tools/check_upstream_parity.py --wri
 | `platform.cmake-linux` | partial | — | CMake builds Linux binaries, registers CTest, refuses unsupported hosts and has an installed-prefix smoke check in CI. **Next:** Compare release artifacts on multiple Linux distributions/architectures and test upgrades in place. |
 | `platform.debian-package` | partial | — | The Debian package installs the CLI, GUI, desktop entry, icons and man page; CI smokes the installed paths. **Next:** Verify installation/upgrade/uninstall on Debian stable and non-root environments. |
 | `platform.prefix-lookup` | verified | gui-desktop-uri | An arbitrary PREFIX/share/linuxscp/gui resolves PREFIX/bin/linuxscp before /usr/bin. |
+| `platform.posix-runtime-services` | verified | unit | The Linux platform layer supplies temporary directories, home/config lookup and concurrent child stdout/stderr capture. |
+| `platform.terminal-and-console` | verified | script, unit | Linux command-line parsing, terminal-facing configuration and the native console entry point are built from the Linux sources. |
+| `platform.linux-file-events` | verified | live-dav | The Linux synchronization watcher uses filesystem events and retains interval polling as a safety net when a watch cannot be installed. |

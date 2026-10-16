@@ -101,11 +101,24 @@ unsigned long ParseHttpDate(const std::string & text);
 unsigned long ParseListingDate(const std::string & monthName,
     const std::string & dayText, const std::string & timeOrYear);
 
+/* A chunk delivered while a child is running. 'fromStderr' distinguishes
+ * the progress/status stream from the captured stdout stream. The callback
+ * runs in the parent process, never in the child, and must not retain the
+ * pointed-to bytes after it returns. */
+typedef void (*RunCaptureOutputFn)(const void * data, size_t len,
+    bool fromStderr, void * ctx);
+
 /* Runs args[0] with args[1..] without a shell, capturing everything the
  * child writes to stdout and stderr (read concurrently, so a child can
- * fill both pipes without deadlocking). Returns the child's exit code,
- * or -1 when the child could not be started, in which case 'err' holds
- * the reason. Child stderr is returned in 'err' on a normal run too. */
+ * fill both pipes without deadlocking). If 'output' is non-NULL it also
+ * receives each chunk as it is read, before the bytes are appended to 'out'
+ * or 'err'. Returns the child's exit code, or -1 when the child could not
+ * be started, in which case 'err' holds the reason. */
+int RunCaptureWithOutput(const std::vector<std::string> & args,
+    std::string & out, std::string & err, RunCaptureOutputFn output,
+    void * ctx);
+
+/* Convenience form for callers that only need the completed output. */
 int RunCapture(const std::vector<std::string> & args, std::string & out,
     std::string & err);
 
