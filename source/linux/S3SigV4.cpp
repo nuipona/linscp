@@ -80,10 +80,18 @@ std::string NormalizeHeaderValue(std::string value)
     return out;
 }
 
-void Gmtime(unsigned long long epochSeconds, struct tm & out)
+bool Gmtime(unsigned long long epochSeconds, struct tm & out)
 {
     const time_t t = static_cast<time_t>(epochSeconds);
-    gmtime_r(&t, &out);
+    /* Avoid silently wrapping an unsigned timestamp when it does not fit
+     * Linux's time_t, and never format an uninitialised tm after gmtime_r
+     * fails for an out-of-range value. */
+    if (t < 0 || static_cast<unsigned long long>(t) != epochSeconds ||
+        gmtime_r(&t, &out) == NULL)
+    {
+        return false;
+    }
+    return out.tm_year >= -1900 && out.tm_year <= 8099;
 }
 
 } // namespace
@@ -241,21 +249,30 @@ std::string AuthorizationHeader(const std::string & accessKey,
 std::string AmzDate(unsigned long long epochSeconds)
 {
     struct tm value;
-    Gmtime(epochSeconds, value);
+    if (!Gmtime(epochSeconds, value))
+    {
+        return std::string();
+    }
     char buffer[32];
-    snprintf(buffer, sizeof(buffer), "%04d%02d%02dT%02d%02d%02dZ",
-        value.tm_year + 1900, value.tm_mon + 1, value.tm_mday,
-        value.tm_hour, value.tm_min, value.tm_sec);
+    if (strftime(buffer, sizeof(buffer), "%Y%m%dT%H%M%SZ", &value) == 0)
+    {
+        return std::string();
+    }
     return buffer;
 }
 
 std::string DateStamp(unsigned long long epochSeconds)
 {
     struct tm value;
-    Gmtime(epochSeconds, value);
+    if (!Gmtime(epochSeconds, value))
+    {
+        return std::string();
+    }
     char buffer[16];
-    snprintf(buffer, sizeof(buffer), "%04d%02d%02d",
-        value.tm_year + 1900, value.tm_mon + 1, value.tm_mday);
+    if (strftime(buffer, sizeof(buffer), "%Y%m%d", &value) == 0)
+    {
+        return std::string();
+    }
     return buffer;
 }
 

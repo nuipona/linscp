@@ -26,6 +26,7 @@ import tempfile
 import threading
 import time
 import unittest
+import zlib
 
 BINARY = str(pathlib.Path(sys.argv.pop(1)).resolve())
 SUITE_NAME = "live-sftp"
@@ -77,8 +78,10 @@ class LiveSftpTests(unittest.TestCase):
             self.stop_proxy(*self.proxies.pop())
 
     # -- the server ---------------------------------------------------------
-    def start_server(self):
-        env = dict(os.environ, LSCP_TEST_ROOT=str(self.root), LSCP_TEST_PORT="0")
+    def start_server(self, copy_data=False, check_file_name=False):
+        env = dict(os.environ, LSCP_TEST_ROOT=str(self.root), LSCP_TEST_PORT="0",
+                   LSCP_TEST_COPY_DATA="1" if copy_data else "0",
+                   LSCP_TEST_CHECK_FILE_NAME="1" if check_file_name else "0")
         # Its own process group, so that tearDown can stop the server and
         # anything it left behind without touching the test runner.
         popen_args = dict(env=env, stdout=subprocess.PIPE,
@@ -209,6 +212,100 @@ class LiveSftpTests(unittest.TestCase):
         return path
 
     # -- tests --------------------------------------------------------------
+    def test_cp_multiple_sources_and_recursive_tree(self):
+        """The copy-data extension is optional: SFTP copies must still work
+        through the streamed fallback for multiple files and whole trees."""
+        first = self.write_in_jail("copy-input/first.bin", 8193)
+        second = self.write_in_jail("copy-input/second.bin", 12291)
+        nested = self.write_in_jail("copy-input/sub/nested.bin", 4097)
+        copies = [self.local / "first-copy.bin",
+                  self.local / "second-copy.bin",
+                  self.local / "nested-copy.bin"]
+        result = self.run_script(
+            "option confirm off ; mkdir /many ; "
+            "cp /copy-input/first.bin /copy-input/second.bin /many ; "
+            "cp /copy-input /whole-copy ; "
+            "get /many/first.bin %s ; get /many/second.bin %s ; "
+            "get /whole-copy/sub/nested.bin %s" % tuple(copies))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sha256_of(first), sha256_of(copies[0]))
+        self.assertEqual(sha256_of(second), sha256_of(copies[1]))
+        self.assertEqual(sha256_of(nested), sha256_of(copies[2]))
+        self.assertIn("copying through this client", result.stdout)
+
+    def test_cp_respects_batch_overwrite_confirmation(self):
+        source = self.write_in_jail("copy-overwrite-source.txt", 4096)
+        target = self.write_in_jail("copy-overwrite-target.txt", 31)
+        original_target = sha256_of(target)
+        result = self.run_script(
+            "cp /copy-overwrite-source.txt /copy-overwrite-target.txt")
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn("Cannot confirm this action", result.stderr)
+        self.assertEqual(sha256_of(target), original_target)
+
+        result = self.run_script(
+            "option confirm off ; cp /copy-overwrite-source.txt "
+            "/copy-overwrite-target.txt ; get /copy-overwrite-target.txt %s" %
+            (self.local / "copy-overwrite-result.txt"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(sha256_of(source),
+                         sha256_of(self.local / "copy-overwrite-result.txt"))
+
+    def test_cp_uses_native_copy_data_when_the_server_advertises_it(self):
+        source = self.write_in_jail("native-copy-source.bin", 131_117)
+        downloaded = self.local / "native-copy-result.bin"
+        self.stop_server()
+        self.start_server(copy_data=True)
+        result = self.run_script(
+            "option confirm off ; cp /native-copy-source.bin "
+            "/native-copy-target.bin ; get /native-copy-target.bin %s" %
+            downloaded)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("on the server", result.stdout)
+        self.assertEqual(sha256_of(source), sha256_of(downloaded))
+
+    def test_chmod_symbolic_mode_recurses_over_directories_and_files(self):
+        """A recursive symbolic mode has to apply to every directory and
+        file in the remote subtree, not just the requested top-level path."""
+        root = self.root / "chmod-tree"
+        nested_dir = root / "nested"
+        nested_dir.mkdir(parents=True)
+        nested_file = nested_dir / "data.txt"
+        nested_file.write_bytes(b"mode test" + bytes([10]))
+        os.chmod(root, 0o755)
+        os.chmod(nested_dir, 0o750)
+        os.chmod(nested_file, 0o640)
+
+        result = self.run_script("chmod -recursive g+w /chmod-tree")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(root.stat().st_mode & 0o777, 0o775)
+        self.assertEqual(nested_dir.stat().st_mode & 0o777, 0o770)
+        self.assertEqual(nested_file.stat().st_mode & 0o777, 0o660)
+
+    def test_copyid_installs_public_key_once_with_private_permissions(self):
+        """Install a public key into the test server's SFTP home, creating
+        ~/.ssh and authorized_keys with the expected modes; a repeat is
+        idempotent."""
+        key = server_module.paramiko.RSAKey.generate(2048)
+        public_file = self.local / "copyid.pub"
+        public_file.write_text("%s %s live-copyid-test" %
+                               (key.get_name(), key.get_base64()) + "\n")
+
+        result = self.run_script("copyid %s" % public_file)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        ssh_dir = self.root / ".ssh"
+        authorized_keys = ssh_dir / "authorized_keys"
+        self.assertEqual(ssh_dir.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(authorized_keys.stat().st_mode & 0o777, 0o600)
+        lines = authorized_keys.read_text().splitlines()
+        self.assertEqual(len(lines), 1, lines)
+        self.assertTrue(lines[0].startswith(key.get_name() + " " +
+                                            key.get_base64()), lines[0])
+
+        result = self.run_script("copyid %s" % public_file)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(authorized_keys.read_text().splitlines(), lines)
+
     def test_open_with_a_wrong_password_is_refused(self):
         argv = [BINARY, "-batch", "-hostkey=*",
                 "-command=open sftp://%s:not-the-password@127.0.0.1:%d/" %
@@ -600,6 +697,75 @@ class LiveSftpTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(int((self.root / "up.txt").stat().st_mtime), when)
 
+
+    def test_checksum_fallback_supports_all_documented_algorithms(self):
+        """When the server lacks the extension, every documented checksum
+        algorithm hashes the downloaded bytes and reports the correct digest."""
+        data = (b"checksum fallback" + bytes([0])) * 4097
+        self.write_in_jail("fallback-checksum.bin", len(data)).write_bytes(data)
+        expected = {
+            "sha-256": hashlib.sha256(data).hexdigest(),
+            "sha-1": hashlib.sha1(data).hexdigest(),
+            "md5": hashlib.md5(data).hexdigest(),
+            "crc32": "%08x" % (zlib.crc32(data) & 0xffffffff),
+        }
+        for algorithm, digest in expected.items():
+            with self.subTest(algorithm=algorithm):
+                result = self.run_script(
+                    "checksum %s /fallback-checksum.bin" % algorithm)
+                self.assertEqual(result.returncode, 0,
+                                 result.stdout + result.stderr)
+                self.assertIn(digest + " /fallback-checksum.bin",
+                              result.stdout)
+                self.assertIn("computed from the downloaded file",
+                              result.stdout)
+
+    def test_checksum_uses_native_check_file_name_extension(self):
+        """A server implementing check-file-name should calculate the digest
+        itself rather than forcing the client's download-and-hash fallback."""
+        self.stop_server()
+        self.start_server(check_file_name=True)
+        remote = self.write_in_jail("native-checksum.bin", 97 << 10)
+        expected = sha256_of(remote)
+
+        result = self.run_script("checksum sha-256 /native-checksum.bin")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(expected + " /native-checksum.bin", result.stdout)
+        self.assertNotIn("cannot calculate checksums", result.stdout)
+        self.assertNotIn("downloaded file", result.stdout)
+
+    def test_synchronize_filemask_prunes_excluded_subtrees(self):
+        """A path exclusion prunes its subtree in both the transfer and
+        delete phases, leaving excluded destination files untouched."""
+        local_root = self.local / "sync-exclusion"
+        (local_root / "skip").mkdir(parents=True)
+        keep = b"included by synchronization" + bytes([10])
+        excluded = b"excluded source" + bytes([10])
+        (local_root / "keep.txt").write_bytes(keep)
+        (local_root / "skip" / "new.txt").write_bytes(excluded)
+
+        remote_preserved = self.write_in_jail(
+            "sync-exclusion/skip/old.txt", 0)
+        remote_preserved.write_bytes(b"must survive -delete" + bytes([10]))
+        preview = self.run_script(
+            "synchronize remote -filemask=|skip/ -delete -preview %s "
+            "/sync-exclusion" % local_root)
+        self.assertEqual(preview.returncode, 0,
+                         preview.stdout + preview.stderr)
+        self.assertIn("keep.txt", preview.stdout)
+        self.assertNotIn("new.txt", preview.stdout)
+        self.assertNotIn("old.txt", preview.stdout)
+
+        result = self.run_script(
+            "option confirm off ; synchronize remote -filemask=|skip/ "
+            "-delete %s /sync-exclusion" % local_root)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / "sync-exclusion/keep.txt").read_bytes(),
+                         keep)
+        self.assertEqual(remote_preserved.read_bytes(),
+                         b"must survive -delete" + bytes([10]))
+        self.assertFalse((self.root /
+                          "sync-exclusion/skip/new.txt").exists())
 
     def test_synchronize_by_checksum_sees_what_the_timestamp_hides(self):
         """A file whose contents changed without its size or its timestamp

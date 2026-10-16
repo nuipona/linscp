@@ -1409,6 +1409,8 @@ void TestS3SigV4()
         "20260115/us-east-1/s3/aws4_request");
     CHECK_EQ(AmzDate(1768473000ULL), "20260115T103000Z");
     CHECK_EQ(DateStamp(1768473000ULL), "20260115");
+    CHECK_EQ(AmzDate(~0ULL), "");
+    CHECK_EQ(DateStamp(~0ULL), "");
 
     const std::string emptyHash =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";

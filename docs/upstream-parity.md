@@ -1,7 +1,7 @@
 # WinSCP parity audit and implementation plan
 
 **Full feature parity is not achieved.** LinSCP is a substantially reduced,
-cross-platform client using part of WinSCP's PuTTY code, not a build of the
+Linux-only client using part of WinSCP's PuTTY code, not a build of the
 complete upstream application. A protocol URL being accepted, a similar GUI,
 or a passing build is not evidence of behavioral parity.
 
@@ -50,8 +50,8 @@ build on any of them:
 * A platform record without a `how`, a dated `date` and described suites is an
   error, because evidence nobody can reproduce is not evidence.
 
-As it stands: 50 entries have evidence recorded on Linux and **35 are
-`verified`**. The other 26 stay `partial` or `missing` for functional reasons -
+As it stands: 52 entries have evidence recorded on Linux and **37 are
+`verified`**. The other 24 stay `partial` or `missing` for functional reasons -
 a protocol feature that is not implemented, or a behaviour no suite exercises
 yet - and the ledger says so per entry instead of rounding the whole inventory
 down to `partial`. Entries that used to be held at `partial` only because a
@@ -59,9 +59,9 @@ second platform could not test them (`copyid` was one) carry their Linux
 evidence now; nothing was promoted on the strength of a build alone.
 
 The count is not taken on trust either. Each test suite prints one line when
-it finishes - `evidence: suite=live-sftp platform=linux ran=6 skipped=0
+it finishes - `evidence: suite=live-sftp platform=linux ran=25 skipped=0
 failed=0` - and the CI jobs repeat it as an annotation on the run. A suite that
-could not run because `paramiko` is missing shows up as `skipped=6`, which is
+could not run because `paramiko` is missing shows up as `skipped=25`, which is
 the case a green check mark used to hide. The S3 suite reports its
 reference-signature test skipped the same way when `botocore` is absent.
 
@@ -74,19 +74,19 @@ even though WinSCP edits files from its GUI and through its .NET assembly.
 
 | Area | Current implementation and remaining work |
 | --- | --- |
-| SFTP | The native PuTTY transport, not a curl session. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Remaining: metadata policies. |
+| SFTP | The native PuTTY transport, not a curl session. SYMLINK, server-side copy-data (with a streamed fallback) and check-file-name (with a local hash fallback) are implemented and were exercised against a live in-process SFTP server; unknown extensions still fail explicitly. Multi-source and recursive `cp` paths pass through the streamed fallback, while native copy-data and check-file-name replies are exercised by extension-enabled test-server modes. Remaining: metadata policies. |
 | SCP | curl-dependent transfer path, not WinSCP's remote-shell filesystem engine. Listing and directory operations need a real SCP implementation. |
 | FTP/FTPS | curl and a text listing parser. Verify server compatibility, MLSD, active/passive mode, TLS settings and resume semantics. |
 | WebDAV | A PROPFIND filesystem: Depth 0/1 listings parsed from the 207 multi-status (type, size, date - namespace prefix agnostic), stat with real sizes/times and proper missing-path reporting, MKCOL with named refusals, MOVE with an absolute-URI Destination, COPY with Destination/Overwrite for single-file `cp` (streamed fallback when COPY is refused; both paths checked live), DELETE with 409 as 'not empty' and `rmdir` checking children first because DAV collection deletes are recursive; `open` probes with PROPFIND and refuses a 401 after the `--anyauth` challenge or a 405 that means the server is not DAV (`LiveDavTest.py` against a stdlib mock). Missing: LOCK/UNLOCK, dead properties, collection-level precondition handling and `If` headers. |
 | S3 | AWS SigV4 over curl with path-style bucket access: `s3://` URLs (region from `AWS_REGION`/`AWS_DEFAULT_REGION`/the hostname/us-east-1), ListBuckets, ListObjectsV2 with delimiter and continuation, HEAD stat, get with range resume and `Last-Modified` preservation, PutObject for small files, multipart initiation/part upload/completion for files over 16 MiB, directory markers with bucket-aware `mkdir`/`rmdir`, CopyObject for `cp` and rename-as-copy-plus-delete, and refusal of unsigned or wrongly signed requests - signed vectors pinned to botocore in the unit suite and the whole loop against a TLS mock that re-derives signatures itself, including synthetic HTTP-200 Error bodies and abort cleanup (`LiveS3Test.py`, Linux-only evidence). On a handled failure the client attempts to abort; a retry restarts from part one because upload IDs/parts are not persisted. Multipart copy is not implemented. Missing: ACLs, versioning, storage classes, SSE options and object metadata beyond content. |
 | Transfers | Binary/ASCII/automatic transfers with full WinSCP file masks (name, directory and path masks plus size/time criteria), `option include/exclude`, `-filemask=`, `-transfer=`, fail-on-no-match, resume (binary only), and reconnect via `option reconnecttime`; ASCII conversion, `-speed=`, `-append`, `-resumesupport=` and `-preservetime[=all]` were verified against a live server, and refused opens, denied operations, an interrupted download and its resume are automated in `LiveSftpTest.py`. Resume-capable transfers stage through upstream's `.filepart` name and are renamed into place only when complete - `option resume automatic` (default) from upstream's 100 KB threshold, `on` always, `off` never - so an interrupted transfer never leaves a truncated file under the final name and a continuation reads the staging file instead of splicing the existing destination; the live suite covers both directions, the stale-staging-file restart and `option resume off`. Transfer presets (named, per-site and rule-based, using upstream's copy-parameter vocabulary) drive these transfers too, checked live. Missing: per-file progress reporting on the curl paths. |
-| Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=` taking upstream's `none`, `either` and `both` and any comma-separated list of `time`, `size` and `checksum` (`-criteria=checksum` reads both files, through the server's checksum when the transport can ask for it and a downloaded copy otherwise, and a file that cannot be hashed refuses the plan instead of counting as equal; the `both` direction decides from its state record and so refuses the criteria that record cannot honour), `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror`, ASCII conversion and a change only `-criteria=checksum` can see were verified against a live server. `keepuptodate` recursively watches local changes with inotify; `-interval=` remains a full-rescan safety net, with timer polling if the watch cannot be set up. The live WebDAV suite passes the watcher and local-to-remote assertions. Missing: path exclusions and WinSCP's conflict-resolution UI. |
+| Synchronization | A planner with previews (`-preview`, `SYNCPLAN`/`SYNCSUMMARY`), `-criteria=` taking upstream's `none`, `either` and `both` and any comma-separated list of `time`, `size` and `checksum` (`-criteria=checksum` reads both files, through the server's checksum when the transport can ask for it and a downloaded copy otherwise, and a file that cannot be hashed refuses the plan instead of counting as equal; the `both` direction decides from its state record and so refuses the criteria that record cannot honour), `-filemask=`, `-transfer=binary\|ascii\|automatic`, `-delete`/`-nodelete` (default from `option synchdelete`), `-mirror` (rejected with `both`), `-nonrecursive`, `-interval=`, `-count=`, `keepuptodate -continue` (keeps watching after a failed pass) and a state record that tells a change from a conflict; `-mirror`, ASCII conversion and a change only `-criteria=checksum` can see were verified against a live server. `keepuptodate` recursively watches local changes with inotify; `-interval=` remains a full-rescan safety net, with timer polling if the watch cannot be set up. The live WebDAV suite passes the watcher and local-to-remote assertions. Path exclusion `-filemask=|skip/` is verified live: it prunes that subtree and protects an excluded destination file from `-delete`. Missing: WinSCP's conflict-resolution UI. |
 | Sessions | `sessions.ini` site manager shared by the console and the GUI: `sessions` (list, open by name, export/import), `savesession`, `rmsession`, `open <name>` and last-used tracking, while `session` itself follows upstream - open-session listing, active line and 1-based switching; the GUI holds one persistent connection per tab. Stored passwords are encrypted under a sibling `sessions.key`, in a format the GUI reads and writes too, and a proxy travels with a site: `open -rawsettings` applies upstream's proxy settings, `savesession -rawsettings` stores them with the proxy password encrypted like a session password, and a site whose stored proxy cannot be decrypted is refused rather than opened without it. Missing folder trees, the raw settings beyond the proxy ones, and the full upstream configuration model. |
-| Security | Password, private-key and ssh-agent authentication and the host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration follows upstream's setting names (`ProxyMethod`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword`, `ProxyTelnetCommand`, `ProxyLocalCommand`, `ProxyDNS`, `ProxyLocalhost`, `ProxyExcludeList`): SOCKS 4 and 5, HTTP CONNECT and a telnet or local command through the PuTTY core on the native transport, and `--proxy`/`--proxy-user`/`--noproxy` on the curl protocols, which refuse a proxy they cannot run instead of connecting around it - the one setting the curl path cannot express is `ProxyLocalhost=0`, since curl proxies localhost too. A proxy password is masked in the echoed command line and in the XML action log. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account or upstream key-management UI; stored session passwords are encrypted at rest under `sessions.key` rather than kept in the clear. |
-| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote filename search plus bounded UTF-8 content search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header. Synchronized browsing (both panes move as one, with a refusal - not a divergence - when the counterpart folder is missing) and drag and drop between the panes (payload, target highlight, the drop queuing exactly the dragged names, same-pane drops ignored) match WinSCP's Commander, asserted in `ClientTest.js`. Missing: custom commands, localization, and drops from the operating system's file manager. |
+| Security | Password, private-key and ssh-agent authentication and the host-key policy exist, and an unknown or changed key is reported on a `HOSTKEY` line instead of being accepted. GSSAPI is compiled out, and SSH tunnels and curl fingerprint equivalence are incomplete. Proxy configuration follows upstream's setting names (`ProxyMethod`, `ProxyHost`, `ProxyPort`, `ProxyUsername`, `ProxyPassword`, `ProxyTelnetCommand`, `ProxyLocalCommand`, `ProxyDNS`, `ProxyLocalhost`, `ProxyExcludeList`): SOCKS 4 and 5, HTTP CONNECT and a telnet or local command through the PuTTY core on the native transport, and `--proxy`/`--proxy-user`/`--noproxy` on the curl protocols, which refuse a proxy they cannot run instead of connecting around it. `ProxyLocalhost=0` adds `localhost`, IPv4 loopback (`127.0.0.0/8`) and IPv6 loopback (`::1/128`) to curl's no-proxy list; `ProxyLocalhost=1` leaves them eligible for proxying. A proxy password is masked in the echoed command line and in the XML action log. The GUI verifies by default, pins on request, stores a pin rather than a wildcard, and serves its API on loopback behind a per-run token with a `Host` check. Still no user account or upstream key-management UI; stored session passwords are encrypted at rest under `sessions.key` rather than kept in the clear. |
+| GUI | Browser Commander with one persistent session per tab, dual panes, a transfer queue with progress/pause/cancel/retry, synchronization preview, remote filename search plus bounded UTF-8 content search, a remote editor, the site manager and host-key pinning, driven by a loopback HTTP API that requires a per-run token and checks the `Host` header. Synchronized browsing (both panes move as one, with a refusal - not a divergence - when the counterpart folder is missing) and drag and drop between the panes (payload, target highlight, the drop queuing exactly the dragged names, same-pane drops ignored) match WinSCP's Commander, asserted in `ClientTest.js`. Dropping individual files from the operating system's file manager onto the remote pane now queues authenticated, bounded uploads through the transfer queue; folders and drops onto the local pane remain unsupported. Missing: custom commands, localization, and the remaining Explorer-style interactions. |
 | Editing/search | `edit` downloads, runs the configured editor and uploads on change, with a size limit (`option editmaxsize`) and a refusal when the remote file changed meanwhile; GUI search walks remote directories by filename mask or searches literal UTF-8 content in matching files, bounded to 8 MiB per file and 64 MiB/200 files per search with skipped/truncated counts (`RemoteSearchTest.py`, `ClientTest.js`). Missing save/upload monitoring of local edits, broader encoding handling and the custom command system. |
 | Automation | CLI scripting with WinSCP switches, unambiguous command and option abbreviations, script parameters, `%TIMESTAMP%` and environment expansion, and an XML action log (`-xmllog=`) with masked passwords. Missing: the .NET assembly and PowerShell APIs, and log-format equivalence - our log mirrors upstream's structure but does not copy a schema, since upstream has no XML session log to copy. |
-| Integration | Debian launcher/icons, the `sftp://`, `ftp://` and `ftps://` scheme handlers of the desktop entry, and an external SSH terminal - not full desktop drag/drop, shell integration and extensions. A mechanism this client cannot offer is stated rather than silently skipped. |
+| Integration | Debian launcher/icons, working `sftp://`, `ftp://` and `ftps://` scheme handlers (the URL opens a GUI tab at its remote path and still requires the normal host-key decision), and an external SSH terminal. The URL parsing/startup path is covered by `DesktopUriTest.py`. Still missing: full folder drop, shell integration and extensions. A mechanism this client cannot offer is stated rather than silently skipped. |
 | Localization/accessibility | No upstream translation catalog or equivalent accessibility validation. |
 | Platforms | Linux only. The Makefile build, the CMake/CTest build and the `.deb` all run in CI, which installs the package and starts both clients from the installed paths. Each protocol still depends on the backend that serves it: SFTP on the bundled PuTTY core, everything else on an installed `curl` that was built with that protocol. |
 
@@ -218,7 +218,7 @@ python3 tools/check_upstream_parity.py   # the inventory and its evidence rules
 `check-live` runs `ScriptTest.py` (server-free), `LiveSftpTest.py` (skips
 itself, loudly, without `paramiko`), `LiveS3Test.py` (standard library only;
 `botocore` is an optional extra one test skips without), `LiveDavTest.py` and
-the two GUI Python suites. CMake registers the same suites with CTest, and CI
+the four GUI Python suites (remote search, local editor, browser uploads and desktop URL startup). CMake registers the same suites with CTest, and CI
 runs both builds plus a job that builds the `.deb`, installs it and starts the
 console and graphical clients from the installed paths. A suite that cannot
 run prints its skip count on its evidence line, so a green run that did less
@@ -239,8 +239,11 @@ download interrupted by Ctrl-C that stays in `.filepart` and is completed by a
 plain `get`, the same for an interrupted upload, a continuation that must not
 splice an existing destination, a transfer whose server dies under it and the
 same resume against a restarted server, `option resume off` disabling the
-staging, `-preservetime` in both directions, and the shared stored-password
-format: a password encrypted by the GUI's module authenticating the console
+staging, `-preservetime` in both directions, multi-source and recursive
+`cp` through the streamed fallback when the SFTP server rejects copy-data,
+all four checksum algorithms through the download fallback, and native
+`check-file-name` replies from an extension-enabled server; the shared
+stored-password format: a password encrypted by the GUI's module authenticating the console
 client, a missing key file reported without losing the value, and a
 core-written password decrypted back by the GUI's reader.
 
@@ -258,12 +261,12 @@ source/linux/build/linuxscp -batch -hostkey='*' \
 ```
 
 What only that hand-run covers so far - and is recorded as `manual` evidence in
-the ledger, on Linux only: `cd`/`ls` masks, `cp`, `ln`, `checksum`, `call`,
-`mv`, `rmdir`, `rm -onlyfile`, ASCII transfers, `synchronize -mirror
--transfer=`, `chmod` (octal, symbolic and `-recursive`), `copyid`, `-speed=`
-(timed), `-append`, `-resumesupport=` and `-preservetime[=all]` on directories.
-Automating those is the cheapest way to turn entries in this table into entries
-with evidence.
+the ledger, on Linux only: `cd`/`ls` masks, `cp`, `ln`, `call`, `mv`, `rmdir`,
+`rm -onlyfile`, ASCII transfers, `synchronize -mirror -transfer=`, octal
+`chmod`, `copyid` with a private key, `-speed=` (timed), `-append`,
+`-resumesupport=` and `-preservetime[=all]` on directories. Automating those
+remaining variants is the cheapest way to turn entries in this table into
+entries with evidence.
 
 The Python CLI regression suite exercises default/explicit batch policies,
 file and command input, alias routing, local listing, binary mode, rejected
@@ -313,7 +316,8 @@ to say what those suites proved.
 3. **Synchronization:** the planner exists with previews, criteria, filtering,
    `-mirror`, `-transfer=` conversion, deletion guards and `keepuptodate
    -continue`; a recursive inotify watcher drives local-to-remote
-   `keepuptodate` behavior. Remaining work is path exclusions, a
+   `keepuptodate` behavior. Path exclusions are now verified live, including
+   protection of excluded destination files from `-delete`. Remaining work is a
    conflict-resolution workflow and broader sync semantics; the watcher and the
    DAV direction have live-suite coverage in CI.
    `-resumesupport=` thresholds and `-append` are in place for the native

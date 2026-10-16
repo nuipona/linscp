@@ -39,6 +39,7 @@ import time
 import secrets
 import shutil
 import stat
+import re
 import getpass
 import queue
 import posixpath
@@ -53,6 +54,7 @@ import linscp_crypto
 
 PORT = 8080
 HOST = "127.0.0.1"
+MAX_BROWSER_UPLOAD_BYTES = 1024 * 1024 * 1024
 # Filled in by main(): one random token per run, required on every /api/ call.
 API_TOKEN = ""
 REQUIRE_TOKEN = True
@@ -253,6 +255,74 @@ def read_stored_sessions():
     return sessions
 
 
+def parse_desktop_site_url(uri):
+    """Convert a registered Linux sftp://, ftp:// or ftps:// URL to a site."""
+    parsed = urllib.parse.urlsplit(uri)
+    protocol = parsed.scheme.lower()
+    if protocol not in ("sftp", "ftp", "ftps"):
+        raise ValueError("Only sftp://, ftp:// and ftps:// URLs can be opened.")
+    if not parsed.hostname:
+        raise ValueError("The site URL has no host name.")
+    if parsed.query or parsed.fragment:
+        raise ValueError("Site URLs must not contain a query or fragment.")
+
+    def decode_component(value, label):
+        if re.search(r"%(?![0-9A-Fa-f]{2})", value):
+            raise ValueError("The site URL has an invalid escape in its %s." % label)
+        try:
+            return urllib.parse.unquote(value, errors="strict")
+        except UnicodeDecodeError:
+            raise ValueError("The site URL has invalid UTF-8 in its %s." % label)
+
+    try:
+        port = parsed.port
+    except ValueError:
+        raise ValueError("The site URL has an invalid port.")
+    defaults = {"sftp": 22, "ftp": 21, "ftps": 990}
+    session = new_session()
+    session["protocol"] = protocol
+    session["host"] = parsed.hostname
+    session["port"] = port if port is not None else defaults[protocol]
+    if session["port"] < 1 or session["port"] > 65535:
+        raise ValueError("The site URL port must be between 1 and 65535.")
+    if parsed.username is not None:
+        username = decode_component(parsed.username, "user name")
+        if not username:
+            raise ValueError("The site URL user name is empty.")
+        session["username"] = username
+    if parsed.password is not None:
+        session["password"] = decode_component(parsed.password, "password")
+    path = decode_component(parsed.path or "/", "path")
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
+        raise ValueError("The site URL path contains a control character.")
+    session["initial_dir"] = path if path.startswith("/") else "/" + path
+    return session
+
+
+def open_desktop_site(session):
+    """Start the GUI with a URL supplied by a Linux desktop scheme handler."""
+    with STATE_LOCK:
+        tab = CoreSession(STATE["next_tab"], session)
+        STATE["next_tab"] += 1
+        STATE["tabs"].append(tab)
+        STATE["active_tab"] = tab.id
+
+    def connect():
+        add_log("Connecting to %s (%s)..." %
+                (session.get("host"), session.get("protocol")), "info")
+        ok, error = tab.connect()
+        if ok:
+            add_log("Connected to %s" % tab.name, "success")
+        else:
+            add_log("Connection failed: %s" % error, "error")
+            if tab.observed_hostkey:
+                with STATE_LOCK:
+                    STATE["challenges"][tab.id] = tab
+
+    threading.Thread(target=connect, daemon=True).start()
+    return tab
+
+
 def new_session():
     return {
         "protocol": "sftp",
@@ -282,12 +352,15 @@ def session_url(session, path=None):
         if password:
             url += ":" + urllib.parse.quote(password, safe="")
         url += "@"
-    url += host
+    if ":" in host and not host.startswith("["):
+        url += "[" + host + "]"
+    else:
+        url += host
     if port and port != 22:
         url += ":%d" % port
     url += "/"
     if path:
-        url += path.lstrip("/")
+        url += urllib.parse.quote(path.lstrip("/"), safe="/")
     return url
 
 
@@ -584,7 +657,8 @@ def require_tab(tab_id=None):
 
 class Task(object):
     def __init__(self, task_id, kind, command, session, source, destination,
-                 tab_id, progress_path=None, progress_remote=None, move_source=None):
+                 tab_id, progress_path=None, progress_remote=None, move_source=None,
+                 cleanup_path=None):
         self.id = task_id
         self.kind = kind
         self.command = command
@@ -604,6 +678,9 @@ class Task(object):
         self.progress_remote = progress_remote  # (tab_id, remote path)
         # A move removes its source only after the copied file is complete.
         self.move_source = move_source
+        # Browser-originated uploads use a private temporary source file; keep
+        # it available for retry, then remove it on completion or queue clear.
+        self.cleanup_path = cleanup_path
 
     def as_dict(self):
         percent = 0
@@ -651,11 +728,12 @@ class TaskManager(object):
         threading.Thread(target=self._worker, daemon=True).start()
 
     def submit(self, kind, command, session, source, destination, tab_id,
-               progress_path=None, progress_remote=None, move_source=None):
+               progress_path=None, progress_remote=None, move_source=None,
+               cleanup_path=None):
         with STATE_LOCK:
             task = Task(STATE["next_task"], kind, command, session, source,
                         destination, tab_id, progress_path, progress_remote,
-                        move_source=move_source)
+                        move_source=move_source, cleanup_path=cleanup_path)
             STATE["next_task"] += 1
             STATE["tasks"].insert(0, task)
         with self.condition:
@@ -750,7 +828,9 @@ class TaskManager(object):
                 code = 1
         task.status = "Completed" if code == 0 else "Failed"
         task.finished = time.strftime("%H:%M:%S")
-        if code != 0:
+        if code == 0:
+            self.cleanup_source(task)
+        else:
             task.error = move_error or "\n".join(captured[-6:]) or "The operation failed."
         add_log("%s %s: %s" % (task.kind, task.status.lower(), task.source),
                 "success" if code == 0 else "error")
@@ -807,6 +887,16 @@ class TaskManager(object):
 
     # -- queue controls ----------------------------------------------------
 
+    @staticmethod
+    def cleanup_source(task):
+        path = getattr(task, "cleanup_path", None)
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            task.cleanup_path = None
+
     def cancel(self, task_id):
         with STATE_LOCK:
             for task in STATE["tasks"]:
@@ -850,8 +940,16 @@ class TaskManager(object):
 
     def clear_finished(self):
         with STATE_LOCK:
-            STATE["tasks"] = [task for task in STATE["tasks"]
-                              if task.status in ("Queued", "Running", "Cancelling")]
+            kept = []
+            removed = []
+            for task in STATE["tasks"]:
+                if task.status in ("Queued", "Running", "Cancelling"):
+                    kept.append(task)
+                else:
+                    removed.append(task)
+            STATE["tasks"] = kept
+        for task in removed:
+            self.cleanup_source(task)
 
     def cancel_all(self):
         with STATE_LOCK:
@@ -860,6 +958,7 @@ class TaskManager(object):
                     task.status = "Cancelled"
                 elif task.status == "Running":
                     task.status = "Cancelling"
+                self.cleanup_source(task)
 
 
 TASKS = TaskManager()
@@ -874,6 +973,35 @@ def quote_remote(path):
     if path and not any(ch in path for ch in " \t\"';"):
         return path
     return '"' + path.replace('"', '\\"') + '"'
+
+
+def queue_browser_upload(tab, remote_dir, filename, source_stream, content_length):
+    """Stage one browser File body and queue it through the normal client."""
+    fd, source_path = tempfile.mkstemp(prefix="linscp-browser-upload-")
+    try:
+        remaining = content_length
+        with os.fdopen(fd, "wb") as uploaded:
+            while remaining:
+                chunk = source_stream.read(min(65536, remaining))
+                if not chunk:
+                    raise IOError("The upload ended before all bytes arrived.")
+                uploaded.write(chunk)
+                remaining -= len(chunk)
+        destination = posixpath.join(remote_dir, filename)
+        command = "put %s %s" % (quote_remote(source_path),
+                                  quote_remote(destination))
+        task = TASKS.submit("Upload", command, tab.session,
+                            "Browser: " + filename, destination, tab.id,
+                            progress_remote=(tab.id, destination),
+                            cleanup_path=source_path)
+        task.bytes_total = content_length
+        return task
+    except Exception:
+        try:
+            os.unlink(source_path)
+        except OSError:
+            pass
+        raise
 
 
 def parse_ls_output(stdout):
@@ -1274,6 +1402,57 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         if path.startswith("/api/") and not self.guarded():
             return
+        if path == "/api/transfer/drop":
+            query = urllib.parse.parse_qs(parsed.query)
+            try:
+                tab_id = int(query.get("tab", [""])[0])
+                content_length = int(self.headers.get("Content-Length", "-1"))
+            except (TypeError, ValueError):
+                self.send_json({"success": False,
+                                "error": "Invalid upload request."}, status=400)
+                return
+            if content_length < 0:
+                self.send_json({"success": False,
+                                "error": "The upload size is missing."}, status=411)
+                return
+            if content_length > MAX_BROWSER_UPLOAD_BYTES:
+                self.send_json({"success": False,
+                                "error": "Browser uploads are limited to 1 GiB."},
+                               status=413)
+                return
+            if self.headers.get_content_type() != "application/octet-stream":
+                self.send_json({"success": False,
+                                "error": "Expected an octet-stream file upload."},
+                               status=415)
+                return
+            tab = require_tab(tab_id)
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"},
+                               status=400)
+                return
+            filename = query.get("name", [""])[0]
+            remote_dir = query.get("remote_dir", [tab.remote_dir])[0]
+            if (not filename or filename in (".", "..") or
+                    "/" in filename or "\\" in filename or
+                    any(ord(char) < 32 or ord(char) == 127
+                        for char in filename) or
+                    any(ord(char) < 32 or ord(char) == 127
+                        for char in remote_dir)):
+                self.send_json({"success": False,
+                                "error": "The file or destination name is invalid."},
+                               status=400)
+                return
+            try:
+                task = queue_browser_upload(tab, remote_dir, filename,
+                                            self.rfile, content_length)
+            except (IOError, OSError) as exc:
+                self.send_json({"success": False,
+                                "error": "Could not receive the file: %s" % exc},
+                               status=400)
+                return
+            self.send_json({"success": True, "task_id": task.id})
+            return
+
         body = self.read_json_body()
 
         if path == "/api/tabs/open":
@@ -2288,7 +2467,12 @@ def main():
     port = PORT
     host = HOST
     fixed_token = None
+    startup_url = None
     for arg in sys.argv[1:]:
+        if (startup_url is None and arg.lower().startswith(
+                ("sftp://", "ftp://", "ftps://"))):
+            startup_url = arg
+            continue
         if arg.startswith("--port="):
             try:
                 port = int(arg.split("=", 1)[1])
@@ -2318,6 +2502,13 @@ def main():
             print("  --allow-any-host       answer requests for any host name")
             print("  --print-token          write the token to the terminal")
             return 0
+    startup_session = None
+    if startup_url:
+        try:
+            startup_session = parse_desktop_site_url(startup_url)
+        except ValueError as exc:
+            print("Cannot open desktop site URL: %s" % exc, file=sys.stderr)
+            return 2
     API_TOKEN = fixed_token or secrets.token_hex(32)
 
     server_address = (host, port)
@@ -2326,6 +2517,8 @@ def main():
     except OSError as exc:
         print("Cannot listen on %s:%d: %s" % (host, port, exc), file=sys.stderr)
         return 1
+    if startup_session is not None:
+        open_desktop_site(startup_session)
     print("LinSCP Commander GUI running at http://localhost:%d/" % port)
     print("Serving web client from: %s" % WEB_DIR)
     print("LinSCP core binary: %s" % LINUXSCP_BIN)

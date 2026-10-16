@@ -305,32 +305,40 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
             args.push_back("--proxy-user");
             args.push_back(proxy.userName + ":" + proxy.password);
         }
-        if (!proxy.excludeList.empty())
+        /* PuTTY separates ProxyExcludeList entries by whitespace or comma,
+         * while curl expects commas. Add curl's loopback exclusions for
+         * PuTTY's default ProxyLocalhost=0 policy. CIDR matching handles all
+         * of IPv4's loopback block, not just 127.0.0.1; localhost and ::1
+         * cover the usual name and IPv6 loopback forms. */
+        std::string list;
+        for (size_t i = 0; i < proxy.excludeList.size(); i++)
         {
-            /* PuTTY separates the entries by white space or comma, curl by
-             * comma alone. */
-            std::string list;
-            for (size_t i = 0; i < proxy.excludeList.size(); i++)
+            const char c = proxy.excludeList[i];
+            if (c == ',' || c == ';' || c == '\n' || c == '\r' ||
+                c == ' ' || c == '\t')
             {
-                const char c = proxy.excludeList[i];
-                if (c == ',' || c == ';' || c == '\n' || c == '\r' ||
-                    c == ' ' || c == '\t')
+                if (!list.empty() && list[list.size() - 1] != ',')
                 {
-                    if (!list.empty() && list[list.size() - 1] != ',')
-                    {
-                        list += ",";
-                    }
-                }
-                else
-                {
-                    list += c;
+                    list += ",";
                 }
             }
-            if (!list.empty())
+            else
             {
-                args.push_back("--noproxy");
-                args.push_back(list);
+                list += c;
             }
+        }
+        if (!proxy.evenLocalhost)
+        {
+            if (!list.empty() && list[list.size() - 1] != ',')
+            {
+                list += ",";
+            }
+            list += "localhost,127.0.0.0/8,::1/128";
+        }
+        if (!list.empty())
+        {
+            args.push_back("--noproxy");
+            args.push_back(list);
         }
     }
 }

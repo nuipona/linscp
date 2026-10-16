@@ -636,6 +636,26 @@ class LiveDavTests(unittest.TestCase):
         self.assertNotIn("c.txt", listing.stdout)
 
 
+    def test_proxy_localhost_off_bypasses_loopback(self):
+        """ProxyLocalhost=0 is the upstream default: loopback destinations
+        must bypass the configured proxy."""
+        proxy_port, proxy_lines = self.start_proxy()
+        source = self.root / "local-bypass.txt"
+        source.write_bytes(b"loopback bypass\n")
+        downloaded = self.root / "local-bypass-back.txt"
+        result = self.run_script(
+            "put %s /local-bypass.txt ; get /local-bypass.txt %s" %
+            (source, downloaded),
+            open_args=["-rawsettings", "ProxyMethod=SOCKS5",
+                       "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port,
+                       "ProxyLocalhost=0"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(downloaded.read_bytes(), source.read_bytes())
+        self.assertFalse(
+            any(line.startswith("CONNECT ") for line in proxy_lines),
+            "loopback request unexpectedly went through the proxy: %s" %
+            (proxy_lines,))
+
     def test_the_curl_path_goes_through_a_proxy(self):
         """A SOCKS5 proxy set with '-rawsettings' carries a WebDAV session
         too: curl is given the proxy, the requests reach the server through
@@ -649,7 +669,8 @@ class LiveDavTests(unittest.TestCase):
             "mkdir /proxied ; put %s /proxied/file.txt ; "
             "get /proxied/file.txt %s ; echo PROXY_OK" % (source, downloaded),
             open_args=["-rawsettings", "ProxyMethod=SOCKS5",
-                       "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port])
+                       "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port,
+                       "ProxyLocalhost=1"])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PROXY_OK", result.stdout)
         self.assertEqual(sha256_of(source), sha256_of(downloaded))

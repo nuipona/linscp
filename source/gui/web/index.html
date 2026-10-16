@@ -528,7 +528,8 @@
         <p><b>Sessions</b> opens the site manager: stored sessions are shared with the
         console client, and each tab keeps its own connection open.</p>
         <p><b>Transfers</b> run in the queue at the bottom. They can be paused,
-        cancelled and retried; a cancelled transfer does not disturb the session.</p>
+        cancelled and retried; a cancelled transfer does not disturb the session.
+        You can also drop individual files from your desktop onto the remote pane to upload them.</p>
         <p><b>Synchronize</b> compares the two panes and shows the plan before it
         changes anything. "Both" uses the record of the previous synchronization to
         tell a change from a conflict.</p>
@@ -1057,9 +1058,21 @@
   }
 
   function dragOverPane(side, event) {
-    if (!state.dragSide || state.dragSide === side || !event) return;
+    if (!event) return;
+    const transfer = event.dataTransfer;
+    const externalFiles = transfer &&
+      ((transfer.files && transfer.files.length > 0) ||
+       (transfer.types && Array.from(transfer.types).indexOf('Files') >= 0));
+    if (externalFiles) {
+      event.preventDefault();
+      if (transfer) transfer.dropEffect = side === 'remote' ? 'copy' : 'none';
+      const pane = $(side + 'Pane');
+      if (pane && side === 'remote') pane.classList.add('drop-target');
+      return;
+    }
+    if (!state.dragSide || state.dragSide === side) return;
     event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+    if (transfer) transfer.dropEffect = 'copy';
     const pane = $(side + 'Pane');
     if (pane) pane.classList.add('drop-target');
   }
@@ -1073,10 +1086,45 @@
     if (pane) pane.classList.remove('drop-target');
   }
 
+  async function queueDesktopFile(file) {
+    const query = new URLSearchParams({
+      tab: String(tabId()),
+      remote_dir: state.remote.path,
+      name: file.name
+    });
+    return api('/api/transfer/drop?' + query.toString(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file
+    });
+  }
+
   async function dropOnPane(side, event) {
     if (event) event.preventDefault();
     endDrag();
     if (!event || !event.dataTransfer) return;
+    const droppedFiles = Array.from(event.dataTransfer.files || []);
+    const externalFileDrop = event.dataTransfer.types &&
+      Array.from(event.dataTransfer.types).indexOf('Files') >= 0;
+    if (externalFileDrop && !droppedFiles.length) {
+      toast('Folders from the file manager are not supported yet; drop individual files.', true);
+      return;
+    }
+    if (droppedFiles.length) {
+      if (side !== 'remote') {
+        toast('Drop files onto the remote pane to upload them.', true);
+        return;
+      }
+      const results = await Promise.all(droppedFiles.map(queueDesktopFile));
+      const queued = results.filter(result => result && result.success).length;
+      const failed = results.length - queued;
+      if (queued) toast('Queued ' + queued + ' desktop file' +
+        (queued === 1 ? '' : 's') + ' for upload.');
+      if (failed) toast(failed + ' desktop file upload' +
+        (failed === 1 ? ' was' : 's were') + ' refused.', true);
+      refreshQueue();
+      return;
+    }
     let payload = null;
     try {
       payload = JSON.parse(event.dataTransfer.getData('text/plain') || 'null');

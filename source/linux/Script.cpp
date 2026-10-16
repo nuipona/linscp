@@ -6209,6 +6209,10 @@ bool Script::CopyRemoteOneFile(const std::string & from,
                 "Overwrite remote file '" + to + "'?");
             if (confirmation != ConfirmationResult::Accepted)
             {
+                if (confirmation == ConfirmationResult::Unavailable)
+                {
+                    mErrors++;
+                }
                 return confirmation != ConfirmationResult::Unavailable;
             }
         }
