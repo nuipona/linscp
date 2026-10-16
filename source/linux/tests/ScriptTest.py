@@ -1163,6 +1163,13 @@ class ScriptTests(unittest.TestCase):
             linux_dir = pathlib.Path(__file__).resolve().parent.parent
             repo_root = linux_dir.parent.parent
             destdir = pathlib.Path(tmp) / "stage"
+            # CMake-only checkouts do not have the Makefile binary yet. Build
+            # it with a compilation-sized timeout before timing installation;
+            # otherwise this smoke test gives a cold serial build only 30s.
+            build = subprocess.run(
+                ["make", "-C", str(linux_dir), "-j2", "all"],
+                capture_output=True, text=True, timeout=300)
+            self.assertEqual(build.returncode, 0, build.stdout + build.stderr)
             install = subprocess.run(
                 ["make", "-C", str(linux_dir), "install",
                  "DESTDIR=" + str(destdir), "PREFIX=/usr"],
