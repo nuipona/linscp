@@ -199,6 +199,16 @@ struct SessionOptions
      * so the server refuses the write when the lock is gone instead of
      * accepting one the lock was meant to prevent. */
     std::map<std::string, std::string> davLocks;
+    /* WebDAV ETag preconditions: If-Match and If-None-Match values per
+     * path, set by the 'etag' command.  If-Match: only write if the
+     * server's ETag matches.  If-None-Match: only write if the server's
+     * ETag does NOT match (or the resource does not exist). */
+    struct EtagPrecondition
+    {
+        std::string ifMatch;     /* empty: no If-Match header */
+        std::string ifNoneMatch; /* empty: no If-None-Match header */
+    };
+    std::map<std::string, EtagPrecondition> davEtags;
 
     SessionOptions();
 };

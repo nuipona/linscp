@@ -55,6 +55,8 @@ set(FRONTEND_SOURCES
   ${FRONTEND}/ProtocolClient.cpp
   ${FRONTEND}/S3SigV4.cpp
   ${FRONTEND}/S3Client.cpp
+  ${FRONTEND}/ScpShell.cpp
+  ${FRONTEND}/SshTunnel.cpp
   ${FRONTEND}/Script.cpp
   ${FRONTEND}/ScriptParams.cpp
   ${FRONTEND}/Console.cpp

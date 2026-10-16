@@ -62,6 +62,39 @@ bool ParseUnixListingLine(const std::string & line, ListingEntry & entry);
  * the console prints for a long listing. */
 std::string PermissionsString(unsigned long permissions);
 
+/*
+ * Non-Unix listing formats: FTP servers that do not speak Unix may return
+ * DOS (IIS) or VMS (OpenVMS) directory listings from LIST.  MLSD provides
+ * a structured alternative, but a server that refuses MLSD can only fall
+ * back to its own LIST dialect.  The parser decides which dialect to try
+ * and reports what it parsed, so the caller never treats an unparsed
+ * directory as empty.
+ */
+
+/* True when 'line' looks like a DOS/IIS listing:
+ *   03-25-23  11:22AM       <DIR>          dirname
+ *   07-14-22  04:00PM             12345    filename  */
+bool LooksLikeDosListing(const std::string & line);
+
+/* Parses one DOS/IIS listing line.  Returns false when 'line' is not a
+ * recognizable DOS listing entry (the caller may still try the next
+ * parser). */
+bool ParseDosListingLine(const std::string & line, ListingEntry & entry);
+
+/* True when 'line' looks like a VMS (Multinet/UCX) listing:
+ *   filename.ext;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)
+ *   DIR.DIR;1         3   25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)  */
+bool LooksLikeVmsListing(const std::string & line);
+
+/* Parses one VMS listing line.  The version number (;N) is stripped from
+ * the name.  Returns false when 'line' is not a recognizable VMS entry. */
+bool ParseVmsListingLine(const std::string & line, ListingEntry & entry);
+
+/* Unified listing parser: tries Unix, then DOS, then VMS and returns the
+ * first that matches.  A caller that already tried one dialect can skip
+ * it by checking its LooksLike* first. */
+bool ParseAnyListingLine(const std::string & line, ListingEntry & entry);
+
 } // namespace linuxscp
 
 #endif /* LINUXSCP_LISTINGPARSE_H */

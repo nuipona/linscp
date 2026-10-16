@@ -153,6 +153,8 @@ APP_SRCS := \
 	ProtocolClient.cpp \
 	S3SigV4.cpp \
 	S3Client.cpp \
+	ScpShell.cpp \
+	SshTunnel.cpp \
 	PuttyGlue.cpp \
 	Script.cpp \
 	ScriptParams.cpp \
@@ -255,6 +257,8 @@ install: $(BINDIR)/linuxscp
 	install -d $(DESTDIR)$(PREFIX)/share/pixmaps
 	install -d $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
 	install -d $(DESTDIR)$(PREFIX)/share/linuxscp/gui/web
+	install -d $(DESTDIR)$(PREFIX)/share/linuxscp/automation
+	install -d $(DESTDIR)$(PREFIX)/include/linuxscp
 	install -m 0755 $(BINDIR)/linuxscp $(DESTDIR)$(PREFIX)/bin/linuxscp
 	install -m 0755 $(TOP)/source/gui/linuxscp-gui $(DESTDIR)$(PREFIX)/bin/linuxscp-gui
 	install -m 0644 $(TOP)/source/gui/linuxscp_gui.py $(TOP)/source/gui/linscp_crypto.py \
@@ -264,6 +268,8 @@ install: $(BINDIR)/linuxscp
 	install -m 0644 $(TOP)/debian/linuxscp.png $(DESTDIR)$(PREFIX)/share/pixmaps/linuxscp.png
 	install -m 0644 $(TOP)/debian/linuxscp.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/linuxscp.svg
 	install -m 0644 $(TOP)/docs/linuxscp.1 $(DESTDIR)$(PREFIX)/share/man/man1/linuxscp.1
+	install -m 0644 $(TOP)/automation/LinSCP.psm1 $(DESTDIR)$(PREFIX)/share/linuxscp/automation/
+	install -m 0644 $(TOP)/source/linux/liblinscp.h $(DESTDIR)$(PREFIX)/include/linuxscp/
 
 clean:
 	rm -rf $(BUILD)

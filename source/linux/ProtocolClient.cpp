@@ -702,7 +702,7 @@ bool IsDavProtocol(const std::string & proto)
 const char * const kDavPropfindBody =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
     "<propfind xmlns=\"DAV:\"><prop>"
-    "<resourcetype/><getcontentlength/><getlastmodified/>"
+    "<resourcetype/><getcontentlength/><getlastmodified/><getetag/>"
     "</prop></propfind>";
 
 int HexDigitValue(char c)
@@ -874,6 +874,7 @@ struct DavResponse
     unsigned long long size;
     bool hasTime;
     unsigned long mtime;
+    std::string etag;
 };
 
 bool DavParseMultiStatus(const std::string & xml,
@@ -950,6 +951,11 @@ bool DavParseMultiStatus(const std::string & xml,
                     entry.hasTime = true;
                     entry.mtime = stamp;
                 }
+            }
+            text.clear();
+            if (DavFindText(propstat, "getetag", 0, text) && !text.empty())
+            {
+                entry.etag = text;
             }
         }
         out.push_back(entry);
@@ -1127,6 +1133,36 @@ std::string DavTokenFor(const SessionOptions & options, const std::string & remo
     return found == options.davLocks.end() ? std::string() : found->second;
 }
 
+/* Build the combined If header for lock tokens AND ETag preconditions.
+ * Lock tokens go in parentheses (token-list), ETags in angle brackets
+ * (entity-tag-list), following RFC 4918 §10.4. */
+std::string DavIfHeader(const SessionOptions & options, const std::string & remotePath)
+{
+    std::string header;
+    const std::string lockToken = DavTokenFor(options, remotePath);
+    std::map<std::string, SessionOptions::EtagPrecondition>::const_iterator
+        etagFound = options.davEtags.find(remotePath);
+    if (!lockToken.empty())
+    {
+        header += "(" + lockToken + ")";
+    }
+    if (etagFound != options.davEtags.end())
+    {
+        const SessionOptions::EtagPrecondition & ep = etagFound->second;
+        if (!ep.ifMatch.empty())
+        {
+            if (!header.empty()) header += " ";
+            header += "<" + remotePath + "> ([" + ep.ifMatch + "])";
+        }
+        if (!ep.ifNoneMatch.empty())
+        {
+            if (!header.empty()) header += " ";
+            header += "<" + remotePath + "> ([" + ep.ifNoneMatch + "])";
+        }
+    }
+    return header;
+}
+
 std::string DavTrimmed(const std::string & text)
 {
     size_t begin = 0;
@@ -1261,11 +1297,11 @@ bool DavFetchListing(const SessionOptions & options,
 int DavDelete(const SessionOptions & options, const std::string & remotePath,
     bool emptyDirectory, std::string & error)
 {
-    const std::string davLockToken = DavTokenFor(options, remotePath);
+    const std::string davIfHeader = DavIfHeader(options, remotePath);
     DavResult deleted;
     if (!DavInvoke(options, "DELETE", remotePath,
         std::vector<std::pair<std::string, std::string> >(),
-        std::string(), deleted, error, davLockToken))
+        std::string(), deleted, error, davIfHeader))
     {
         return -1;
     }
@@ -1847,12 +1883,14 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 
     /* A locked path: the token proves this writer owns the lock, and a
      * lock that expired or was broken makes the server refuse the
-     * upload (412) instead of writing over somebody else's change. */
-    const std::string davLockToken = DavTokenFor(options, remotePath);
-    if (!davLockToken.empty())
+     * upload (412) instead of writing over somebody else's change.
+     * ETag preconditions (If-Match/If-None-Match) are added alongside
+     * the lock token in the If header. */
+    const std::string davIfHeader = DavIfHeader(options, remotePath);
+    if (!davIfHeader.empty())
     {
         args.push_back("-H");
-        args.push_back("If: (" + davLockToken + ")");
+        args.push_back("If: " + davIfHeader);
     }
 
     args.push_back("-T");
@@ -2175,9 +2213,9 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
             std::string("T")));
         DavResult moved;
         std::string moveError;
-        const std::string davLockToken = DavTokenFor(options, fromPath);
+        const std::string davIfHeader = DavIfHeader(options, fromPath);
         if (!DavInvoke(options, "MOVE", fromPath, headers, std::string(),
-            moved, moveError, davLockToken))
+            moved, moveError, davIfHeader))
         {
             error = moveError;
             return -1;
@@ -2546,6 +2584,56 @@ bool ProtocolClient::DavGetProperty(const SessionOptions & options,
     return true;
 }
 
+/* Retrieve the current ETag of a resource via a Depth-0 PROPFIND.
+ * Returns false with etag empty when the path does not exist. */
+bool ProtocolClient::DavGetEtag(const SessionOptions & options,
+    const std::string & remotePath, std::string & etag,
+    std::string & error)
+{
+    etag.clear();
+    if (!IsDavProtocol(options.protocol))
+    {
+        error = "ETags are a WebDAV feature; this session is " +
+            options.protocol + ".";
+        return false;
+    }
+    const std::string body =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
+        "<propfind xmlns=\"DAV:\"><prop><getetag/></prop></propfind>";
+    std::vector<std::pair<std::string, std::string> > headers;
+    headers.push_back(std::make_pair(std::string("Depth"), std::string("0")));
+    headers.push_back(std::make_pair(std::string("Content-Type"),
+        std::string("application/xml")));
+    DavResult result;
+    if (!DavInvoke(options, "PROPFIND", remotePath, headers, body,
+        result, error))
+    {
+        return false;
+    }
+    if (result.httpCode == 404)
+    {
+        /* The resource does not exist; etag stays empty. */
+        return true;
+    }
+    if (result.httpCode != 207 && result.httpCode != 200)
+    {
+        error = DavHttpFailure(result, "Get ETag");
+        return false;
+    }
+    /* Parse the ETag from the multi-status response.  The XML uses
+     * getetag inside a propstat, like:
+     *   <D:getetag>"abc123"</D:getetag>
+     * The value may be wrapped in double quotes (the HTTP convention) and
+     * we preserve whatever the server returns. */
+    std::vector<DavResponse> responses;
+    std::string parseError;
+    DavParseMultiStatus(result.out, responses, parseError);
+    if (!responses.empty())
+    {
+        etag = responses[0].etag;
+    }
+    return true;
+}
 
 std::string DavPropertyUpdateBody(const std::string & name,
     const std::string & value)
