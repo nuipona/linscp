@@ -1,4 +1,6 @@
-#Requires -Version 5.1
+#Requires -Version 7.0
+# PowerShell 7 (pwsh) on Linux is the supported host. Windows PowerShell 5.1
+# is a Windows-only shell and does not run on this platform.
 <#
 .SYNOPSIS
     PowerShell module for LinSCP - Linux secure file transfer client.
@@ -98,7 +100,6 @@ function Open-LScpSession {
         [string]$PrivateKey
     )
     $bin = Find-LinScpBinary
-    $args = @("-server")
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo.FileName = $bin
     $proc.StartInfo.Arguments = "-server"
