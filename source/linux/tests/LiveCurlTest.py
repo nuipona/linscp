@@ -645,6 +645,54 @@ class LiveCurlTests(unittest.TestCase):
                          reopened.stdout + reopened.stderr)
         self.assertEqual((self.local / "stored-out.txt").read_bytes(), payload)
 
+    def test_pty_curl_progress_and_filepart_staging(self):
+        """Curl-backed transfers emit live progress on a PTY, stage large
+        downloads in a '.filepart' file, and resume from the staged bytes."""
+        import pty
+        import select
+        port = self.start_ftp(tls=False)
+        payload = bytes(range(256)) * 1024  # 256 KiB
+        (self.root / "progress.bin").write_bytes(payload)
+        dest = self.local / "progress-dl.bin"
+        part = self.local / "progress-dl.bin.filepart"
+        part.write_bytes(payload[:65536])
+
+        master, slave = pty.openpty()
+        argv = [
+            BINARY, "-batch",
+            "-command=open ftp://test:test@127.0.0.1:%d/ ; "
+            "get -resume -speed=128 /progress.bin %s ; exit" % (port, dest)
+        ]
+        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        proc = subprocess.Popen(
+            argv, stdin=slave, stdout=slave, stderr=slave,
+            cwd=str(self.local), env=env, close_fds=True)
+        os.close(slave)
+        captured = bytearray()
+        try:
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                ready, _, _ = select.select([master], [], [], 0.2)
+                if ready:
+                    try:
+                        chunk = os.read(master, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    captured.extend(chunk)
+                elif proc.poll() is not None:
+                    break
+            proc.wait(timeout=15)
+        finally:
+            os.close(master)
+
+        text = captured.decode("utf-8", "replace")
+        self.assertEqual(proc.returncode, 0, text)
+        self.assertFalse(part.exists())
+        self.assertEqual(dest.read_bytes(), payload)
+        self.assertIn("progress-dl.bin", text)
+
 
 def run_and_report():
     suite = unittest.defaultTestLoader.loadTestsFromModule(sys.modules[__name__])

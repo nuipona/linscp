@@ -453,6 +453,99 @@ class LiveS3Tests(unittest.TestCase):
         xml = response.read().decode("utf-8")
         self.assertIn("<Name>botobucket</Name>", xml)
 
+    def test_object_write_headers_and_requester_pays(self):
+        """S3 raw settings (S3StorageClass, S3Acl, S3ServerSideEncryption,
+        S3KmsKeyId, S3RequestPayer, S3Metadata) are signed with SigV4 and
+        delivered on object writes and requests."""
+        source = self.root / "meta-item.txt"
+        source.write_text("classified payload\n", encoding="utf-8")
+        argv = [
+            BINARY, "-batch", "-hostkey=*",
+            "-command="
+            "open s3://%s:%s@127.0.0.1:%d/ -rawsettings "
+            "S3StorageClass=STANDARD_IA "
+            "S3Acl=bucket-owner-full-control "
+            "S3ServerSideEncryption=aws:kms "
+            "S3KmsKeyId=alias/linscp-key "
+            "S3RequestPayer=1 "
+            "S3Metadata=Author=Ada,Project=linscp ; "
+            "mkdir /vault ; "
+            "put %s /vault/item.txt ; "
+            "exit" % (ACCESS_KEY, SECRET_KEY, self.port, source)
+        ]
+        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        result = subprocess.run(
+            argv, capture_output=True, text=True, timeout=60, env=env)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        state = self.server_state()
+        headers = state["object_headers"].get("vault/item.txt", {})
+        self.assertEqual(headers.get("x-amz-storage-class"), "STANDARD_IA")
+        self.assertEqual(headers.get("x-amz-acl"), "bucket-owner-full-control")
+        self.assertEqual(
+            headers.get("x-amz-server-side-encryption"), "aws:kms")
+        self.assertEqual(
+            headers.get("x-amz-server-side-encryption-aws-kms-key-id"),
+            "alias/linscp-key")
+        self.assertEqual(headers.get("x-amz-meta-author"), "Ada")
+        self.assertEqual(headers.get("x-amz-meta-project"), "linscp")
+        self.assertIn("requester", state["request_payers"])
+
+    def test_multipart_upload_resume_and_multipart_copy(self):
+        """An interrupted multipart upload resumes from its persisted state
+        sidecar without re-uploading completed parts, and 'cp' on an object
+        above the multipart threshold uses multipart UploadPartCopy."""
+        source = self.root / "resume-multipart.bin"
+        expected_size = 18 * 1024 * 1024 + 321
+        block = bytes(range(256)) * 4096
+        with source.open("wb") as handle:
+            remaining = expected_size
+            while remaining:
+                chunk = block[:min(len(block), remaining)]
+                handle.write(chunk)
+                remaining -= len(chunk)
+
+        self.assertEqual(
+            self.run_script("mkdir /big").returncode, 0)
+        # Fail part 2 on the first upload attempt; part 1 is saved in the
+        # multipart resume sidecar and the upload remains active.
+        self.inject_embedded_error("part2")
+        first = self.run_script(
+            "put %s /big/object.bin" % source, timeout=180)
+        self.assertNotEqual(first.returncode, 0)
+        state1 = self.server_state()
+        self.assertEqual(state1["active_uploads"], 1)
+
+        # Retry the upload: it resumes the existing UploadId and skips part 1.
+        second = self.run_script(
+            "put %s /big/object.bin" % source, timeout=180)
+        self.assertEqual(second.returncode, 0, second.stdout + second.stderr)
+        state2 = self.server_state()
+        self.assertEqual(state2["active_uploads"], 0)
+        initiates = [
+            e for e in state2["multipart_history"] if e["action"] == "initiate"
+        ]
+        self.assertEqual(len(initiates), 1)
+        part1_uploads = [
+            e for e in state2["multipart_history"]
+            if e["action"] == "part" and e["part"] == 1
+        ]
+        self.assertEqual(len(part1_uploads), 1)
+
+        # Server-side 'cp' of the >16 MiB object uses multipart UploadPartCopy.
+        copied_dl = self.root / "copied-multipart.bin"
+        copy_res = self.run_script(
+            "cp /big/object.bin /big/copied.bin ; "
+            "get /big/copied.bin %s" % copied_dl, timeout=180)
+        self.assertEqual(
+            copy_res.returncode, 0, copy_res.stdout + copy_res.stderr)
+        self.assertEqual(sha256_of(source), sha256_of(copied_dl))
+        state3 = self.server_state()
+        copy_parts = [
+            e for e in state3["multipart_history"] if e["action"] == "copy_part"
+        ]
+        self.assertEqual([e["part"] for e in copy_parts], [1, 2, 3])
+
 
 def run_and_report():
     """Run the suite, then print one line that says what was actually

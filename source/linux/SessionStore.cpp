@@ -147,7 +147,13 @@ const SiteSettingKey kSiteSettingKeys[] = {
     { "tls_certificate_key_file", "TlsCertificateKeyFile" },
     { "ca_certificate_file", "CaCertificateFile" },
     { "ca_certificate_dir", "CaCertificateDir" },
-    { "pinned_public_key", "PinnedPublicKey" }
+    { "pinned_public_key", "PinnedPublicKey" },
+    { "s3_storage_class", "S3StorageClass" },
+    { "s3_acl", "S3Acl" },
+    { "s3_sse", "S3ServerSideEncryption" },
+    { "s3_kms_key_id", "S3KmsKeyId" },
+    { "s3_request_payer", "S3RequestPayer" },
+    { "s3_metadata", "S3Metadata" }
 };
 
 const char * SettingNameForSiteKey(const std::string & key)
@@ -248,6 +254,29 @@ std::string ValueOf(const StoredSession & session, const std::string & key,
     if (key == "ca_certificate_file") { return session.tls.caFile; }
     if (key == "ca_certificate_dir") { return session.tls.caDirectory; }
     if (key == "pinned_public_key") { return session.tls.pinnedPublicKey; }
+    if (key == "s3_storage_class") { return session.s3.storageClass; }
+    if (key == "s3_acl") { return session.s3.acl; }
+    if (key == "s3_sse") { return session.s3.serverSideEncryption; }
+    if (key == "s3_kms_key_id") { return session.s3.kmsKeyId; }
+    if (key == "s3_request_payer")
+    {
+        return session.s3.requestPayer ? std::string("1") : std::string();
+    }
+    if (key == "s3_metadata")
+    {
+        std::string out;
+        for (std::map<std::string, std::string>::const_iterator it =
+                session.s3.metadata.begin();
+             it != session.s3.metadata.end(); ++it)
+        {
+            if (!out.empty())
+            {
+                out += ",";
+            }
+            out += it->first + "=" + it->second;
+        }
+        return out;
+    }
     if (key == "last_used")
     {
         *isNumber = true;
@@ -704,7 +733,12 @@ bool SessionStore::IsValidName(const std::string & name)
         return false;
     }
     if (name[0] == ' ' || name[0] == '\t' ||
-        name[name.size() - 1] == ' ' || name[name.size() - 1] == '\t')
+        name[name.size() - 1] == ' ' || name[name.size() - 1] == '\t' ||
+        name[0] == '/' || name[name.size() - 1] == '/')
+    {
+        return false;
+    }
+    if (name.find("//") != std::string::npos)
     {
         return false;
     }
@@ -810,6 +844,89 @@ bool SessionStore::Rename(const std::string & from, const std::string & to,
     return false;
 }
 
+std::vector<std::string> SessionStore::Folders() const
+{
+    std::vector<std::string> folders;
+    for (size_t i = 0; i < mSessions.size(); i++)
+    {
+        const std::string & name = mSessions[i].name;
+        size_t pos = 0;
+        while ((pos = name.find('/', pos)) != std::string::npos)
+        {
+            const std::string folder = name.substr(0, pos);
+            bool seen = false;
+            for (size_t k = 0; k < folders.size(); k++)
+            {
+                if (Lower(folders[k]) == Lower(folder))
+                {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen)
+            {
+                folders.push_back(folder);
+            }
+            pos++;
+        }
+    }
+    return folders;
+}
+
+std::vector<StoredSession> SessionStore::SessionsInFolder(
+    const std::string & folder) const
+{
+    std::string prefix = Trim(folder);
+    while (!prefix.empty() && prefix[prefix.size() - 1] == '/')
+    {
+        prefix.erase(prefix.size() - 1);
+    }
+    std::vector<StoredSession> out;
+    if (prefix.empty())
+    {
+        return mSessions;
+    }
+    const std::string wanted = Lower(prefix) + "/";
+    for (size_t i = 0; i < mSessions.size(); i++)
+    {
+        if (StartsWith(Lower(mSessions[i].name), wanted.c_str()))
+        {
+            out.push_back(mSessions[i]);
+        }
+    }
+    return out;
+}
+
+int SessionStore::RemoveFolder(const std::string & folder, std::string & error)
+{
+    error.clear();
+    std::string prefix = Trim(folder);
+    while (!prefix.empty() && prefix[prefix.size() - 1] == '/')
+    {
+        prefix.erase(prefix.size() - 1);
+    }
+    if (prefix.empty())
+    {
+        error = "No session folder name was given.";
+        return 0;
+    }
+    const std::string wanted = Lower(prefix) + "/";
+    int removed = 0;
+    for (size_t i = mSessions.size(); i > 0; i--)
+    {
+        if (StartsWith(Lower(mSessions[i - 1].name), wanted.c_str()))
+        {
+            mSessions.erase(mSessions.begin() + static_cast<long>(i - 1));
+            removed++;
+        }
+    }
+    if (removed == 0)
+    {
+        error = "There are no stored sessions in folder '" + prefix + "'.";
+    }
+    return removed;
+}
+
 bool SessionStore::Load(std::string & error)
 {
     error.clear();
@@ -904,12 +1021,14 @@ bool SessionStore::Load(std::string & error)
             SessionOptions scratch;
             scratch.ftp = current.ftp;
             scratch.tls = current.tls;
+            scratch.s3 = current.s3;
             std::string settingError;
             if (ApplySessionRawSetting(SettingNameForSiteKey(key), value,
                 scratch, settingError))
             {
                 current.ftp = scratch.ftp;
                 current.tls = scratch.tls;
+                current.s3 = scratch.s3;
             }
             else if (current.settingError.empty())
             {
@@ -1111,7 +1230,7 @@ bool SessionStore::Save(std::string & error) const
      * The directory has to exist before anything is created inside it -
      * the key file included - so it comes first.
      */
-    const size_t slash = mPath.find_last_of("/\\");
+    const size_t slash = mPath.find_last_of('/');
     if (slash != std::string::npos && slash > 0)
     {
         const std::string directory = mPath.substr(0, slash);
@@ -1213,7 +1332,9 @@ bool SessionStore::Save(std::string & error) const
             "ftp_pasv_mode", "ftp_force_pasv_ip", "ftp_use_mlsd",
             "ftp_account", "ftps", "min_tls_version", "max_tls_version",
             "tls_certificate_file", "tls_certificate_key_file",
-            "ca_certificate_file", "ca_certificate_dir", "pinned_public_key"
+            "ca_certificate_file", "ca_certificate_dir", "pinned_public_key",
+            "s3_storage_class", "s3_acl", "s3_sse", "s3_kms_key_id",
+            "s3_request_payer", "s3_metadata"
         };
         for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
         {
@@ -1346,6 +1467,7 @@ SessionOptions SessionStore::ToSessionOptions(const StoredSession & session,
     }
     options.ftp = session.ftp;
     options.tls = session.tls;
+    options.s3 = session.s3;
     return options;
 }
 
@@ -1366,6 +1488,7 @@ StoredSession SessionStore::FromSessionOptions(const std::string & name,
     session.proxy = options.proxy;
     session.ftp = options.ftp;
     session.tls = options.tls;
+    session.s3 = options.s3;
     session.lastUsed = static_cast<unsigned long long>(time(NULL));
     return session;
 }

@@ -262,11 +262,29 @@ class CopyDataSFTPServer(SFTPServer):
 
 
 class Server(paramiko.ServerInterface):
+    def __init__(self):
+        self.exec_threads = []
+
     def check_auth_password(self, username, password):
         return paramiko.AUTH_SUCCESSFUL if (username == USER and password == PASSWORD) else paramiko.AUTH_FAILED
 
+    def check_auth_publickey(self, username, key):
+        if username != USER:
+            return paramiko.AUTH_FAILED
+        auth_file = os.path.join(ROOT, ".ssh", "authorized_keys")
+        try:
+            with open(auth_file, "r", encoding="utf-8") as handle:
+                for line in handle:
+                    parts = line.strip().split()
+                    if (len(parts) >= 2 and parts[0] == key.get_name() and
+                            parts[1] == key.get_base64()):
+                        return paramiko.AUTH_SUCCESSFUL
+        except OSError:
+            pass
+        return paramiko.AUTH_FAILED
+
     def get_allowed_auths(self, username):
-        return "password"
+        return "password,publickey"
 
     def check_channel_request(self, kind, chanid):
         return paramiko.OPEN_SUCCEEDED
@@ -275,10 +293,15 @@ class Server(paramiko.ServerInterface):
         def run():
             proc = subprocess.run(command, shell=True, capture_output=True,
                                   cwd=ROOT)
-            channel.sendall(proc.stdout)
+            if proc.stdout:
+                channel.sendall(proc.stdout)
+            if proc.stderr:
+                channel.sendall_stderr(proc.stderr)
             channel.send_exit_status(proc.returncode)
             channel.close()
-        threading.Thread(target=run, daemon=True).start()
+        thread = threading.Thread(target=run, daemon=True)
+        self.exec_threads.append(thread)
+        thread.start()
         return True
 
     def check_channel_shell_request(self, channel):
@@ -298,7 +321,10 @@ def handle(client):
         transport.start_server(server=server)
         channel = transport.accept(60)
         if channel is not None:
-            channel.recv_exit_status()  # wait until the channel closes
+            while not channel.closed and transport.is_active():
+                channel.status_event.wait(0.05)
+            for thread in server.exec_threads:
+                thread.join(timeout=10)
     except Exception as exc:  # noqa
         print("server error:", exc, file=sys.stderr)
     finally:

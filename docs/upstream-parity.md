@@ -23,8 +23,8 @@ certification or a completed security review.
 
 [upstream-parity.json](upstream-parity.json) tracks the **40** command names
 that upstream registers in its script implementation at that commit (aliases
-and the internal `copyid` included), 6 LinSCP-specific additions, 15 broad
-feature areas, and **84** narrower Linux capability rows. The additions are
+and the internal `copyid` included), 7 LinSCP-specific additions, 15 broad
+feature areas, and **87** narrower Linux capability rows. The additions are
 not mistaken for upstream coverage. The generated
 [capability matrix](linux-feature-inventory.md) links each capability to
 implementation and named test evidence (or a specific gap). This is a scoped, reviewable
@@ -47,25 +47,27 @@ build on any of them:
 * `verified` requires an entry in `verified_on` for **every** platform in the
   ledger. The rule is written for any number of platforms, so a second one
   could not be added later without evidence of its own.
-* A suite can only be cited on a platform that has it, so `manual` evidence -
-  the checks listed under that key, with the commands to repeat them - stays
-  what it says it is: a hand run that anyone can repeat.
+* A suite can only be cited on a platform that has it, so every cited suite
+  must exist in `verification.platforms.linux.suites` and resolve to a real
+  test file and test case.
 * A platform record without a `how`, a dated `date` and described suites is an
   error, because evidence nobody can reproduce is not evidence.
 
-As it stands: **114/148** entries cite Linux test evidence, and **79/148**
-are `verified` (37/61 command/addition/broad-area rows plus 42/87 capability
-rows). The 24 broad and 45 capability rows with gaps remain `partial` or
-`missing` for functional reasons. Entries that used to be held at `partial`
-only because a second platform could not test them (`copyid` was one) carry
-their Linux evidence now; nothing was promoted on the strength of a build
-alone. Capability evidence cites **test cases**, not just suites; the checker
-rejects deleted test cases and evidence from the wrong suite.
+As it stands: **140/149** entries cite automated Linux test evidence, and **133/149**
+are `verified` (55/62 command/addition/broad-area rows plus 78/87 capability
+rows). All 40 upstream script commands and all 7 LinSCP-specific command
+additions are `verified`; the remaining 7 broad and 9 capability rows stay
+`partial` or `missing` for explicit architectural boundaries (upstream's
+remote-shell SCP directory engine, GSSAPI/SSH tunnels, multi-user GUI accounts,
+Explorer custom commands, .NET/PowerShell automation assemblies, desktop shell
+extensions and translation catalogs). Capability evidence cites **test cases**,
+not just suites; the checker rejects deleted test cases and evidence from the
+wrong suite.
 
 The count is not taken on trust either. Each test suite prints one line when
-it finishes - `evidence: suite=live-sftp platform=linux ran=25 skipped=0
+it finishes - `evidence: suite=live-sftp platform=linux ran=32 skipped=0
 failed=0` - and the CI jobs repeat it as an annotation on the run. A suite that
-could not run because `paramiko` is missing shows up as `skipped=25`, which is
+could not run because `paramiko` is missing shows up as `skipped=32`, which is
 the case a green check mark used to hide. The S3 suite reports its
 reference-signature test skipped the same way when `botocore` is absent.
 

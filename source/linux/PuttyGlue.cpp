@@ -375,7 +375,8 @@ std::string Base64OneLine(ptrlen data)
 
 } // namespace
 
-std::string PreparePrivateKeyFile(const std::string & keyFile, std::string & error)
+std::string PreparePrivateKeyFile(const std::string & keyFile,
+    std::string & error, const std::string & suppliedPassphrase)
 {
     error.clear();
     DeleteImportedKeyFile();
@@ -410,16 +411,17 @@ std::string PreparePrivateKeyFile(const std::string & keyFile, std::string & err
     /* An encrypted key needs its passphrase before it can be imported.
      * (import_encrypted writes a key comment out through this pointer
      * without a NULL check, so it must always be a real variable.) */
-    std::string passphrase;
+    std::string passphrase = suppliedPassphrase;
     char * keyComment = NULL;
     const bool encrypted = import_encrypted(fileName, type, &keyComment);
     sfree(keyComment);
-    if (encrypted)
+    if (encrypted && passphrase.empty())
     {
         if (!Console::Instance().IsInteractive())
         {
             error = "The private key file '" + keyFile + "' is encrypted; "
-                "run interactively to enter its passphrase.";
+                "supply -passphrase=<passphrase> or run interactively to "
+                "enter its passphrase.";
             filename_free(fileName);
             return std::string();
         }
@@ -500,7 +502,7 @@ void DiscardImportedPrivateKeyFile()
  * through the same importer the SSH core needs.
  */
 bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
-    std::string & error)
+    std::string & error, const std::string & suppliedPassphrase)
 {
     line.clear();
     error.clear();
@@ -603,16 +605,17 @@ bool PublicKeyAuthorizedLine(const std::string & keyFile, std::string & line,
      * exactly as PreparePrivateKeyFile() requires, and a passphrase prompt
      * needs a terminal.
      */
-    std::string passphrase;
+    std::string passphrase = suppliedPassphrase;
     char * keyComment = NULL;
     const bool encrypted = import_encrypted(fileName, type, &keyComment);
     sfree(keyComment);
-    if (encrypted)
+    if (encrypted && passphrase.empty())
     {
         if (!Console::Instance().IsInteractive())
         {
-            error = "The private key file '" + path + "' is encrypted; run "
-                "interactively to enter its passphrase.";
+            error = "The private key file '" + path + "' is encrypted; supply "
+                "-passphrase=<passphrase> or run interactively to enter its "
+                "passphrase.";
             filename_free(fileName);
             return false;
         }

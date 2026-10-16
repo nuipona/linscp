@@ -133,13 +133,18 @@ SeatPromptResult seat_get_userpass_input(Seat * seat, prompts_t * prompts)
             (lowerPrompt.find("username") != std::string::npos ||
              lowerPrompt.find("user name") != std::string::npos ||
              lowerPrompt.find("login") != std::string::npos);
+        bool isPassphrase = !prompt->echo &&
+            lowerPrompt.find("passphrase") != std::string::npos;
         bool isPassword = !prompt->echo &&
-            (lowerPrompt.find("password") != std::string::npos ||
-             lowerPrompt.find("passphrase") != std::string::npos);
+            (lowerPrompt.find("password") != std::string::npos || isPassphrase);
 
         if (isUserName && !options.userName.empty() && session->UserName().empty())
         {
             answer = options.userName;
+        }
+        else if (isPassphrase && !options.keyPassphrase.empty() && !session->PasswordUsed())
+        {
+            answer = options.keyPassphrase;
         }
         else if (isPassword && !options.password.empty() && !session->PasswordUsed())
         {
@@ -739,6 +744,13 @@ std::vector<std::string> SessionRawSettingNames()
     names.push_back("CaCertificateFile");
     names.push_back("CaCertificateDir");
     names.push_back("PinnedPublicKey");
+    /* S3 object options and requester-pays headers. */
+    names.push_back("S3StorageClass");
+    names.push_back("S3Acl");
+    names.push_back("S3ServerSideEncryption");
+    names.push_back("S3KmsKeyId");
+    names.push_back("S3RequestPayer");
+    names.push_back("S3Metadata");
     return names;
 }
 
@@ -949,6 +961,184 @@ bool ApplySessionRawSetting(const std::string & name, const std::string & value,
     if (lower == "pinnedpublickey")
     {
         options.tls.pinnedPublicKey = text;
+        return true;
+    }
+    if (lower == "s3storageclass")
+    {
+        static const char * const kClasses[] = {
+            "STANDARD", "REDUCED_REDUNDANCY", "STANDARD_IA", "ONEZONE_IA",
+            "INTELLIGENT_TIERING", "GLACIER", "DEEP_ARCHIVE", "GLACIER_IR",
+            "EXPRESS_ONEZONE"
+        };
+        if (text.empty())
+        {
+            options.s3.storageClass.clear();
+            return true;
+        }
+        std::string upper = text;
+        for (size_t i = 0; i < upper.size(); i++)
+        {
+            upper[i] = static_cast<char>(toupper(static_cast<unsigned char>(upper[i])));
+        }
+        bool known = false;
+        for (size_t i = 0; i < sizeof(kClasses) / sizeof(kClasses[0]); i++)
+        {
+            if (upper == kClasses[i])
+            {
+                known = true;
+                break;
+            }
+        }
+        if (!known)
+        {
+            error = "Unsupported S3StorageClass '" + value +
+                "' (use STANDARD, REDUCED_REDUNDANCY, STANDARD_IA, ONEZONE_IA, "
+                "INTELLIGENT_TIERING, GLACIER, DEEP_ARCHIVE, GLACIER_IR or "
+                "EXPRESS_ONEZONE).";
+            return false;
+        }
+        options.s3.storageClass = upper;
+        return true;
+    }
+    if (lower == "s3acl")
+    {
+        static const char * const kAcls[] = {
+            "private", "public-read", "public-read-write",
+            "authenticated-read", "aws-exec-read", "bucket-owner-read",
+            "bucket-owner-full-control"
+        };
+        if (text.empty())
+        {
+            options.s3.acl.clear();
+            return true;
+        }
+        const std::string aclLower = LowerAscii(text);
+        bool known = false;
+        for (size_t i = 0; i < sizeof(kAcls) / sizeof(kAcls[0]); i++)
+        {
+            if (aclLower == kAcls[i])
+            {
+                known = true;
+                break;
+            }
+        }
+        if (!known)
+        {
+            error = "Unsupported S3Acl '" + value +
+                "' (use private, public-read, public-read-write, "
+                "authenticated-read, aws-exec-read, bucket-owner-read or "
+                "bucket-owner-full-control).";
+            return false;
+        }
+        options.s3.acl = aclLower;
+        return true;
+    }
+    if (lower == "s3serversideencryption")
+    {
+        if (text.empty() || LowerAscii(text) == "none")
+        {
+            options.s3.serverSideEncryption.clear();
+            return true;
+        }
+        const std::string sseLower = LowerAscii(text);
+        if (sseLower == "aes256")
+        {
+            options.s3.serverSideEncryption = "AES256";
+            return true;
+        }
+        if (sseLower == "aws:kms" || sseLower == "aws:kms:dsse")
+        {
+            options.s3.serverSideEncryption = sseLower;
+            return true;
+        }
+        error = "Unsupported S3ServerSideEncryption '" + value +
+            "' (use AES256, aws:kms, aws:kms:dsse or none).";
+        return false;
+    }
+    if (lower == "s3kmskeyid")
+    {
+        for (size_t i = 0; i < text.size(); i++)
+        {
+            if (text[i] == '\r' || text[i] == '\n')
+            {
+                error = "The value of 'S3KmsKeyId' cannot contain line breaks.";
+                return false;
+            }
+        }
+        options.s3.kmsKeyId = text;
+        return true;
+    }
+    if (lower == "s3requestpayer")
+    {
+        const std::string payerLower = LowerAscii(text);
+        if (payerLower == "requester")
+        {
+            options.s3.requestPayer = true;
+            return true;
+        }
+        bool toggle = false;
+        if (!ParseToggle(text, toggle))
+        {
+            error = "The value of 'S3RequestPayer' must be 0, 1 or "
+                "'requester', not '" + value + "'.";
+            return false;
+        }
+        options.s3.requestPayer = toggle;
+        return true;
+    }
+    if (lower == "s3metadata")
+    {
+        options.s3.metadata.clear();
+        if (text.empty())
+        {
+            return true;
+        }
+        size_t pos = 0;
+        while (pos < text.size())
+        {
+            size_t next = text.find_first_of(",;", pos);
+            const std::string pair = TrimAscii(next == std::string::npos ?
+                text.substr(pos) : text.substr(pos, next - pos));
+            pos = next == std::string::npos ? text.size() : next + 1;
+            if (pair.empty())
+            {
+                continue;
+            }
+            const size_t eq = pair.find('=');
+            if (eq == std::string::npos || eq == 0)
+            {
+                error = "The value of 'S3Metadata' must be KEY=VALUE pairs, "
+                    "not '" + pair + "'.";
+                return false;
+            }
+            const std::string metaKey = LowerAscii(TrimAscii(pair.substr(0, eq)));
+            const std::string metaVal = TrimAscii(pair.substr(eq + 1));
+            if (metaKey.empty())
+            {
+                error = "An S3Metadata entry has an empty key.";
+                return false;
+            }
+            for (size_t k = 0; k < metaKey.size(); k++)
+            {
+                const char c = metaKey[k];
+                const bool ok = (c >= 'a' && c <= 'z') ||
+                    (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.';
+                if (!ok)
+                {
+                    error = "Invalid S3Metadata key '" + metaKey + "'.";
+                    return false;
+                }
+            }
+            for (size_t k = 0; k < metaVal.size(); k++)
+            {
+                if (metaVal[k] == '\r' || metaVal[k] == '\n')
+                {
+                    error = "An S3Metadata value cannot contain line breaks.";
+                    return false;
+                }
+            }
+            options.s3.metadata[metaKey] = metaVal;
+        }
         return true;
     }
 
@@ -1186,6 +1376,20 @@ bool ValidateSessionSettings(const SessionOptions & options, std::string & error
      * was asked to, so it is refused with what remains.
      */
     const std::string protocol = LowerAscii(options.protocol);
+    if (!options.s3.Empty() && protocol != "s3")
+    {
+        error = "The S3 object settings apply to s3:// sessions, not to '" +
+            options.protocol + "'.";
+        return false;
+    }
+    if (!options.s3.kmsKeyId.empty() &&
+        options.s3.serverSideEncryption != "aws:kms" &&
+        options.s3.serverSideEncryption != "aws:kms:dsse")
+    {
+        error = "S3KmsKeyId requires S3ServerSideEncryption=aws:kms (or "
+            "aws:kms:dsse).";
+        return false;
+    }
     if (IsSshCurlProtocol(protocol) && !UseNativeSftp(protocol) &&
         !options.hostKey.empty() && options.hostKey != "*")
     {
@@ -1894,7 +2098,8 @@ bool Session::Connect(const SessionOptions & options, const char * program,
     {
         std::string keyError;
         const std::string keyFile = PreparePrivateKeyFile(
-            ExpandTilde(mOptions.privateKeyFile), keyError);
+            ExpandTilde(mOptions.privateKeyFile), keyError,
+            mOptions.keyPassphrase);
         if (keyFile.empty())
         {
             error = keyError;
@@ -2044,12 +2249,21 @@ void ExecOutputSink(void * ctx, const char * data, size_t len)
 
 } // namespace
 
+int Session::ExitCode() const
+{
+    if (mBackend == NULL)
+    {
+        return -1;
+    }
+    return backend_exitcode(static_cast<Backend *>(mBackend));
+}
+
 bool Session::ExecRemote(const SessionOptions & options,
     const std::string & command, std::string & error)
 {
-    if (!UseNativeSftp(options.protocol))
+    if (!UseNativeSftp(options.protocol) && options.protocol != "scp")
     {
-        error = "Remote command execution needs an SSH (sftp://) session.";
+        error = "Remote command execution needs an SSH (sftp:// or scp://) session.";
         return false;
     }
     /* A one-shot session of its own: it never becomes the session the
@@ -2068,10 +2282,17 @@ bool Session::ExecRemote(const SessionOptions & options,
             break;
         }
     }
+    const int exitCode = exec.ExitCode();
     exec.Close();
     if (!exec.ConnectionError().empty())
     {
         error = exec.ConnectionError();
+        return false;
+    }
+    if (exitCode > 0 && exitCode != INT_MAX)
+    {
+        error = "Command '" + command + "' failed with return code " +
+            std::to_string(exitCode) + ".";
         return false;
     }
     return true;

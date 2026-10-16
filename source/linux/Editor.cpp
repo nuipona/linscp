@@ -71,6 +71,138 @@ bool LooksLikeText(const char * data, size_t length)
     return true;
 }
 
+namespace {
+
+bool ReadWholeFile(const std::string & path, std::string & content)
+{
+    content.clear();
+    FILE * file = fopen(path.c_str(), "rb");
+    if (file == NULL)
+    {
+        return false;
+    }
+    char buffer[8192];
+    size_t got = 0;
+    while ((got = fread(buffer, 1, sizeof(buffer), file)) > 0)
+    {
+        content.append(buffer, got);
+    }
+    const bool ok = ferror(file) == 0;
+    fclose(file);
+    return ok;
+}
+
+bool WriteWholeFile(const std::string & path, const std::string & content)
+{
+    FILE * file = fopen(path.c_str(), "wb");
+    if (file == NULL)
+    {
+        return false;
+    }
+    const size_t written = content.empty() ? 0 :
+        fwrite(content.data(), 1, content.size(), file);
+    const bool ok = written == content.size() && fflush(file) == 0;
+    fclose(file);
+    return ok;
+}
+
+bool HasUtf8Bom(const std::string & bytes)
+{
+    return bytes.size() >= 3 &&
+        static_cast<unsigned char>(bytes[0]) == 0xEF &&
+        static_cast<unsigned char>(bytes[1]) == 0xBB &&
+        static_cast<unsigned char>(bytes[2]) == 0xBF;
+}
+
+bool UsesPureCrlf(const std::string & bytes)
+{
+    bool sawCrlf = false;
+    for (size_t i = 0; i < bytes.size(); i++)
+    {
+        if (bytes[i] == '\n')
+        {
+            if (i == 0 || bytes[i - 1] != '\r')
+            {
+                return false;
+            }
+            sawCrlf = true;
+        }
+    }
+    return sawCrlf;
+}
+
+std::string ConvertNewlinesToLf(const std::string & bytes)
+{
+    std::string out;
+    out.reserve(bytes.size());
+    for (size_t i = 0; i < bytes.size(); i++)
+    {
+        if (bytes[i] == '\r' && i + 1 < bytes.size() && bytes[i + 1] == '\n')
+        {
+            continue;
+        }
+        out += bytes[i];
+    }
+    return out;
+}
+
+std::string ConvertNewlinesToCrlf(const std::string & bytes)
+{
+    std::string out;
+    out.reserve(bytes.size() + 32);
+    for (size_t i = 0; i < bytes.size(); i++)
+    {
+        if (bytes[i] == '\r' && i + 1 < bytes.size() && bytes[i + 1] == '\n')
+        {
+            out += "\r\n";
+            i++;
+        }
+        else if (bytes[i] == '\n')
+        {
+            out += "\r\n";
+        }
+        else
+        {
+            out += bytes[i];
+        }
+    }
+    return out;
+}
+
+} // namespace
+
+std::string NormalizeEditedText(const std::string & originalBytes,
+    const std::string & editedBytes, const std::string & eolPolicy)
+{
+    if (!LooksLikeText(editedBytes.data(), editedBytes.size()))
+    {
+        return editedBytes;
+    }
+    const bool hadBom = HasUtf8Bom(originalBytes);
+    const bool hasBom = HasUtf8Bom(editedBytes);
+    std::string body = hasBom ? editedBytes.substr(3) : editedBytes;
+    const std::string origBody = hadBom ? originalBytes.substr(3) : originalBytes;
+
+    if (eolPolicy == "lf")
+    {
+        body = ConvertNewlinesToLf(body);
+    }
+    else if (eolPolicy == "crlf")
+    {
+        body = ConvertNewlinesToCrlf(body);
+    }
+    else if (UsesPureCrlf(origBody))
+    {
+        body = ConvertNewlinesToCrlf(body);
+    }
+
+    if (hadBom || hasBom)
+    {
+        return std::string("\xEF\xBB\xBF", 3) + body;
+    }
+    return body;
+}
+
 std::vector<std::string> ResolveEditorCommand(const std::string & configured,
     std::string & error)
 {
@@ -117,8 +249,7 @@ std::vector<std::string> ResolveEditorCommand(const std::string & configured,
         error = "The editor command '" + command + "' is empty.";
         return std::vector<std::string>();
     }
-    if (words[0].find('/') == std::string::npos &&
-        words[0].find('\\') == std::string::npos)
+    if (words[0].find('/') == std::string::npos)
     {
         const std::string resolved = FindExecutableOnPath(words[0]);
         if (resolved.empty())
@@ -224,17 +355,13 @@ bool RemoteEditor::Edit(const std::string & remotePath, const EditOptions & opti
     RestrictFileToUser(tempPath);
 
     const LocalFileInfo before = StatLocal(tempPath);
+    std::string beforeBytes;
+    ReadWholeFile(tempPath, beforeBytes);
     if (!options.force && !options.allowBinary)
     {
-        char head[8192];
-        size_t bytesRead = 0;
-        FILE * file = fopen(tempPath.c_str(), "rb");
-        if (file != NULL)
-        {
-            bytesRead = fread(head, 1, sizeof(head), file);
-            fclose(file);
-        }
-        if (bytesRead != 0 && !LooksLikeText(head, bytesRead))
+        const size_t checkLen = beforeBytes.size() < 8192 ?
+            beforeBytes.size() : 8192;
+        if (checkLen != 0 && !LooksLikeText(beforeBytes.data(), checkLen))
         {
             error = "'" + remotePath + "' does not look like a text file. Use "
                 "'edit -force' to edit it anyway.";
@@ -285,14 +412,123 @@ bool RemoteEditor::Edit(const std::string & remotePath, const EditOptions & opti
         return false;
     }
 
-    const LocalFileInfo after = StatLocal(tempPath);
-    if (!after.exists)
+    unsigned long expectedRemoteMtime = remoteMtimeBefore;
+    std::string lastUploadedBytes = beforeBytes;
+
+    auto uploadIfChanged = [&](bool & uploadedOut) -> bool
     {
-        error = "The temporary file '" + tempPath + "' is gone; '" + remotePath +
-            "' was not changed.";
+        uploadedOut = false;
+        const LocalFileInfo after = StatLocal(tempPath);
+        if (!after.exists)
+        {
+            error = "The temporary file '" + tempPath + "' is gone; '" +
+                remotePath + "' was not changed.";
+            return false;
+        }
+        std::string editedBytes;
+        if (!ReadWholeFile(tempPath, editedBytes))
+        {
+            error = "Cannot read the edited file '" + tempPath + "'.";
+            return false;
+        }
+        if (!options.force && !options.allowBinary)
+        {
+            editedBytes = NormalizeEditedText(beforeBytes, editedBytes,
+                options.eol);
+        }
+        if (editedBytes == lastUploadedBytes &&
+            after.mtime == before.mtime && after.size == before.size)
+        {
+            return true;
+        }
+        if (editedBytes == lastUploadedBytes)
+        {
+            return true;
+        }
+        WriteWholeFile(tempPath, editedBytes);
+
+        /* The remote file may have changed while the editor was open. */
+        LscpAttrs nowAttrs = {};
+        std::string statError;
+        const int stillThere = mAccess.Stat(remotePath, nowAttrs, statError);
+        if (stillThere == LSCP_SFTP_STAT_ERROR)
+        {
+            error = statError.empty() ? std::string("Cannot re-read '") +
+                remotePath + "'." : statError;
+            return false;
+        }
+        if (stillThere == LSCP_SFTP_STAT_MISSING)
+        {
+            error = "'" + remotePath + "' no longer exists; the edited copy is "
+                "kept at '" + tempPath + "'.";
+            return false;
+        }
+        const unsigned long remoteMtimeNow =
+            (nowAttrs.flags & LSCP_ATTR_ACMODTIME) != 0 ? nowAttrs.mtime : 0;
+        if (expectedRemoteMtime != 0 && remoteMtimeNow != expectedRemoteMtime)
+        {
+            bool overwrite = false;
+            if (confirmUpload && mConsole != NULL && mConsole->IsInteractive())
+            {
+                overwrite = mConsole->Confirm("'" + remotePath +
+                    "' changed on the server while it was open in the editor. "
+                    "Overwrite it with your changes?", false);
+            }
+            if (!overwrite)
+            {
+                error = "'" + remotePath + "' changed on the server while it was "
+                    "being edited, so it was not overwritten. Your copy is kept at '" +
+                    tempPath + "'.";
+                return false;
+            }
+        }
+
+        if (confirmUpload && mConsole != NULL && mConsole->IsInteractive() &&
+            !mConsole->Confirm("Upload the changes to '" + remotePath + "'?", true))
+        {
+            if (mConsole != NULL)
+            {
+                mConsole->Status("Cancelled. The edited copy is kept at '" +
+                    tempPath + "'.");
+            }
+            return true;
+        }
+
+        if (mConsole != NULL)
+        {
+            mConsole->Status("Uploading '" + remotePath + "'...");
+        }
+        if (mAccess.Upload(tempPath, remotePath, false, error) != 0)
+        {
+            if (error.empty())
+            {
+                error = std::string("Cannot upload '") + remotePath + "'.";
+            }
+            error += " The edited copy is kept at '" + tempPath + "'.";
+            return false;
+        }
+        if (mConsole != NULL)
+        {
+            mConsole->Status("Uploaded '" + remotePath + "'.");
+        }
+        lastUploadedBytes = editedBytes;
+        uploadedOut = true;
+        LscpAttrs updatedAttrs = {};
+        if (mAccess.Stat(remotePath, updatedAttrs, statError) ==
+                LSCP_SFTP_STAT_EXISTS &&
+            (updatedAttrs.flags & LSCP_ATTR_ACMODTIME) != 0)
+        {
+            expectedRemoteMtime = updatedAttrs.mtime;
+        }
+        return true;
+    };
+
+    bool uploaded = false;
+    if (!uploadIfChanged(uploaded))
+    {
         return false;
     }
-    if (after.mtime == before.mtime && after.size == before.size)
+    if (!uploaded && !options.monitor)
     {
         if (mConsole != NULL)
         {
@@ -306,70 +542,38 @@ bool RemoteEditor::Edit(const std::string & remotePath, const EditOptions & opti
         return true;
     }
 
-    /* The remote file may have changed while the editor was open. */
-    LscpAttrs nowAttrs = {};
-    std::string statError;
-    const int stillThere = mAccess.Stat(remotePath, nowAttrs, statError);
-    if (stillThere == LSCP_SFTP_STAT_ERROR)
+    if (options.monitor)
     {
-        error = statError.empty() ? std::string("Cannot re-read '") + remotePath + "'."
-            : statError;
-        return false;
-    }
-    if (stillThere == LSCP_SFTP_STAT_MISSING)
-    {
-        error = "'" + remotePath + "' no longer exists; the edited copy is kept "
-            "at '" + tempPath + "'.";
-        return false;
-    }
-    const unsigned long remoteMtimeNow =
-        (nowAttrs.flags & LSCP_ATTR_ACMODTIME) != 0 ? nowAttrs.mtime : 0;
-    if (remoteMtimeBefore != 0 && remoteMtimeNow != remoteMtimeBefore)
-    {
-        bool overwrite = false;
-        if (confirmUpload && mConsole != NULL && mConsole->IsInteractive())
-        {
-            overwrite = mConsole->Confirm("'" + remotePath + "' changed on the "
-                "server while it was open in the editor. Overwrite it with "
-                "your changes?", false);
-        }
-        if (!overwrite)
-        {
-            error = "'" + remotePath + "' changed on the server while it was "
-                "being edited, so it was not overwritten. Your copy is kept at '" +
-                tempPath + "'.";
-            return false;
-        }
-    }
-
-    if (confirmUpload && mConsole != NULL && mConsole->IsInteractive() &&
-        !mConsole->Confirm("Upload the changes to '" + remotePath + "'?", true))
-    {
+        InstallInterruptHandler();
+        unsigned completedPasses = 0;
+        const unsigned targetPasses = options.monitorPasses == 0 ? 1 :
+            options.monitorPasses;
         if (mConsole != NULL)
         {
-            mConsole->Status("Cancelled. The edited copy is kept at '" +
-                tempPath + "'.");
+            mConsole->Status("Monitoring '" + tempPath + "' for local saves...");
         }
-        return true;
+        unsigned elapsedPolls = 0;
+        while (!Interrupted() && completedPasses < targetPasses)
+        {
+            SleepMilliseconds(options.monitorIntervalMs > 0 ?
+                options.monitorIntervalMs : 50);
+            bool passUploaded = false;
+            if (!uploadIfChanged(passUploaded))
+            {
+                return false;
+            }
+            if (passUploaded)
+            {
+                completedPasses++;
+                elapsedPolls = 0;
+            }
+            else if (++elapsedPolls > 200)
+            {
+                break;
+            }
+        }
     }
 
-    if (mConsole != NULL)
-    {
-        mConsole->Status("Uploading '" + remotePath + "'...");
-    }
-    if (mAccess.Upload(tempPath, remotePath, false, error) != 0)
-    {
-        if (error.empty())
-        {
-            error = std::string("Cannot upload '") + remotePath + "'.";
-        }
-        error += " The edited copy is kept at '" + tempPath + "'.";
-        return false;
-    }
-    if (mConsole != NULL)
-    {
-        mConsole->Status("Uploaded '" + remotePath + "'.");
-    }
     if (!options.keepTempFile)
     {
         RemoveLocalFile(tempPath, remoteError);

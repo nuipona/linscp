@@ -926,6 +926,271 @@ class LiveSftpTests(unittest.TestCase):
         finally:
             self.clean_sessions()
 
+    def test_ln_symlink_and_recursive_chmod(self):
+        """'ln' and 'symlink' create symbolic links on the SFTP server, and
+        'chmod' applies both symbolic modes and recursive (-r) permission
+        changes."""
+        target = self.root / "target.txt"
+        target.write_text("symlink-payload\n", encoding="utf-8")
+        tree = self.root / "chmod-tree" / "nested"
+        tree.mkdir(parents=True, exist_ok=True)
+        nested_file = tree / "script.sh"
+        nested_file.write_text("#!/bin/sh\necho hi\n", encoding="utf-8")
+        os.chmod(nested_file, 0o600)
+
+        result = self.run_script(
+            "ln /target.txt /link1.txt ; "
+            "symlink /target.txt /link2.txt ; "
+            "stat /link1.txt ; "
+            "chmod u+x,go+r /chmod-tree/nested/script.sh ; "
+            "chmod -r 750 /chmod-tree ; "
+            "exit")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue((self.root / "link1.txt").is_symlink())
+        self.assertTrue((self.root / "link2.txt").is_symlink())
+        self.assertTrue(
+            os.readlink(self.root / "link1.txt").endswith("/target.txt"))
+        self.assertTrue(
+            os.readlink(self.root / "link2.txt").endswith("/target.txt"))
+        self.assertEqual(
+            (self.root / "chmod-tree").stat().st_mode & 0o777, 0o750)
+        self.assertEqual(nested_file.stat().st_mode & 0o777, 0o750)
+
+    def test_transfer_speed_append_and_preservetime_all(self):
+        """'-speed=' throttles transfers cleanly, '-append' appends to an
+        existing file without truncating, and '-preservetime=all' preserves
+        directory modification times as well as file modification times."""
+        # 1. -append on put and get
+        (self.root / "remote-log.txt").write_bytes(b"head\n")
+        (self.local / "tail.txt").write_bytes(b"tail\n")
+        (self.local / "local-log.txt").write_bytes(b"local-head\n")
+        (self.root / "remote-tail.txt").write_bytes(b"remote-tail\n")
+
+        # 2. -preservetime=all on directory tree
+        src_dir = self.local / "dated-dir"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        src_file = src_dir / "item.txt"
+        src_file.write_bytes(b"dated\n")
+        fixed_mtime = 1650000000
+        os.utime(src_file, (fixed_mtime, fixed_mtime))
+        os.utime(src_dir, (fixed_mtime, fixed_mtime))
+
+        result = self.run_script(
+            "put -append -speed=1024 %s /remote-log.txt ; "
+            "get -append -speed=1024 /remote-tail.txt %s ; "
+            "put -r -preservetime=all %s /dated-dir ; "
+            "get -r -preservetime=all /dated-dir %s ; "
+            "exit" % (
+                self.local / "tail.txt",
+                self.local / "local-log.txt",
+                src_dir,
+                self.local / "dated-out"))
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(
+            (self.root / "remote-log.txt").read_bytes(), b"head\ntail\n")
+        self.assertEqual(
+            (self.local / "local-log.txt").read_bytes(),
+            b"local-head\nremote-tail\n")
+        self.assertEqual(
+            int((self.root / "dated-dir").stat().st_mtime), fixed_mtime)
+        self.assertEqual(
+            int((self.local / "dated-out").stat().st_mtime), fixed_mtime)
+
+    def test_call_and_local_shell_exit_status(self):
+        """'call' executes a remote command over an SSH exec channel and
+        checks its exit code; '!' executes a local command and checks its
+        exit code."""
+        ok = self.run_script("call echo remote-exec-ok ; ! echo local-exec-ok ; exit")
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertIn("remote-exec-ok", ok.stdout)
+        self.assertIn("local-exec-ok", ok.stdout)
+
+        bad_remote = self.run_script("call exit 7 ; echo SHOULD_NOT_RUN")
+        self.assertNotEqual(bad_remote.returncode, 0)
+        self.assertNotIn("SHOULD_NOT_RUN", bad_remote.stdout)
+
+        bad_local = self.run_script("! exit 5 ; echo SHOULD_NOT_RUN")
+        self.assertNotEqual(bad_local.returncode, 0)
+        self.assertNotIn("SHOULD_NOT_RUN", bad_local.stdout)
+
+    def test_ssh_agent_and_encrypted_private_key_passphrase(self):
+        """Encrypted OpenSSH private keys are unlocked with '-passphrase='
+        on 'copyid' and 'open', and unencrypted/unlocked keys held in
+        ssh-agent authenticate over SSH_AUTH_SOCK."""
+        key_path = self.local / "id_ed25519_enc"
+        keygen = subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "keysecret123",
+             "-f", str(key_path)],
+            capture_output=True, text=True, timeout=30)
+        self.assertEqual(keygen.returncode, 0, keygen.stderr)
+
+        # Install the public key via copyid using -passphrase=
+        copy_res = self.run_script(
+            "copyid %s -passphrase=keysecret123 ; exit" % key_path)
+        self.assertEqual(copy_res.returncode, 0,
+                         copy_res.stdout + copy_res.stderr)
+        auth_keys = (self.root / ".ssh" / "authorized_keys").read_text(
+            encoding="utf-8")
+        self.assertIn("ssh-ed25519", auth_keys)
+
+        # Connect using the encrypted key + -passphrase= (no password in URL).
+        env = dict(os.environ, LINUXSCP_CONFIG_DIR=str(self.config))
+        env.pop("SSH_AUTH_SOCK", None)
+        good_key = subprocess.run(
+            [BINARY, "-batch", "-hostkey=*",
+             "-command=open sftp://%s@127.0.0.1:%d/ -privatekey=%s "
+                       "-passphrase=keysecret123 ; pwd ; exit"
+             % (USER, self.port, key_path)],
+            capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(good_key.returncode, 0,
+                         good_key.stdout + good_key.stderr)
+
+        # Wrong passphrase must fail in batch mode.
+        bad_key = subprocess.run(
+            [BINARY, "-batch", "-hostkey=*",
+             "-command=open sftp://%s@127.0.0.1:%d/ -privatekey=%s "
+                       "-passphrase=wrongpass ; pwd ; exit"
+             % (USER, self.port, key_path)],
+            capture_output=True, text=True, timeout=30, env=env)
+        self.assertNotEqual(bad_key.returncode, 0)
+
+        # ssh-agent authentication over SSH_AUTH_SOCK.
+        plain_key = self.local / "id_ed25519_agent"
+        subprocess.run(
+            ["ssh-keygen", "-q", "-t", "ed25519", "-N", "",
+             "-f", str(plain_key)],
+            check=True, timeout=30)
+        self.assertEqual(
+            self.run_script("copyid %s ; exit" % plain_key).returncode, 0)
+        agent_Test = subprocess.run(
+            ["ssh-agent", "sh", "-c",
+             "ssh-add %s >/dev/null 2>&1 && %s -batch -hostkey=* "
+             "-command='open sftp://%s@127.0.0.1:%d/ ; pwd ; exit'"
+             % (plain_key, BINARY, USER, self.port)],
+            capture_output=True, text=True, timeout=30, env=env)
+        self.assertEqual(agent_Test.returncode, 0,
+                         agent_Test.stdout + agent_Test.stderr)
+
+    def test_http_connect_proxy_and_direct_isolation(self):
+        """SFTP sessions tunnel through an HTTP CONNECT proxy when configured
+        and never fall back to a direct connection when the proxy is down."""
+        proxy_port, proxy_lines = self.start_proxy(
+            kind="http", credentials="httpuser:httppass")
+        (self.root / "via-http.txt").write_bytes(b"http-proxy-ok\n")
+        out = self.local / "via-http.txt"
+
+        result = self.run_script(
+            "get /via-http.txt %s" % out,
+            open_args=[
+                "-rawsettings", "ProxyMethod=HTTP",
+                "ProxyHost=127.0.0.1", "ProxyPort=%d" % proxy_port,
+                "ProxyLocalhost=1", "ProxyUsername=httpuser",
+                "ProxyPassword=httppass"])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(out.read_bytes(), b"http-proxy-ok\n")
+        self.assertTrue(proxy_lines.contains(
+            lambda line: line == "CONNECT 127.0.0.1:%d" % self.port),
+            proxy_lines)
+
+        # Unreachable proxy port must fail rather than connect directly.
+        dead = self.run_script(
+            "pwd",
+            open_args=[
+                "-rawsettings", "ProxyMethod=HTTP",
+                "ProxyHost=127.0.0.1", "ProxyPort=1",
+                "ProxyLocalhost=1"])
+        self.assertNotEqual(dead.returncode, 0)
+        self.assertNotIn("Connected", dead.stdout)
+
+    def test_synchronize_conflict_policy_and_keepuptodate(self):
+        """'synchronize both -conflict=...' resolves bidirectional conflicts
+        deterministically, and 'keepuptodate -once -delete' propagates local
+        changes to the remote directory."""
+        sync_local = self.local / "sync-both"
+        sync_remote = self.root / "sync-both"
+        sync_local.mkdir(parents=True, exist_ok=True)
+        sync_remote.mkdir(parents=True, exist_ok=True)
+        (sync_local / "doc.txt").write_bytes(b"v1\n")
+        (sync_remote / "doc.txt").write_bytes(b"v1\n")
+        os.utime(sync_local / "doc.txt", (1700000000, 1700000000))
+        os.utime(sync_remote / "doc.txt", (1700000000, 1700000000))
+
+        # Baseline bidirectional sync records state.
+        base = self.run_script(
+            "synchronize both %s /sync-both ; exit" % sync_local)
+        self.assertEqual(base.returncode, 0, base.stdout + base.stderr)
+
+        # Modify both sides with different sizes/timestamps -> conflict!
+        (sync_local / "doc.txt").write_bytes(b"local-v2\n")
+        (sync_remote / "doc.txt").write_bytes(b"remote-v2-longer\n")
+        os.utime(sync_local / "doc.txt", (1700000100, 1700000100))
+        os.utime(sync_remote / "doc.txt", (1700000200, 1700000200))
+
+        # Default (-conflict=skip) reports a conflict and returns non-zero.
+        skipped = self.run_script(
+            "synchronize both %s /sync-both ; exit" % sync_local)
+        self.assertNotEqual(skipped.returncode, 0)
+
+        # -conflict=newer picks the newer remote version.
+        resolved = self.run_script(
+            "synchronize both -conflict=newer %s /sync-both ; exit"
+            % sync_local)
+        self.assertEqual(resolved.returncode, 0,
+                         resolved.stdout + resolved.stderr)
+        self.assertEqual(
+            (sync_local / "doc.txt").read_bytes(), b"remote-v2-longer\n")
+
+        # keepuptodate -count=1 -delete mirrors local directory to remote.
+        watch_local = self.local / "watch"
+        watch_remote = self.root / "watch"
+        watch_local.mkdir(parents=True, exist_ok=True)
+        watch_remote.mkdir(parents=True, exist_ok=True)
+        (watch_local / "fresh.txt").write_bytes(b"watched\n")
+        (watch_remote / "stale.txt").write_bytes(b"remove-me\n")
+        kept = self.run_script(
+            "option confirm off ; "
+            "keepuptodate -count=1 -delete %s /watch ; exit" % watch_local)
+        self.assertEqual(kept.returncode, 0, kept.stdout + kept.stderr)
+        self.assertEqual(
+            (watch_remote / "fresh.txt").read_bytes(), b"watched\n")
+        self.assertFalse((watch_remote / "stale.txt").exists())
+
+    def test_remote_edit_and_xml_action_log(self):
+        """'edit' downloads, edits with line-ending preservation, and
+        re-uploads a remote file, and '-xmllog' records structured XML
+        elements for file and session operations."""
+        (self.root / "config.ini").write_bytes(b"\xef\xbb\xbfkey=old\r\n")
+        editor_sh = self.local / "edit-helper.sh"
+        editor_sh.write_text(
+            "#!/bin/sh\nprintf 'key=new\\n' > \"$1\"\n", encoding="utf-8")
+        editor_sh.chmod(0o755)
+        xmllog = self.config / "actions.xml"
+
+        result = self.run_script(
+            "option confirm off ; "
+            "option editor %s ; "
+            "edit -eol=preserve /config.ini ; "
+            "mkdir /xml-dir ; "
+            "put -preservetime %s /xml-dir/item.sh ; "
+            "chmod 755 /xml-dir/item.sh ; "
+            "mv /xml-dir/item.sh /xml-dir/renamed.sh ; "
+            "get -preservetime /xml-dir/renamed.sh %s ; "
+            "call echo xml-call ; "
+            "rm /xml-dir/renamed.sh ; "
+            "exit" % (
+                editor_sh, editor_sh, self.local / "downloaded.sh"),
+            extra_args=["-xmllog=" + str(xmllog)])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        # UTF-8 BOM and CRLF preserved across remote edit.
+        self.assertEqual(
+            (self.root / "config.ini").read_bytes(),
+            b"\xef\xbb\xbfkey=new\r\n")
+
+        xml_text = xmllog.read_text(encoding="utf-8")
+        for tag in ("<upload ", "<download ", "<mkdir ", "<mv ",
+                    "<chmod ", "<touch ", "<call ", "<rm "):
+            self.assertIn(tag, xml_text)
+
 
 def run_and_report():
     """Run the suite, then print one line that says what was actually run.

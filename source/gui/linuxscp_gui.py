@@ -38,6 +38,7 @@ import json
 import time
 import secrets
 import shutil
+import signal
 import stat
 import re
 import getpass
@@ -731,13 +732,16 @@ class TaskManager(object):
 
     def submit(self, kind, command, session, source, destination, tab_id,
                progress_path=None, progress_remote=None, move_source=None,
-               cleanup_path=None):
+               cleanup_path=None, priority=False):
         with STATE_LOCK:
             task = Task(STATE["next_task"], kind, command, session, source,
                         destination, tab_id, progress_path, progress_remote,
                         move_source=move_source, cleanup_path=cleanup_path)
             STATE["next_task"] += 1
-            STATE["tasks"].insert(0, task)
+            if priority:
+                STATE["tasks"].append(task)
+            else:
+                STATE["tasks"].insert(0, task)
         with self.condition:
             self.condition.notify_all()
         add_log("Queued %s: %s -> %s" % (kind, source, destination), "info")
@@ -807,9 +811,13 @@ class TaskManager(object):
         while task.proc.poll() is None:
             if task.status == "Cancelling":
                 try:
-                    task.proc.kill()
-                except OSError:
-                    pass
+                    task.proc.send_signal(signal.SIGINT)
+                    task.proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        task.proc.kill()
+                    except OSError:
+                        pass
                 break
             task.poll_progress()
             time.sleep(0.4)
@@ -925,6 +933,32 @@ class TaskManager(object):
                     task.bytes_done = 0
                     break
             else:
+                return False
+        with self.condition:
+            self.condition.notify_all()
+        return True
+
+    def prioritize(self, task_id, position="top"):
+        """Reorder a queued task ('top' runs next; 'up'/'down' shifts one slot)."""
+        with STATE_LOCK:
+            tasks = STATE["tasks"]
+            idx = next((i for i, t in enumerate(tasks)
+                        if str(t.id) == str(task_id)), None)
+            if idx is None or tasks[idx].status != "Queued":
+                return False
+            task = tasks.pop(idx)
+            # Note: _next() scans reversed(STATE["tasks"]), so the end of the
+            # list is the head of the execution queue (runs next).
+            if position in ("top", "next", "first"):
+                tasks.append(task)
+            elif position == "up":
+                target = min(len(tasks), idx + 1)
+                tasks.insert(target, task)
+            elif position in ("down", "bottom"):
+                target = 0 if position == "bottom" else max(0, idx - 1)
+                tasks.insert(target, task)
+            else:
+                tasks.insert(idx, task)
                 return False
         with self.condition:
             self.condition.notify_all()
@@ -1061,6 +1095,76 @@ def queue_browser_upload(tab, remote_dir, filename, source_stream,
         raise
 
 
+def local_browser_destination(local_dir, relative_path):
+    """Validate and resolve a browser drop target beneath a local directory."""
+    if not isinstance(local_dir, str) or not os.path.isabs(local_dir) or \
+            not isinstance(relative_path, str) or not relative_path:
+        raise ValueError("The drop destination must be an absolute local directory and a relative path.")
+    segments = relative_path.split("/")
+    try:
+        too_long = (len(relative_path.encode("utf-8")) > 4096 or
+                    len(local_dir.encode("utf-8")) > 4096 or
+                    any(len(part.encode("utf-8")) > 255 for part in segments))
+    except UnicodeError as exc:
+        raise ValueError("The drop path has invalid Unicode.") from exc
+    if too_long or len(segments) > 32 or any(
+            not segment or segment in (".", "..") or "\\" in segment or
+            any(ord(char) < 32 or ord(char) == 127 for char in segment)
+            for segment in segments):
+        raise ValueError("The drop path contains an invalid name or escapes the local directory.")
+    if not os.path.isdir(local_dir) or os.path.islink(local_dir):
+        raise ValueError("The target local directory does not exist.")
+    real_base = os.path.realpath(local_dir)
+    current = real_base
+    for segment in segments:
+        current = os.path.join(current, segment)
+        if os.path.islink(current):
+            raise ValueError("Refusing to overwrite or traverse a symbolic link in the local drop target.")
+    if os.path.commonpath([real_base, os.path.abspath(current)]) != real_base:
+        raise ValueError("The drop path escapes the local directory.")
+    return current
+
+
+def save_local_browser_directory(local_dir, relative_path):
+    """Create an empty or nested directory dropped onto the local panel."""
+    destination = local_browser_destination(local_dir, relative_path)
+    os.makedirs(destination, exist_ok=True)
+    add_log("Created local directory from drop: %s" % destination, "success")
+    return destination
+
+
+def save_local_browser_upload(local_dir, filename, source_stream,
+                              content_length, relative_path=None):
+    """Save a browser-dropped file into the local panel directory."""
+    if relative_path is None:
+        relative_path = filename
+    destination = local_browser_destination(local_dir, relative_path)
+    if not isinstance(filename, str) or relative_path.split("/")[-1] != filename:
+        raise ValueError("The file name does not match the dropped path.")
+    parent = os.path.dirname(destination)
+    os.makedirs(parent, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".linscp-drop-", dir=parent)
+    try:
+        remaining = content_length
+        with os.fdopen(fd, "wb") as handle:
+            while remaining:
+                chunk = source_stream.read(min(65536, remaining))
+                if not chunk:
+                    raise IOError("The upload ended before all bytes arrived.")
+                handle.write(chunk)
+                remaining -= len(chunk)
+        os.replace(temp_path, destination)
+        add_log("Saved dropped local file: %s" % destination, "success")
+        return destination
+    except Exception:
+        try:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+        except OSError:
+            pass
+        raise
+
+
 def parse_ls_output(stdout):
     entries = []
     lines = stdout.splitlines() if isinstance(stdout, str) else list(stdout)
@@ -1143,7 +1247,7 @@ SYNC_ACTIONS = ("download", "upload", "delete-local", "delete-remote", "conflict
 
 
 def build_sync_command(mode, local_dir, remote_dir, delete=False, criteria="time",
-                       filemask="", recursive=True, preview=False):
+                       filemask="", recursive=True, preview=False, conflict="skip"):
     command = "synchronize " + mode
     if delete:
         command += " -delete"
@@ -1153,6 +1257,8 @@ def build_sync_command(mode, local_dir, remote_dir, delete=False, criteria="time
         command += " -nonrecursive"
     if criteria and criteria != "time":
         command += " -criteria=" + criteria
+    if conflict and conflict in ("skip", "local", "remote", "newer") and conflict != "skip":
+        command += " -conflict=" + conflict
     if filemask:
         command += ' -filemask="%s"' % filemask.replace('"', "")
     command += ' "%s" "%s"' % (local_dir, remote_dir)
@@ -1502,7 +1608,63 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             self.send_json({"success": True, "task_id": task.id})
             return
 
+        if path == "/api/local/drop":
+            query = urllib.parse.parse_qs(parsed.query)
+            try:
+                content_length = int(self.headers.get("Content-Length", "-1"))
+            except (TypeError, ValueError):
+                self.send_json({"success": False,
+                                "error": "Invalid upload request."}, status=400)
+                return
+            if content_length < 0:
+                self.send_json({"success": False,
+                                "error": "The upload size is missing."}, status=411)
+                return
+            if content_length > MAX_BROWSER_UPLOAD_BYTES:
+                self.send_json({"success": False,
+                                "error": "Browser uploads are limited to 1 GiB."},
+                               status=413)
+                return
+            if self.headers.get_content_type() != "application/octet-stream":
+                self.send_json({"success": False,
+                                "error": "Expected an octet-stream file upload."},
+                               status=415)
+                return
+            tab = get_tab(query.get("tab", [None])[0])
+            default_local = tab.local_dir if tab else os.path.expanduser("~")
+            filename = query.get("name", [""])[0]
+            local_dir = query.get("local_dir", [default_local])[0]
+            relative_path = query.get("relative_path", [filename])[0]
+            try:
+                dest = save_local_browser_upload(
+                    local_dir, filename, self.rfile, content_length,
+                    relative_path)
+            except (IOError, OSError, ValueError) as exc:
+                self.send_json({"success": False,
+                                "error": "Could not save the dropped file: %s" % exc},
+                               status=400)
+                return
+            self.send_json({"success": True, "path": dest})
+            return
+
         body = self.read_json_body()
+
+        if path == "/api/local/drop-dir":
+            if not isinstance(body, dict):
+                self.send_json({"success": False, "error": "Invalid drop request"},
+                               status=400)
+                return
+            tab = get_tab(body.get("tab"))
+            default_local = tab.local_dir if tab else os.path.expanduser("~")
+            try:
+                dest = save_local_browser_directory(
+                    body.get("local_dir") or default_local,
+                    body.get("relative_path"))
+            except (OSError, ValueError) as exc:
+                self.send_json({"success": False, "error": str(exc)}, status=400)
+                return
+            self.send_json({"success": True, "path": dest})
+            return
 
         if path == "/api/transfer/drop-dir":
             if not isinstance(body, dict):
@@ -1689,13 +1851,15 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/sessions/delete":
             name = (body.get("name") or "").strip()
+            is_folder = bool(body.get("folder"))
             if not name:
                 self.send_json({"success": False, "error": "A session name is required"},
                                status=400)
                 return
-            code, stdout, stderr = run_linuxscp("rmsession %s" % quote_remote(name))
+            rm_cmd = ("rmsession -folder %s" if is_folder else "rmsession %s") % quote_remote(name)
+            code, stdout, stderr = run_linuxscp(rm_cmd)
             if code == 0:
-                add_log("Removed session '%s'" % name, "success")
+                add_log("Removed session %s'%s'" % ("folder " if is_folder else "", name), "success")
                 self.send_json({"success": True, "sessions": read_stored_sessions()})
             else:
                 message = stderr.strip() or stdout.strip() or "Cannot remove the session"
@@ -1928,13 +2092,15 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             names = body.get("names") or []
             local_dir = body.get("local_dir") or tab.local_dir
             switches = transfer_switches(body)
+            priority = bool(body.get("priority"))
             for name in names:
                 remote_path = posixpath.join(tab.remote_dir, name)
                 local_target = os.path.join(local_dir, name)
                 command = 'lcd "%s" ; cd %s ; get %s %s' % (
                     local_dir, quote_remote(tab.remote_dir), switches, quote_remote(name))
                 task = TASKS.submit("Download", command, tab.session, remote_path,
-                                    local_target, tab.id, progress_path=local_target)
+                                    local_target, tab.id, progress_path=local_target,
+                                    priority=priority)
                 try:
                     task.bytes_total = remote_size(tab, remote_path) or 0
                 except Exception:
@@ -1950,6 +2116,7 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
             names = body.get("names") or []
             remote_dir = body.get("remote_dir") or tab.remote_dir
             switches = transfer_switches(body)
+            priority = bool(body.get("priority"))
             for name in names:
                 local_path = os.path.join(tab.local_dir, name)
                 remote_target = posixpath.join(remote_dir, name)
@@ -1958,7 +2125,8 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                     '"%s"' % name)
                 task = TASKS.submit("Upload", command, tab.session, local_path,
                                     remote_target, tab.id,
-                                    progress_remote=(tab.id, remote_target))
+                                    progress_remote=(tab.id, remote_target),
+                                    priority=priority)
                 try:
                     task.bytes_total = os.path.getsize(local_path)
                 except OSError:
@@ -2075,7 +2243,8 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 criteria=body.get("criteria") or "time",
                 filemask=body.get("filemask") or "",
                 recursive=body.get("recursive", True),
-                preview=True)
+                preview=True,
+                conflict=body.get("conflict") or "skip")
             code, stdout, stderr = run_linuxscp(
                 "open %s ; %s" % (session_url(tab.session, tab.remote_dir), command),
                 tab.session)
@@ -2102,10 +2271,17 @@ class LinuxScpGuiHandler(SimpleHTTPRequestHandler):
                 delete=bool(body.get("delete")),
                 criteria=body.get("criteria") or "time",
                 filemask=body.get("filemask") or "",
-                recursive=body.get("recursive", True))
+                recursive=body.get("recursive", True),
+                conflict=body.get("conflict") or "skip")
             task = TASKS.submit("Synchronize (%s)" % (body.get("mode") or "local"),
                                 command, tab.session, local_dir, remote_dir, tab.id)
             self.send_json({"success": True, "task_id": task.id})
+            return
+
+        if path == "/api/queue/priority":
+            ok = TASKS.prioritize(body.get("task_id"),
+                                  body.get("position") or "top")
+            self.send_json({"success": ok})
             return
 
         if path == "/api/queue/cancel":

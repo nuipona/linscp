@@ -92,7 +92,8 @@ struct StoredSession
      */
     FtpSettings ftp;
     TlsSettings tls;
-    /* Why a stored FTP/TLS setting cannot be used, if one cannot: the file
+    S3Settings s3;
+    /* Why a stored FTP/TLS/S3 setting cannot be used, if one cannot: the file
      * then holds a value this build does not accept (a newer version's
      * setting, or a typo), and 'open' says so instead of connecting with a
      * policy nobody asked for. */
@@ -149,6 +150,12 @@ public:
     bool AddOrUpdate(const StoredSession & session, std::string & error);
     bool Remove(const std::string & name, std::string & error);
     bool Rename(const std::string & from, const std::string & to, std::string & error);
+
+    /* Folder-tree helpers: session names containing '/' form a folder
+     * hierarchy ('Prod/Web/app1' is in folders 'Prod' and 'Prod/Web'). */
+    std::vector<std::string> Folders() const;
+    std::vector<StoredSession> SessionsInFolder(const std::string & folder) const;
+    int RemoveFolder(const std::string & folder, std::string & error);
 
     /* Reads the sessions of 'path' into this store: 'merge' keeps the
      * sessions that are already here, otherwise they are replaced.

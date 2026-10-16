@@ -223,6 +223,52 @@ const char * SyncActionName(SyncAction action)
     return "unchanged";
 }
 
+bool ParseSyncConflictPolicy(const std::string & text,
+    SyncConflictPolicy & policy, std::string & error)
+{
+    error.clear();
+    std::string lower = text;
+    for (size_t i = 0; i < lower.size(); i++)
+    {
+        lower[i] = static_cast<char>(tolower(static_cast<unsigned char>(lower[i])));
+    }
+    if (lower == "skip" || lower == "abort" || lower == "prompt")
+    {
+        policy = SyncConflictPolicy::Skip;
+        return true;
+    }
+    if (lower == "local" || lower == "upload")
+    {
+        policy = SyncConflictPolicy::Local;
+        return true;
+    }
+    if (lower == "remote" || lower == "download")
+    {
+        policy = SyncConflictPolicy::Remote;
+        return true;
+    }
+    if (lower == "newer")
+    {
+        policy = SyncConflictPolicy::Newer;
+        return true;
+    }
+    error = "Unsupported conflict policy '" + text +
+        "' (use skip, local, remote or newer).";
+    return false;
+}
+
+const char * SyncConflictPolicyName(SyncConflictPolicy policy)
+{
+    switch (policy)
+    {
+        case SyncConflictPolicy::Skip:   return "skip";
+        case SyncConflictPolicy::Local:  return "local";
+        case SyncConflictPolicy::Remote: return "remote";
+        case SyncConflictPolicy::Newer:  return "newer";
+    }
+    return "skip";
+}
+
 /* ------------------------------------------------------------------ *
  * FileMask                                                            *
  * ------------------------------------------------------------------ */
@@ -1286,6 +1332,44 @@ private:
         SyncStateEntry recorded;
         const bool known = mOptions.state != NULL &&
             mOptions.state->Lookup(relative, recorded);
+        auto resolveConflict = [&](SyncItem & conflictItem,
+            const std::string & defaultReason)
+        {
+            if (mOptions.conflictPolicy == SyncConflictPolicy::Local)
+            {
+                conflictItem.action = SyncAction::Upload;
+                conflictItem.reason =
+                    "conflict resolved in favour of the local file";
+                return;
+            }
+            if (mOptions.conflictPolicy == SyncConflictPolicy::Remote)
+            {
+                conflictItem.action = SyncAction::Download;
+                conflictItem.reason =
+                    "conflict resolved in favour of the remote file";
+                return;
+            }
+            if (mOptions.conflictPolicy == SyncConflictPolicy::Newer)
+            {
+                if (local.mtime > remote.mtime)
+                {
+                    conflictItem.action = SyncAction::Upload;
+                    conflictItem.reason =
+                        "conflict resolved in favour of the newer local file";
+                    return;
+                }
+                if (remote.mtime > local.mtime)
+                {
+                    conflictItem.action = SyncAction::Download;
+                    conflictItem.reason =
+                        "conflict resolved in favour of the newer remote file";
+                    return;
+                }
+            }
+            conflictItem.action = SyncAction::Conflict;
+            conflictItem.reason = defaultReason;
+        };
+
         if (!known)
         {
             if (local.mtime == remote.mtime && local.size == remote.size)
@@ -1294,9 +1378,9 @@ private:
             }
             else if (local.mtime == remote.mtime)
             {
-                item.action = SyncAction::Conflict;
-                item.reason = "the timestamps are equal but the sizes differ, and "
-                    "there is no previous synchronization to compare with";
+                resolveConflict(item, "the timestamps are equal but the sizes "
+                    "differ, and there is no previous synchronization to "
+                    "compare with");
             }
             else if (local.mtime > remote.mtime)
             {
@@ -1320,8 +1404,8 @@ private:
             remote.size != recorded.size;
         if (localChanged && remoteChanged)
         {
-            item.action = SyncAction::Conflict;
-            item.reason = "it changed on both sides since the last synchronization";
+            resolveConflict(item,
+                "it changed on both sides since the last synchronization");
         }
         else if (localChanged)
         {
@@ -1480,6 +1564,7 @@ bool PlanSynchronization(SyncFileSystem & localFs, SyncFileSystem & remoteFs,
     const std::string & localRoot, const std::string & remoteRoot,
     const SyncOptions & options, SyncPlan & plan, std::string & error)
 {
+    error.clear();
     if (localRoot.empty())
     {
         error = "The local directory of a synchronization is empty.";

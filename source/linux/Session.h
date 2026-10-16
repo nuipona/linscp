@@ -149,6 +149,30 @@ struct TlsSettings
     TlsSettings() : ftpsMode(0), minVersion(0), maxVersion(0) {}
 };
 
+/*
+ * S3 object write and request policy: storage class, canned ACL,
+ * server-side encryption, KMS key ID, requester-pays and custom user
+ * metadata headers, all signed with AWS Signature Version 4.
+ */
+struct S3Settings
+{
+    std::string storageClass;
+    std::string acl;
+    std::string serverSideEncryption;
+    std::string kmsKeyId;
+    bool requestPayer;
+    std::map<std::string, std::string> metadata;
+
+    S3Settings() : requestPayer(false) {}
+
+    bool Empty() const
+    {
+        return storageClass.empty() && acl.empty() &&
+            serverSideEncryption.empty() && kmsKeyId.empty() &&
+            !requestPayer && metadata.empty();
+    }
+};
+
 struct SessionOptions
 {
     std::string protocol;
@@ -157,6 +181,7 @@ struct SessionOptions
     std::string userName;
     std::string password;
     std::string privateKeyFile;
+    std::string keyPassphrase;
     /* Expected host key: empty = use the cache/ask, "*" = accept any. */
     std::string hostKey;
     /* Directory to change to once connected (from the URL path). */
@@ -165,9 +190,10 @@ struct SessionOptions
     bool verbose;
     /* The proxy this session connects through, if any. */
     ProxySettings proxy;
-    /* The FTP engine's policy and the TLS policy of the curl protocols. */
+    /* The FTP engine's policy, the TLS policy and S3 object policy. */
     FtpSettings ftp;
     TlsSettings tls;
+    S3Settings s3;
     /* WebDAV lock tokens this session holds, by remote path. An upload,
      * delete or move of a locked path carries its token in the If header,
      * so the server refuses the write when the lock is gone instead of
@@ -238,6 +264,7 @@ public:
     /* struct Seat *, for get_log_seat(). */
     void * SeatHandle() const { return mSeat; }
     const std::string & ConnectionError() const { return mConnectionError; }
+    int ExitCode() const;
     std::string UserName() const;
     std::string HostDescription() const;
 
