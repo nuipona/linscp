@@ -1,5 +1,6 @@
 #include "Script.h"
 #include "ProtocolClient.h"
+#include "ScpClient.h"
 #include "ScriptParams.h"
 
 #include <cctype>
@@ -917,10 +918,26 @@ int Script::RemoteSetTimes(const std::string & path, unsigned long atime,
     unsigned long mtime, std::string & error)
 {
     error.clear();
+    if (UseNativeScp(mSession.Options().protocol))
+    {
+        /* 'touch' sets both times to the one value, which is all a shell
+         * offers; the modification time is the one a comparison reads. */
+        if (!ScpClient::SetTimes(mSession.Options(), path, atime, mtime, error))
+        {
+            Console::Instance().LogAction("touch",
+                "filename=\"" + Console::EscapeActionText(path) +
+                "\" result=\"failed\"");
+            return -1;
+        }
+        Console::Instance().LogAction("touch",
+            "filename=\"" + Console::EscapeActionText(path) +
+            "\" result=\"ok\"");
+        return 0;
+    }
     if (!UseNativeSftp(mSession.Options().protocol))
     {
         error = "Setting the timestamps of a directory needs the native "
-            "SFTP transport.";
+            "SFTP transport or an SCP session.";
         Console::Instance().LogAction("touch",
             "filename=\"" + Console::EscapeActionText(path) +
             "\" result=\"failed\"");
@@ -1325,6 +1342,32 @@ bool Script::OpenSite(const std::vector<std::string> & args)
         mRemoteDirectory = canonical;
         free(canonical);
     }
+    else if (UseNativeScp(mSession.Options().protocol))
+    {
+        /*
+         * An SCP session runs its commands in the server's shell, and a
+         * shell starts in a directory: that is the home directory 'cd'
+         * with no argument goes to, and the site's initial path is
+         * resolved against it. Both answers come from one command, so a
+         * symlink or a relative path becomes the absolute one every later
+         * command sends, and a directory the server will not change into
+         * fails the open here - where the reason can still be reported -
+         * instead of turning into a listing error two commands later.
+         */
+        std::string home;
+        std::string resolved;
+        if (!ScpClient::ResolveHomeAndInitial(mSession.Options(),
+                options.initialDirectory, home, resolved, error))
+        {
+            Console::Instance().Error(Texts::CannotOpenSession(options.hostName,
+                error));
+            mSession.Close();
+            mErrors++;
+            return false;
+        }
+        mHomeDirectory = home;
+        mRemoteDirectory = resolved;
+    }
     else
     {
         mRemoteDirectory = options.initialDirectory.empty() ?
@@ -1421,6 +1464,22 @@ bool Script::ChangeRemoteDirectory(const std::vector<std::string> & args)
         }
         mRemoteDirectory = canonical;
         free(canonical);
+    }
+    else if (UseNativeScp(mSession.Options().protocol))
+    {
+        /* 'cd <path> && pwd' is the server's own answer, so a directory
+         * that is not there is refused instead of becoming the working
+         * directory of every command that follows. */
+        std::string resolved;
+        std::string error;
+        if (!ScpClient::ResolvePath(mSession.Options(), path, resolved, error))
+        {
+            Console::Instance().Error(Texts::RemoteError("change directory to",
+                path, error));
+            mErrors++;
+            return false;
+        }
+        mRemoteDirectory = resolved;
     }
     else
     {
@@ -2504,6 +2563,11 @@ bool Script::Resumes(const TransferFlags & flags, unsigned long long size) const
  * the final file, whose existing content may be an unrelated complete
  * version that must not be spliced with new bytes.
  */
+bool Script::TransportContinues() const
+{
+    return !UseNativeScp(mSession.Options().protocol);
+}
+
 bool Script::ResolveStage(bool eligible, bool upload,
     const std::string & finalPath, unsigned long long totalSize,
     TransferStage & stage, std::string & error)
@@ -2577,6 +2641,18 @@ bool Script::ResolveStage(bool eligible, bool upload,
     {
         error.clear(); /* no staging file yet: a missing one is not an error */
         return true; /* fresh transfer into the staging name */
+    }
+    if (!TransportContinues())
+    {
+        /*
+         * The transport cannot position a write, so it cannot continue
+         * this file either: the staging file of an interrupted transfer is
+         * discarded and the transfer starts again. Splicing new bytes onto
+         * a partial file nobody can vouch for is how a truncated file
+         * becomes a corrupt one that looks complete.
+         */
+        stage.stale = true;
+        return true;
     }
     if (!sizeKnown)
     {
@@ -3402,6 +3478,27 @@ bool Script::GetFiles(const std::vector<std::string> & args)
         return SwitchError("get", "'-append' needs the native SFTP "
             "transport; the transfer backends cannot position a write.");
     }
+    /*
+     * SCP's rcp protocol has no offset to continue from, so a transfer
+     * that asks to resume by name is refused instead of quietly starting
+     * over: '-resume', '-resumesupport=on' and a '-resumesupport=<KB>'
+     * threshold all promise a continuation this transport cannot make.
+     * The default 'option resume automatic' is not a promise - it stages
+     * the transfer so an interrupted one is not left under the final
+     * name, and this engine still does that, renaming '.filepart' into
+     * place through the server's shell.
+     */
+    if (UseNativeScp(mSession.Options().protocol) && (flags.resume ||
+        flags.resumeSupport == TransferFlags::ResumeOn ||
+        flags.resumeSupport == TransferFlags::ResumeSmart ||
+        (flags.resumeSupport == TransferFlags::ResumeUnset &&
+         mResumeMode == ResumeMode::On)))
+    {
+        return SwitchError("get", "SCP cannot resume a transfer: the rcp "
+            "protocol has no offset to continue from, and a partial file "
+            "nobody can position is not one to splice bytes onto. Use "
+            "'option resume off' or '-resumesupport=off'.");
+    }
     ResolveTransferMask(flags);
     SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
 
@@ -3713,17 +3810,26 @@ bool Script::PutFiles(const std::vector<std::string> & args)
         return SwitchError("put", "'-append' needs the native SFTP "
             "transport; the transfer backends cannot position a write.");
     }
-    const std::string curlProtocol = ToLower(mSession.Options().protocol);
-    const bool scpUpload = curlProtocol == "scp" || curlProtocol == "ssh";
-    if (scpUpload && (flags.resume ||
+    /*
+     * SCP's rcp protocol has no offset to continue from, so a transfer
+     * that asks to resume by name is refused instead of quietly starting
+     * over: '-resume', '-resumesupport=on' and a '-resumesupport=<KB>'
+     * threshold all promise a continuation this transport cannot make.
+     * The default 'option resume automatic' is not a promise - it stages
+     * the transfer so an interrupted one is not left under the final
+     * name, and this engine still does that, renaming '.filepart' into
+     * place through the server's shell.
+     */
+    if (UseNativeScp(mSession.Options().protocol) && (flags.resume ||
         flags.resumeSupport == TransferFlags::ResumeOn ||
         flags.resumeSupport == TransferFlags::ResumeSmart ||
         (flags.resumeSupport == TransferFlags::ResumeUnset &&
          mResumeMode == ResumeMode::On)))
     {
-        return SwitchError("put", "SCP's curl backend cannot resume an upload "
-            "safely: it has no remote rename for the '.filepart' staging "
-            "name. Use 'option resume off' or '-resumesupport=off'.");
+        return SwitchError("put", "SCP cannot resume a transfer: the rcp "
+            "protocol has no offset to continue from, and a partial file "
+            "nobody can position is not one to splice bytes onto. Use "
+            "'option resume off' or '-resumesupport=off'.");
     }
     ResolveTransferMask(flags);
     SpeedLimitForThisCommand limiter(flags.speedKBytesPerSecond, &mSpeedLimit);
@@ -3890,8 +3996,7 @@ bool Script::PutFiles(const std::vector<std::string> & args)
              * confirmation below still runs before anything is removed
              * or written. */
             TransferStage stage;
-            if (!ResolveStage(!flags.append && !scpUpload &&
-                    Resumes(flags, info.size), true,
+            if (!ResolveStage(!flags.append && Resumes(flags, info.size), true,
                     remotePath, info.size, stage, error))
             {
                 Console::Instance().Error(Texts::RemoteError(
@@ -6219,10 +6324,21 @@ int Script::RemoteSymlink(const std::string & target,
     const std::string & linkPath, std::string & error)
 {
     error.clear();
+    if (UseNativeScp(mSession.Options().protocol))
+    {
+        /* The rcp protocol carries no way to make a link, but the shell
+         * this session runs its commands in has one: 'ln -s'. */
+        if (!ScpClient::MakeSymlink(mSession.Options(), target, linkPath, error))
+        {
+            return -1;
+        }
+        return 0;
+    }
     if (!UseNativeSftp(mSession.Options().protocol))
     {
-        error = "Creating symbolic links needs the native SFTP backend; "
-            "the '" + mSession.Options().protocol + "' protocol cannot do it.";
+        error = "Creating symbolic links needs the native SFTP backend or an "
+            "SCP session; the '" + mSession.Options().protocol +
+            "' protocol cannot do it.";
         return -1;
     }
     if (lscp_sftp_symlink(target.c_str(), linkPath.c_str()) != 0)
@@ -6837,76 +6953,65 @@ bool Script::EtagCommand(const std::vector<std::string> & args)
 
     if (getGiven)
     {
-        /* Retrieve the current ETag from the server. */
-        if (!UseNativeSftp(mSession.Options().protocol) &&
-            !IsMultiProtocol(mSession.Options().protocol))
+        /* Only a WebDAV server has an ETag to answer with. Every other
+         * protocol is told so instead of being handed a value nothing on
+         * that transport would ever compare a write against. */
+        const std::string & protocol = mSession.Options().protocol;
+        if (!ProtocolClient::IsDavProtocol(protocol))
         {
-            /* Only the DAV backends carry ETags.  SFTP has none; curl
-             * backends carry them in the listing but not as a precondition. */
-            if (IsDavProtocol(mSession.Options().protocol))
-            {
-                std::string etag;
-                if (!ProtocolClient::DavGetEtag(mSession.Options(), path,
-                    etag, error))
-                {
-                    Console::Instance().Error(Texts::RemoteError("get the ETag of",
-                        path, error));
-                    mErrors++;
-                    return false;
-                }
-                if (etag.empty())
-                {
-                    Console::Instance().WriteLine("No ETag (path does not exist).");
-                }
-                else
-                {
-                    Console::Instance().WriteLine(etag);
-                }
-            }
-            else
-            {
-                /* For curl-backed protocols, the ETag comes from a HEAD
-                 * response if available; the stat is the closest thing. */
-                LscpAttrs attrs = {};
-                if (RemoteStat(path, &attrs, error) == LSCP_SFTP_STAT_NOTEXISTS)
-                {
-                    Console::Instance().WriteLine("No ETag (path does not exist).");
-                }
-                else
-                {
-                    Console::Instance().WriteLine("(ETag not available for " +
-                        mSession.Options().protocol + " protocol.)");
-                }
-            }
+            Console::Instance().WriteLine(Texts::EtagNotAvailable(protocol));
+            return true;
+        }
+        std::string etag;
+        bool pathMissing = false;
+        if (!ProtocolClient::DavGetEtag(mSession.Options(), path, etag,
+            pathMissing, error))
+        {
+            Console::Instance().Error(Texts::RemoteError("get the ETag of",
+                path, error));
+            mErrors++;
+            return false;
+        }
+        if (!etag.empty())
+        {
+            Console::Instance().WriteLine(etag);
         }
         else
         {
-            Console::Instance().WriteLine("(ETag not available for SFTP protocol.)");
+            /* Two different answers, and only one of them is about the
+             * path: a server that sends no getetag has not said the file
+             * is missing. */
+            Console::Instance().WriteLine(pathMissing ? Texts::NoEtag(path)
+                : Texts::NoEtagReported(path));
         }
         return true;
+    }
+
+    /* A precondition is recorded with the session that set it, the way a
+     * lock token is: the value belongs to the connection that read the
+     * resource, and one remembered afterwards would guard nothing. */
+    if (!ProtocolClient::IsDavProtocol(mSession.Options().protocol))
+    {
+        /* Refused rather than recorded: a precondition a transport cannot
+         * check would leave the user believing a write is conditional. */
+        Console::Instance().Error(Texts::EtagNotAvailable(
+            mSession.Options().protocol));
+        mErrors++;
+        return false;
     }
 
     if (clearGiven)
     {
-        mSession.Options().davEtags.erase(path);
-        Console::Instance().WriteLine("Cleared ETag precondition on " + path + ".");
+        mSession.ClearDavEtag(path);
+        Console::Instance().WriteLine(Texts::EtagCleared(path));
         return true;
     }
 
     /* Set the precondition. */
-    SessionOptions::EtagPrecondition ep;
-    ep.ifMatch = matchEtag;
-    ep.ifNoneMatch = nomatchEtag;
-    mSession.Options().davEtags[path] = ep;
-    if (!matchEtag.empty())
-    {
-        Console::Instance().WriteLine("If-Match: " + matchEtag + " on " + path + ".");
-    }
-    else
-    {
-        Console::Instance().WriteLine("If-None-Match: " + nomatchEtag + " on " +
-            path + ".");
-    }
+    mSession.SetDavEtag(path, matchEtag, nomatchEtag);
+    Console::Instance().WriteLine(Texts::EtagSet(
+        matchEtag.empty() ? "If-None-Match" : "If-Match",
+        matchEtag.empty() ? nomatchEtag : matchEtag, path));
     return true;
 }
 
@@ -7005,7 +7110,7 @@ bool Script::CallRemote(const std::vector<std::string> & args, const char * name
         return false;
     }
     const SessionOptions & options = mSession.Options();
-    if (!UseNativeSftp(options.protocol) && options.protocol != "scp")
+    if (!UseNativeSftp(options.protocol) && !UseNativeScp(options.protocol))
     {
         Console::Instance().Error(Texts::WrongArguments(name,
             "Executing a command on the server needs an SSH (sftp:// or scp://) "
@@ -7098,7 +7203,7 @@ bool Script::CopyPublicKey(const std::vector<std::string> & args)
         return false;
     }
     const SessionOptions & options = mSession.Options();
-    if (options.protocol != "sftp" && options.protocol != "scp")
+    if (!UseNativeSftp(options.protocol) && !UseNativeScp(options.protocol))
     {
         return SwitchError("copyid", "Installing a public key needs an SSH "
             "(sftp:// or scp://) session, not '" + options.protocol + "'.");
@@ -7418,8 +7523,15 @@ bool Script::AttrRemote(const std::vector<std::string> & args)
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
     LscpAttrs attrs;
     std::string error;
-    if (RemoteStat(path, &attrs, error) != LSCP_SFTP_STAT_EXISTS)
+    const int statResult = RemoteStat(path, &attrs, error);
+    if (statResult != LSCP_SFTP_STAT_EXISTS)
     {
+        /* A path that is not there is an answer, and an empty reason next
+         * to it reads like the client gave up without asking. */
+        if (statResult == LSCP_SFTP_STAT_MISSING && error.empty())
+        {
+            error = "There is no such file or directory.";
+        }
         Console::Instance().Error(Texts::RemoteError("read the attributes of", path,
             error));
         mErrors++;
@@ -7465,8 +7577,15 @@ bool Script::StatRemote(const std::vector<std::string> & args)
     std::string path = ResolveRemotePath(mRemoteDirectory, args[0]);
     LscpAttrs attrs;
     std::string error;
-    if (RemoteStat(path, &attrs, error) != LSCP_SFTP_STAT_EXISTS)
+    const int statResult = RemoteStat(path, &attrs, error);
+    if (statResult != LSCP_SFTP_STAT_EXISTS)
     {
+        /* A path that is not there is an answer, and an empty reason next
+         * to it reads like the client gave up without asking. */
+        if (statResult == LSCP_SFTP_STAT_MISSING && error.empty())
+        {
+            error = "There is no such file or directory.";
+        }
         Console::Instance().Error(Texts::RemoteError("read the attributes of", path,
             error));
         mErrors++;
@@ -7501,10 +7620,11 @@ void Script::OpenTerminal(const std::vector<std::string> & args)
     }
 
     const SessionOptions & options = mSession.Options();
-    if (options.protocol != "sftp")
+    if (!UseNativeSftp(options.protocol) && !UseNativeScp(options.protocol))
     {
         Console::Instance().Error("An interactive terminal is only available "
-            "for SSH (sftp://) sessions, not for '" + options.protocol + "'.");
+            "for SSH (sftp:// or scp://) sessions, not for '" +
+            options.protocol + "'.");
         mErrors++;
         return;
     }

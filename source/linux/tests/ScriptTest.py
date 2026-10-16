@@ -810,10 +810,12 @@ class ScriptTests(unittest.TestCase):
     def test_open_fails_on_unreachable_endpoint(self):
         """'open' has to report an endpoint that is not there.
 
-        The curl-backed protocols have no connection of their own - every
-        command runs its own transfer - so a dead port would otherwise be
-        reported as a successful open and each command would fail on its own.
-        The classification of an endpoint that does answer is covered by
+        Neither SSH protocol keeps a connection open between commands -
+        sftp:// opens one per session and scp:// one per command, and the
+        curl-backed protocols have none of their own at all - so a dead port
+        would otherwise be reported as a successful open and each command
+        would fail on its own. The classification of an endpoint that does
+        answer is covered by
         test_open_accepts_a_server_that_refuses_the_start_directory.
         """
         for protocol in ("sftp", "scp"):
@@ -931,53 +933,63 @@ class ScriptTests(unittest.TestCase):
         self.assertIn("speed", result.stderr)
 
 
-    def test_a_host_key_pin_curl_cannot_check_is_refused(self):
-        """A host key pin is enforced or refused, never silently dropped.
+    def test_an_ssh_session_never_asks_curl_for_anything(self):
+        """An scp:// or ssh:// session is served by this client's own SSH
+        engine, so the curl on the PATH is not part of it - not for a
+        transfer, and not for a host key pin.
 
-        curl checks '--hostpubsha256' in its libssh2 backend; a build that
-        links libssh (Debian 13, Ubuntu 24.04) accepts the option and
-        ignores it, and the session would then verify less than the pin
-        asked for. The client asks the curl it is about to use, and where
-        the answer is no, it refuses and says what remains - so a fake
-        curl whose version names libssh stands in for those systems.
+        It used to be: curl checked '--hostpubsha256' in its libssh2 backend
+        only, so a build that links libssh (Debian 13, Ubuntu 24.04) accepted
+        the option and ignored it, and the client had to refuse such a
+        session rather than verify less than the pin asked for. A fake curl
+        that reported libssh stood in for those systems. The engine that
+        verifies the key now is the one that verifies an sftp:// key, so what
+        a pin depends on is this build and not whatever SSH library somebody
+        else's curl was linked against - and a fake curl that records every
+        call is the witness that it is never asked.
         """
-        real_curl = shutil.which("curl")
-        if real_curl is None:
-            self.skipTest("curl is not installed")
         with tempfile.TemporaryDirectory(prefix="linscp-curl-") as temp:
+            calls = pathlib.Path(temp) / "calls.log"
             fake = pathlib.Path(temp) / "curl"
             fake.write_text(
                 "#!/bin/sh\n"
-                "if [ \"$1\" = \"--version\" ]; then\n"
-                "  echo \"curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0 \"\n"
-                "  echo \"OpenSSL/3.0.13 zlib/1.3 libssh/0.10.6/openssl/zlib\"\n"
-                "  echo \"Protocols: scp sftp file ftp ftps http https\"\n"
-                "  exit 0\n"
-                "fi\n"
-                "exec " + real_curl + " \"$@\"\n",
+                "echo \"$@\" >> " + str(calls) + "\n"
+                "echo \"curl 8.5.0 (x86_64-pc-linux-gnu) libcurl/8.5.0 \"\n"
+                "echo \"OpenSSL/3.0.13 zlib/1.3 libssh/0.10.6/openssl/zlib\"\n"
+                "echo \"Protocols: file ftp ftps http https\"\n"
+                "exit 1\n",
                 encoding="utf-8")
             fake.chmod(0o755)
             env = {"PATH": temp + os.pathsep + os.environ.get("PATH", "")}
 
-            # 43 base64 characters are a 32-byte digest: the pin is real,
-            # this curl is the part that cannot honour it.
+            # A real 32-byte digest in OpenSSH's spelling, and a port nothing
+            # listens on: what has to be reported is the connection, never the
+            # pin, and never the curl that is not being used.
             pin = "SHA256:" + "A" * 43
-            refused = self.run_commands(
-                "open scp://alice@127.0.0.1:1/ -hostkey=%s ; echo SHOULD_NOT_RUN"
-                % pin, env=env)
-            self.assertEqual(refused.returncode, 1,
-                             refused.stdout + refused.stderr)
-            self.assertIn("hostpubsha256", refused.stderr)
-            self.assertNotIn("SHOULD_NOT_RUN", refused.stdout)
+            for protocol in ("scp", "ssh"):
+                refused = self.run_commands(
+                    "open %s://alice@127.0.0.1:1/ -hostkey=%s ; "
+                    "echo SHOULD_NOT_RUN" % (protocol, pin), env=env)
+                self.assertEqual(refused.returncode, 1,
+                                 refused.stdout + refused.stderr)
+                combined = refused.stdout + refused.stderr
+                self.assertIn("Cannot open session", combined)
+                self.assertNotIn("hostpubsha256", combined)
+                self.assertNotIn("curl", combined.lower())
+                self.assertNotIn("SHOULD_NOT_RUN", refused.stdout)
 
-            # An MD5 pin is a form this curl can check, so the session is
-            # refused only for its connection - the pin message is not what
-            # the user gets.
+            # An MD5 pin is the other spelling ssh-keygen prints, and it is
+            # this client that compares it now.
             md5 = self.run_commands(
                 "open scp://alice@127.0.0.1:1/ -hostkey=" + "ab" * 16 +
                 " ; echo SHOULD_NOT_RUN", env=env)
-            self.assertNotIn("hostpubsha256", md5.stderr)
+            self.assertNotIn("hostpubmd5", md5.stdout + md5.stderr)
             self.assertNotIn("SHOULD_NOT_RUN", md5.stdout)
+
+            self.assertFalse(
+                calls.exists(),
+                "an SSH session called curl: %s" %
+                (calls.read_text() if calls.exists() else ""))
 
     def test_rawsettings_refuse_a_setting_this_build_would_drop(self):
         """Upstream's '-rawsettings' names session settings. One this build

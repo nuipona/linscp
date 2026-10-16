@@ -1,5 +1,6 @@
 #include "ProtocolClient.h"
 #include "FtpClient.h"
+#include "ScpClient.h"
 #include "ListingParse.h"
 #include "S3Client.h"
 #include "S3SigV4.h"
@@ -296,10 +297,6 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
         /* Secure WebDAV, matching the port 443 default. */
         proto = "https";
     }
-    else if (proto == "ssh")
-    {
-        proto = "scp";
-    }
     else if (proto == "s3")
     {
         proto = "https";
@@ -313,12 +310,13 @@ std::string BuildUrl(const SessionOptions & options, const std::string & remoteP
         (options.hostName.empty() || options.hostName[0] != '[');
     std::string url = proto + "://" +
         (ipv6 ? "[" + options.hostName + "]" : options.hostName);
+    /* No SSH protocol is built here: sftp:// goes through the PuTTY SFTP
+     * client and scp:// through the SCP engine, neither of which is a URL. */
     if (options.portNumber > 0 &&
         !((proto == "ftp" && options.portNumber == 21) ||
           (proto == "ftps" && options.portNumber == 990) ||
           (proto == "http" && options.portNumber == 80) ||
-          (proto == "https" && options.portNumber == 443) ||
-          ((proto == "scp" || proto == "sftp") && options.portNumber == 22)))
+          (proto == "https" && options.portNumber == 443)))
     {
         url += ":" + std::to_string(options.portNumber);
     }
@@ -448,42 +446,13 @@ void BuildCommonCurlArgs(const SessionOptions & options, std::vector<std::string
     {
         args.push_back("--insecure");
     }
-    else if (!options.hostKey.empty() && IsSshCurlProtocol(ToLower(options.protocol)))
-    {
-        /* curl pins SSH host keys by fingerprint: SHA-256 hex or base64
-         * for --hostpubsha256, MD5 hex for --hostpubmd5. A value that is
-         * neither keeps the OpenSSH known_hosts file as the check, which
-         * is what the system ssh/sftp clients use too. */
-        std::string sha256;
-        if (HostKeySha256(options.hostKey, sha256))
-        {
-            args.push_back("--hostpubsha256");
-            args.push_back(sha256);
-        }
-        else
-        {
-            std::string md5;
-            for (size_t i = 0; i < options.hostKey.size(); i++)
-            {
-                if (options.hostKey[i] != ':')
-                {
-                    md5 += options.hostKey[i];
-                }
-            }
-            bool hex = md5.size() == 32;
-            for (size_t i = 0; hex && i < md5.size(); i++)
-            {
-                char c = md5[i];
-                hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
-                    (c >= 'A' && c <= 'F');
-            }
-            if (hex)
-            {
-                args.push_back("--hostpubmd5");
-                args.push_back(md5);
-            }
-        }
-    }
+    /*
+     * An SSH host key is not pinned here: no SSH protocol goes through curl
+     * any more. sftp:// and scp:// are both served by this client's own SSH
+     * engine, which checks the pin itself (Session::HostKeyMatches) and
+     * refuses a key that does not match, so there is no curl option whose
+     * support would depend on which SSH library the installed curl linked.
+     */
 
     /* 'FtpPasvMode=0' means an active data connection: curl sends PORT
      * instead of PASV/EPSV, reusing the control connection's address. */
@@ -693,11 +662,6 @@ std::string OctalPermissions(int permissions)
  * length, modification date) are the real metadata. Transfers stay on the
  * generic GET/PUT paths - those are what HTTP already means.
  */
-
-bool IsDavProtocol(const std::string & proto)
-{
-    return proto == "dav" || proto == "webdav";
-}
 
 const char * const kDavPropfindBody =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>"
@@ -1341,36 +1305,27 @@ int RunCurlCaptureWithProgress(const std::vector<std::string> & args,
         progressCtx, upload);
 }
 
-bool CurlSupportsHostPubSha256()
-{
-    /* Asked once: the curl binary does not change under a running process. */
-    static const bool supported = [] {
-        std::vector<std::string> args;
-        args.push_back(CurlExecutable());
-        args.push_back("--version");
-        std::string outStr;
-        std::string errStr;
-        if (RunCurl(args, outStr, errStr) != 0)
-        {
-            return false;
-        }
-        return outStr.find("libssh2/") != std::string::npos;
-    }();
-    return supported;
-}
-
 bool IsCurlEndpointUnreachable(int code)
 {
     return IsEndpointUnreachable(code);
 }
 
+bool ProtocolClient::IsDavProtocol(const std::string & proto)
+{
+    /* Lowercased here so a caller can hand over the protocol as the user
+     * spelled it; the backend's own call sites already lowercase. */
+    const std::string p = ToLower(proto);
+    return p == "dav" || p == "webdav";
+}
+
 bool ProtocolClient::IsMultiProtocol(const std::string & proto)
 {
-    /* The protocols this curl backend serves. SFTP is not one of them:
-     * it goes through the native PuTTY engine. */
+    /* The protocols this curl backend serves. Neither SSH protocol is one
+     * of them: sftp:// goes through the native PuTTY SFTP engine and
+     * scp:// through the native SCP engine (ScpClient.cpp). */
     std::string p = ToLower(proto);
     return p == "ftp" || p == "ftps" || p == "http" || p == "https" ||
-        p == "dav" || p == "webdav" || p == "s3" || p == "scp";
+        p == "dav" || p == "webdav" || p == "s3";
 }
 
 void ProtocolClient::FreeNames(LscpNames * names)
@@ -1428,6 +1383,24 @@ bool FillNames(const std::vector<ListingEntry> & entries, LscpNames * names,
 bool ProtocolClient::List(const SessionOptions & options, const std::string & remotePath,
     LscpNames * names, std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        /* SCP is a shell: the listing is an 'ls -l -a' whose lines the
+         * parser shared with the curl and FTP backends reads. */
+        if (names == NULL)
+        {
+            error = "Null output pointer.";
+            return false;
+        }
+        names->count = 0;
+        names->names = NULL;
+        std::vector<ListingEntry> nativeEntries;
+        if (!ScpClient::List(options, remotePath, nativeEntries, error))
+        {
+            return false;
+        }
+        return FillNames(nativeEntries, names, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::List(options, remotePath, names, error);
@@ -1486,6 +1459,13 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
     {
         return false;
     }
+    if (ScpClient::Handles(options))
+    {
+        /* The native engine really connects, so this is a connection test
+         * in the same sense as the SFTP one: a host key that does not
+         * match, a refused login or a dead port fails the open here. */
+        return ScpClient::CheckEndpoint(options, remotePath, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::CheckEndpoint(options, remotePath, error);
@@ -1512,7 +1492,7 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
                 {
                     error += " This curl does not support the '" +
                         options.protocol + "' protocol; install a curl built "
-                        "with the support it needs (libssh2 for scp://).";
+                        "with the support it needs.";
                 }
                 if (error.empty())
                 {
@@ -1592,8 +1572,7 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
          * through the native PuTTY transport.)
          */
         error += " This curl does not support the '" + options.protocol +
-            "' protocol; install a curl built with the support it needs "
-            "(libssh2 for scp://).";
+            "' protocol; install a curl built with the support it needs.";
     }
     if (error.empty())
     {
@@ -1605,6 +1584,10 @@ bool ProtocolClient::CheckEndpoint(const SessionOptions & options,
 int ProtocolClient::Stat(const SessionOptions & options, const std::string & remotePath,
     LscpAttrs * attrs, std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::Stat(options, remotePath, attrs, error);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Stat(options, remotePath, attrs, error);
@@ -1781,6 +1764,12 @@ int ProtocolClient::Get(const SessionOptions & options, const std::string & remo
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
     void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::Get(options, remotePath, localPath, resumeOffset,
+            preserveTime, size, progress, progressCtx, error,
+            speedKBytesPerSecond);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Get(options, remotePath, localPath, resumeOffset,
@@ -1847,6 +1836,12 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
     bool preserveTime, unsigned long long * size, LscpProgressFn progress,
     void * progressCtx, std::string & error, unsigned speedKBytesPerSecond)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::Put(options, localPath, remotePath, permissions,
+            resumeOffset, preserveTime, size, progress, progressCtx, error,
+            speedKBytesPerSecond);
+    }
     if (ToLower(options.protocol) == "s3")
     {
         return S3Client::Put(options, localPath, remotePath, permissions,
@@ -1924,6 +1919,10 @@ int ProtocolClient::Put(const SessionOptions & options, const std::string & loca
 int ProtocolClient::Remove(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::Remove(options, remotePath, error);
+    }
     if (FtpClient::Handles(options))
     {
         return FtpClient::Remove(options, remotePath, error);
@@ -1944,12 +1943,6 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
     {
         args.push_back("-Q");
         args.push_back("DELE " + remotePath);
-        args.push_back(BuildUrl(options, "/"));
-    }
-    else if (IsSshCurlProtocol(proto))
-    {
-        args.push_back("-Q");
-        args.push_back("rm " + remotePath);
         args.push_back(BuildUrl(options, "/"));
     }
     else
@@ -1973,6 +1966,10 @@ int ProtocolClient::Remove(const SessionOptions & options, const std::string & r
 int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::RemoveDir(options, remotePath, error);
+    }
     if (FtpClient::Handles(options))
     {
         return FtpClient::RemoveDir(options, remotePath, error);
@@ -2011,12 +2008,6 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
         args.push_back("RMD " + remotePath);
         args.push_back(BuildUrl(options, "/"));
     }
-    else if (IsSshCurlProtocol(proto))
-    {
-        args.push_back("-Q");
-        args.push_back("rmdir " + remotePath);
-        args.push_back(BuildUrl(options, "/"));
-    }
     else
     {
         args.push_back("-X");
@@ -2038,6 +2029,10 @@ int ProtocolClient::RemoveDir(const SessionOptions & options, const std::string 
 int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & remotePath,
     std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::MakeDir(options, remotePath, error);
+    }
     if (FtpClient::Handles(options))
     {
         return FtpClient::MakeDir(options, remotePath, error);
@@ -2109,12 +2104,6 @@ int ProtocolClient::MakeDir(const SessionOptions & options, const std::string & 
         args.push_back("MKD " + remotePath);
         args.push_back(BuildUrl(options, "/"));
     }
-    else if (IsSshCurlProtocol(proto))
-    {
-        args.push_back("-Q");
-        args.push_back("mkdir " + remotePath);
-        args.push_back(BuildUrl(options, "/"));
-    }
     else
     {
         args.push_back("-X");
@@ -2139,6 +2128,12 @@ int ProtocolClient::Copy(const SessionOptions & options,
 {
     error.clear();
     const std::string proto = ToLower(options.protocol);
+    if (ScpClient::Handles(options))
+    {
+        /* The server's own 'cp' copies without the bytes coming here; a
+         * server without one answers 127 and the caller streams instead. */
+        return ScpClient::Copy(options, fromPath, toPath, error);
+    }
     if (proto == "s3")
     {
         return S3Client::Copy(options, fromPath, toPath, error);
@@ -2193,6 +2188,10 @@ int ProtocolClient::Copy(const SessionOptions & options,
 int ProtocolClient::Move(const SessionOptions & options, const std::string & fromPath,
     const std::string & toPath, std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::Move(options, fromPath, toPath, error);
+    }
     if (FtpClient::Handles(options))
     {
         return FtpClient::Move(options, fromPath, toPath, error);
@@ -2252,12 +2251,6 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
         args.push_back("RNTO " + toPath);
         args.push_back(BuildUrl(options, "/"));
     }
-    else if (IsSshCurlProtocol(proto))
-    {
-        args.push_back("-Q");
-        args.push_back("rename " + fromPath + " " + toPath);
-        args.push_back(BuildUrl(options, "/"));
-    }
     else
     {
         args.push_back("-X");
@@ -2281,6 +2274,10 @@ int ProtocolClient::Move(const SessionOptions & options, const std::string & fro
 int ProtocolClient::SetPermissions(const SessionOptions & options,
     const std::string & remotePath, int permissions, std::string & error)
 {
+    if (ScpClient::Handles(options))
+    {
+        return ScpClient::SetPermissions(options, remotePath, permissions, error);
+    }
     if (FtpClient::Handles(options))
     {
         return FtpClient::SetPermissions(options, remotePath, permissions, error);
@@ -2588,9 +2585,10 @@ bool ProtocolClient::DavGetProperty(const SessionOptions & options,
  * Returns false with etag empty when the path does not exist. */
 bool ProtocolClient::DavGetEtag(const SessionOptions & options,
     const std::string & remotePath, std::string & etag,
-    std::string & error)
+    bool & pathMissing, std::string & error)
 {
     etag.clear();
+    pathMissing = false;
     if (!IsDavProtocol(options.protocol))
     {
         error = "ETags are a WebDAV feature; this session is " +
@@ -2612,7 +2610,9 @@ bool ProtocolClient::DavGetEtag(const SessionOptions & options,
     }
     if (result.httpCode == 404)
     {
-        /* The resource does not exist; etag stays empty. */
+        /* The resource does not exist; etag stays empty and the caller
+         * says so rather than reporting a server that sent nothing. */
+        pathMissing = true;
         return true;
     }
     if (result.httpCode != 207 && result.httpCode != 200)
@@ -2643,11 +2643,6 @@ std::string DavPropertyUpdateBody(const std::string & name,
         "=\"" + kDavPropertyNamespace + "\"><D:set><D:prop><" +
         kDavPropertyPrefix + ":" + name + ">" + DavXmlEscape(value) + "</" +
         kDavPropertyPrefix + ":" + name + "></D:prop></D:set></D:propertyupdate>";
-}
-
-bool IsSshCurlProtocol(const std::string & proto)
-{
-    return proto == "sftp" || proto == "scp";
 }
 
 } // namespace linuxscp

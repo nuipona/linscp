@@ -350,6 +350,12 @@ std::string NoEtag(const std::string & path)
     return Translate("No ETag (path does not exist).");
 }
 
+std::string NoEtagReported(const std::string & path)
+{
+    return Translate("The server reported no ETag for '{path}'.",
+        {{"path", path}});
+}
+
 std::string EtagNotAvailable(const std::string & protocol)
 {
     return Translate("(ETag not available for {protocol} protocol.)", {{"protocol", protocol}});

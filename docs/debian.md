@@ -17,7 +17,7 @@ platform it builds, ships and tests on; see the top-level
 | a C and C++17 compiler (`gcc`/`g++` or `clang`) | the core is C, the front end is C++ |
 | POSIX threads | the core's critical sections (`-pthread`) |
 | `dpkg-dev` | only to build the `.deb` package |
-| `curl` (run time) | every protocol except SFTP: `scp://`, `ftp://`, `ftps://`, `dav://`, `s3://` |
+| `curl` (run time) | the protocols with no engine of their own: `ftp://`, `ftps://`, `dav://`/`webdav://`, `s3://` |
 | `python3` (run time) | the graphical client, `linuxscp-gui` |
 
 On Debian:
@@ -40,9 +40,12 @@ the resulting binary go to `source/linux/build/`, which is git-ignored.
 
 `LiveCurlTest.py` is optional live evidence rather than a product dependency:
 install `pyftpdlib` and `pyOpenSSL` in the test Python environment for the FTP/
-FTPS cases; the SCP case additionally uses a local `sshd` and `ssh-keygen` when
-available. Missing test dependencies are reported as skips on the suite's
-evidence line.
+FTPS cases. `LiveScpTest.py` needs no Python package but does need `sshd`,
+`ssh-keygen` and the server's own `scp` binary (`openssh-server`): it starts a
+throwaway daemon per test, on a port the kernel picks, with keys generated for
+the run. Missing test dependencies are reported as skips on the suite's
+evidence line, and a suite that ran nothing says so on that line rather than
+passing quietly.
 
 CMake builds the same client from the same sources and registers every test
 suite with CTest, which is what CI runs second:
@@ -173,8 +176,8 @@ and `put` support WinSCP switches:
 * `-append`: add to the end of the destination instead of replacing it. Needs
   the native SFTP transport and cannot be combined with `-resume`.
 * `-speed=<KB/s>`: limit the transfer to that many kilobytes per second, `0`
-  for no limit. The native engine is paced between chunks, the curl paths get
-  `--limit-rate`.
+  for no limit. Both native engines are paced between chunks, the curl paths
+  get `--limit-rate`.
 * `-resumesupport=on|off|<KB>`: whether an interrupted file is continued at an
   offset, and from what size on; `option resume on|off|automatic` is the
   default. `automatic` is upstream's setting: binary files of at least 100 KB
@@ -182,8 +185,10 @@ and `put` support WinSCP switches:
   `.filepart`, `on` stages every eligible transfer and `off` none.
 * `-transfer=binary|ascii|automatic` and `-filemask=<masks>`: as for
   `synchronize`.
-An unknown switch, a value that is not one of the words above, or `-append`
-over curl is reported before anything is transferred, never ignored.
+An unknown switch, a value that is not one of the words above, or a switch the
+transport cannot honour - `-append` over curl, `-resume` over `scp://`, where
+the rcp protocol has no offset to continue from - is reported before anything
+is transferred, never ignored.
 When the destination is omitted, `get` defaults to the local working directory
 and `put` defaults to the remote working directory.
 
@@ -239,7 +244,7 @@ taken from `LINUXSCP_TERMINAL` (`<program> [args]`, for example `xterm -e` or
 `foot`), otherwise the first of `x-terminal-emulator`, `gnome-terminal`,
 `konsole`, `xfce4-terminal`, `mate-terminal`, `lxterminal`, `terminator`,
 `alacritty`, `kitty`, `foot`, `wezterm`, `urxvt` and `xterm` that is
-installed. It is available for SSH (`sftp://`) sessions only. The same
+installed. It is available for SSH (`sftp://` and `scp://`) sessions only. The same
 feature is on the "Terminal" button of the graphical client, which asks the
 backend to run this command.
 
@@ -257,12 +262,21 @@ The same text is installed as the `linuxscp(1)` manual page; its source is
 open sftp://user:password@example.com:2222/var/data -hostkey=<fingerprint>
 ```
 
-In addition to `sftp://`, `ssh://` and `scp://`, LinSCP supports standard
-URL schemes `ftp://`, `ftps://`, `dav://` / `webdav://`, and `s3://`,
-as well as bare `host[:port]`. These curl-backed paths do not establish full
-protocol support: WebDAV has PROPFIND listings and basic COPY/MOVE operations;
-S3 has SigV4, object CRUD, server-side copy, and multipart uploads for large
-files. Both remain partial implementations. WebDAV URL paths are percent-encoded
+Both SSH protocols are served by the client itself: `sftp://` through the
+bundled PuTTY SFTP client, and `scp://` (and its `ssh://` spelling) through
+`source/linux/ScpClient.cpp`, which drives the server's login shell for
+listings, `stat`, `cd` and the directory and metadata commands, and the
+server's own `scp` for the bytes of a transfer over the rcp protocol. Each SCP
+command is one SSH connection of its own, every path is quoted for a POSIX
+shell, a refusal arrives as the sentence the server printed, and a transfer
+cannot be continued because the protocol has no offset.
+
+In addition, LinSCP supports the standard URL schemes `ftp://`, `ftps://`,
+`dav://` / `webdav://`, and `s3://`, as well as bare `host[:port]`. These
+curl-backed paths do not establish full protocol support: WebDAV has PROPFIND
+listings and basic COPY/MOVE operations; S3 has SigV4, object CRUD, server-side
+copy, and multipart uploads for large files. Both remain partial
+implementations. WebDAV URL paths are percent-encoded
 so spaces, percent signs and URL query/fragment characters in filenames are
 transferred literally. See the [parity audit](upstream-parity.md) and
 [capability matrix](linux-feature-inventory.md).
@@ -442,8 +456,10 @@ layer's events to standard output as they happen.
 LinSCP does not provide full WinSCP parity. See
 [the pinned upstream audit](upstream-parity.md) for remaining work. Current
 implementation includes:
-* Native POSIX SFTP and curl-backed transfers (protocol/build dependent;
-  WebDAV and S3 are incomplete).
+* Native POSIX SFTP and native SCP over the bundled PuTTY core - for SCP the
+  remote-shell directory engine and the rcp transfer protocol upstream drives -
+  plus curl-backed transfers for FTP/FTPS, WebDAV and S3 (protocol/build
+  dependent; WebDAV and S3 are incomplete).
 * Binary, ASCII and automatic transfers with WinSCP file masks (`-filemask=`,
   `option include`/`exclude`, `option failonnomatch`).
 * Resuming interrupted file transfers (`-resume`, `-resumesupport=`,
@@ -467,8 +483,9 @@ implementation includes:
   ProxyMethod=SOCKS4|SOCKS5|HTTP|Telnet|Cmd ProxyHost= ProxyPort=
   ProxyUsername= ProxyPassword= ProxyTelnetCommand= ProxyLocalCommand=
   ProxyDNS= ProxyLocalhost= ProxyExcludeList=`), stored with a site by
-  `savesession -rawsettings` and encrypted like a session password; SOCKS and
-  HTTP proxies reach the curl-backed protocols as `--proxy`, and a proxy or
-  setting this build cannot use is refused rather than ignored.
+  `savesession -rawsettings` and encrypted like a session password; both SSH
+  protocols go through the PuTTY core's own proxy support, SOCKS and HTTP
+  proxies reach the curl-backed protocols as `--proxy`, and a proxy or setting
+  this build cannot use is refused rather than ignored.
 * Dual-pane graphical Commander desktop interface (`linuxscp-gui`).
 * Native Debian `.deb` packaging with standard menu launchers and icons.

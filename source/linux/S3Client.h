@@ -77,35 +77,6 @@ public:
     static int Move(const SessionOptions & options,
         const std::string & fromPath, const std::string & toPath,
         std::string & error);
-
-    /*
-     * Versioned-object operations: S3 bucket versioning exposes version IDs,
-     * version listing, version-specific retrieval and delete markers.
-     * These are distinct from the current-object CRUD above: listing
-     * versions includes delete markers and prior versions; getting a
-     * specific version uses the ?versionId= query; deleting by version ID
-     * is a permanent removal, while deleting without one creates a delete
-     * marker.
-     */
-
-    /* List object versions with pagination (ListObjectVersions).
-     * Each name carries its versionId. */
-    static bool ListVersions(const SessionOptions & options,
-        const std::string & remotePath, LscpNames * names,
-        std::string & error);
-
-    /* Download a specific version of an object by version ID. */
-    static int GetVersion(const SessionOptions & options,
-        const std::string & remotePath, const std::string & versionId,
-        const std::string & localPath, bool preserveTime,
-        unsigned long long * size, LscpProgressFn progress,
-        void * progressCtx, std::string & error);
-
-    /* Delete a specific version permanently (requires version ID).
-     * Without a versionId, creates a delete marker instead. */
-    static int DeleteVersion(const SessionOptions & options,
-        const std::string & remotePath, const std::string & versionId,
-        std::string & error);
 };
 
 } // namespace linuxscp

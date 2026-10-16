@@ -28,6 +28,21 @@ inline bool UseNativeSftp(const std::string & protocol)
 }
 
 /*
+ * True when 'protocol' is served by the native SCP engine (ScpClient.cpp)
+ * rather than by curl: the server's shell answers the directory and
+ * metadata operations and the rcp protocol carries the bytes, both over an
+ * SSH connection this client makes itself. 'ssh' is the other spelling of
+ * the same protocol, kept because a curl URL calls it that. An SSH session
+ * of either spelling is therefore never handed to curl, which is what used
+ * to make a SHA-256 host key pin depend on how the installed curl was
+ * built.
+ */
+inline bool UseNativeScp(const std::string & protocol)
+{
+    return protocol == "scp" || protocol == "ssh";
+}
+
+/*
  * The proxy of a session, under the names upstream's session settings use
  * ('None;SOCKS4;SOCKS5;HTTP;Telnet;Cmd'). 'Local' is upstream's pmCmd: a
  * command run locally whose standard input and output carry the connection.
@@ -271,6 +286,12 @@ public:
     void SetDavLock(const std::string & remotePath, const std::string & token);
     void ClearDavLock(const std::string & remotePath);
     const std::string & DavLockFor(const std::string & remotePath) const;
+    /* The WebDAV ETag preconditions the 'etag' command records. They live
+     * with the session for the same reason the lock tokens do: an If-Match
+     * value belongs to the connection that read the resource. */
+    void SetDavEtag(const std::string & remotePath, const std::string & ifMatch,
+        const std::string & ifNoneMatch);
+    void ClearDavEtag(const std::string & remotePath);
     /* struct Seat *, for get_log_seat(). */
     void * SeatHandle() const { return mSeat; }
     const std::string & ConnectionError() const { return mConnectionError; }
@@ -302,6 +323,32 @@ public:
      * current session, if any, stays connected while this runs. */
     static bool ExecRemote(const SessionOptions & options,
         const std::string & command, std::string & error);
+
+    /*
+     * The one-shot exec channel the native SCP engine drives: the command
+     * runs in a session of its own (never the one the SFTP transport glue
+     * addresses), its standard output is buffered for ReceiveData and
+     * TakeAllReceived instead of being printed, its standard input is
+     * SendData, and CaptureStderr keeps its error output for the caller's
+     * message. Both halves of the SCP protocol live on this channel: a
+     * shell command ('ls -l', 'mkdir', 'chmod') answers a directory or
+     * metadata operation, and 'scp -f'/'scp -t' carries the bytes of a
+     * transfer with the engine speaking the rcp wire protocol itself.
+     */
+    bool OpenExec(const SessionOptions & options, const std::string & command,
+        std::string & error);
+    /* Everything the channel has produced so far, drained from the buffer. */
+    bool TakeAllReceived(std::string & out);
+    /* Tells the server no more input is coming (an SSH channel EOF), so a
+     * command that reads its standard input - 'scp -t' does - can finish
+     * and report an exit status instead of waiting. */
+    bool SendEof();
+    /* Runs the event loop until the remote command ends. */
+    void PumpUntilExit();
+    void CaptureStderr(bool capture) { mCaptureStderr = capture; }
+    bool CapturesStderr() const { return mCaptureStderr; }
+    void AppendCapturedStderr(const void * data, size_t len);
+    const std::string & CapturedStderr() const { return mCapturedStderr; }
 
     /* Called by the seat. */
     void NotifyRemoteExit();
@@ -337,6 +384,8 @@ private:
     size_t mReceivedEnd;
     OutputSinkFn mOutputSink;
     void * mOutputSinkCtx;
+    bool mCaptureStderr;
+    std::string mCapturedStderr;
 
     /* Shared connection setup of Open() and ExecRemote(): connects and
      * starts 'program' (subsystem or exec), optionally becoming the

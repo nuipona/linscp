@@ -14,6 +14,11 @@ build-*/
 
 __pycache__/
 
+# The Python virtualenv a contributor installs the live-suite dependencies in
+# (paramiko, pyftpdlib, pyOpenSSL, botocore); see docs/debian.md
+.venv/
+venv/
+
 # npm artifacts of source/gui/tests (installed on demand by CI and locally)
 source/gui/tests/node_modules/
 source/gui/tests/package.json

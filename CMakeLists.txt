@@ -49,13 +49,13 @@ set(FRONTEND_SOURCES
   ${FRONTEND}/SessionStore.cpp
   ${FRONTEND}/ListingParse.cpp
   ${FRONTEND}/FtpClient.cpp
+  ${FRONTEND}/ScpClient.cpp
   ${FRONTEND}/TransferPresets.cpp
   ${FRONTEND}/SyncPlanner.cpp
   ${FRONTEND}/Editor.cpp
   ${FRONTEND}/ProtocolClient.cpp
   ${FRONTEND}/S3SigV4.cpp
   ${FRONTEND}/S3Client.cpp
-  ${FRONTEND}/ScpShell.cpp
   ${FRONTEND}/SshTunnel.cpp
   ${FRONTEND}/Script.cpp
   ${FRONTEND}/ScriptParams.cpp
@@ -95,6 +95,11 @@ if(Python3_Interpreter_FOUND)
     $<TARGET_FILE:linuxscp>)
   # Starts the throwaway S3 endpoint in tests/ over TLS; standard-library
   # only, with botocore an optional extra one test skips without.
+  # The SCP engine talks to a throwaway sshd it starts itself; the suite
+  # skips loudly where sshd, ssh-keygen or the server's scp binary is absent.
+  add_test(NAME live-scp-tests COMMAND ${Python3_EXECUTABLE}
+    ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveScpTest.py
+    $<TARGET_FILE:linuxscp>)
   add_test(NAME live-s3-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveS3Test.py
     $<TARGET_FILE:linuxscp>)
@@ -103,8 +108,8 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME live-dav-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveDavTest.py
     $<TARGET_FILE:linuxscp>)
-  # FTP/FTPS use optional pyftpdlib and SCP uses the local sshd when present;
-  # the suite reports those dependency limits as skips.
+  # FTP/FTPS use optional pyftpdlib and pyOpenSSL; the suite reports those
+  # dependency limits as skips.
   add_test(NAME live-curl-tests COMMAND ${Python3_EXECUTABLE}
     ${CMAKE_CURRENT_SOURCE_DIR}/${FRONTEND}/tests/LiveCurlTest.py
     $<TARGET_FILE:linuxscp>)
