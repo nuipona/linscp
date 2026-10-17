@@ -626,7 +626,7 @@ bool FetchListing(const SessionOptions & options, const std::string & remotePath
         ListingEntry entry;
         entry.longname = line;
 
-        if (!ParseUnixListingLine(line, entry))
+        if (!ParseAnyListingLine(line, entry))
         {
             entry.name = line;
             if (!entry.name.empty() && entry.name.back() == '/')

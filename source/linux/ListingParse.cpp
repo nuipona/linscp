@@ -197,13 +197,10 @@ bool ParseDosDate(const std::string & dateStr, const std::string & timeStr,
         return false;
     }
     int month = 0, day = 0, year = 0;
-    char sep1 = 0, sep2 = 0;
     /* Parse month-day-year */
     const char * ds = dateStr.c_str();
     month = (ds[0] - '0') * 10 + (ds[1] - '0');
-    sep1 = ds[2];
     day = (ds[3] - '0') * 10 + (ds[4] - '0');
-    sep2 = ds[5];
     if (dateStr.size() == 10)
     {
         year = (ds[6] - '0') * 1000 + (ds[7] - '0') * 100 +
