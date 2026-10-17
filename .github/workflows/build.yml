@@ -9,7 +9,7 @@ jobs:
     name: Linux (Makefile, supported build)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Build and run unit tests
         run: |
           set -o pipefail
@@ -164,7 +164,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/gui-client-test"
           cd "$RUNNER_TEMP/gui-client-test"
-          npm install jsdom@26 --no-audit --no-fund
+          npm install jsdom@29 --no-audit --no-fund
           node "$GITHUB_WORKSPACE/source/gui/tests/ClientTest.js" \
             "$GITHUB_WORKSPACE/source/gui/web/index.html"
           node "$GITHUB_WORKSPACE/source/gui/tests/LocalizationTest.js"
@@ -219,7 +219,7 @@ jobs:
     name: Linux (CMake)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Configure and build
         run: |
           # ctest runs the same live suites as the Makefile
@@ -279,7 +279,7 @@ jobs:
     name: Debian package (.deb)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Build the binary package
         run: |
           set -o pipefail

@@ -19,6 +19,7 @@ The client `linscp` is built from the platform-neutral PuTTY core
 | `dpkg-dev` | only to build the `.deb` package |
 | `curl` (run time) | FTP transfers, FTPS, `dav://`/`webdav://` and `s3://` |
 | `python3` (run time) | the graphical client, `linscp-gui` |
+| Node 20.19 or newer with `npm` (tests only) | the browser test suites boot the page in `jsdom` |
 
 ```sh
 sudo apt install build-essential dpkg-dev curl python3
@@ -61,8 +62,8 @@ make -C source/linux BUILD=build-asan OPT=-O0 \
 
 ```sh
 dpkg-buildpackage -b -us -uc
-# -> ../linscp_1.0-2_amd64.deb
-sudo dpkg -i ../linscp_1.0-2_amd64.deb
+# -> ../linscp_1.0-3_amd64.deb
+sudo dpkg -i ../linscp_1.0-3_amd64.deb
 ```
 
 `debian/rules` does not use debhelper. The build is one plain Makefile, so the

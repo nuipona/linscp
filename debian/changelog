@@ -1,3 +1,15 @@
+linscp (1.0-3) unstable; urgency=medium
+
+  * Test dependencies: the browser test suites use jsdom 29, the newest
+    release that runs on the Node 20.19 in Debian 13, and CI checks out
+    with actions/checkout v7.0.1.
+  * The supported distribution is now Debian 13 (trixie) or newer: Debian
+    12 ships Node 18, which no current jsdom release supports.
+  * Declare conformance with Debian Policy 4.7.4; no package changes were
+    required by the versions between 4.6.2 and 4.7.4.
+
+ -- nuipona <nuipona@users.noreply.github.com>  Fri, 16 Oct 2026 00:00:00 +0000
+
 linscp (1.0-2) unstable; urgency=medium
 
   * Linux only: the Windows port is gone. The console client, the GUI and
