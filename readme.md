@@ -49,8 +49,10 @@ free port. A suite that skips a case says so on its evidence line.
 
 The GUI suites (`source/gui/tests/`) run separately, as in CI. The two browser
 suites (`ClientTest.js`, `LocalizationTest.js`) are the ones that need Node and
-`jsdom`; CMake registers them only when both are installed. For the
-Debian package:
+`jsdom`; CMake registers them only when both are installed. `SecurityTest.py`
+drives the server itself, with no browser: tokens, sign-in, the absence of CORS
+permission, response headers, command quoting, and the confinement of every
+local path to its pane. For the Debian package:
 
 ```sh
 dpkg-buildpackage -b -us -uc         # -> ../linscp_1.0-3_<arch>.deb
@@ -96,13 +98,15 @@ it can be pinned.
 - **Stored sessions:** shared between the CLI and the GUI, with folders,
   encrypted passwords in `sessions.key`, and proxy settings through
   `-rawsettings`.
-- **Graphical client:** dual-pane layout, transfer queue, remote search,
-  local file editing and drag-and-drop uploads from a file manager.
+- **Graphical client:** dual-pane layout, transfer queue with pause, retry and
+  priority reordering, transfer settings, sync preview, `keepuptodate`, remote
+  search, checksums, properties, saved command templates, multi-user sign-in,
+  local file editing and drag-and-drop in both panes.
 - **Localization:** English and Spanish, for the CLI and the GUI.
 
-Not implemented: the .NET assembly API, GSSAPI, SSH tunnel configuration, and
-multi-user access to the GUI. `automation/LinSCP.psm1`, a PowerShell 7 wrapper
-over the CLI, is installed by the Makefile but no automated test runs it.
+Not implemented: the .NET assembly API, GSSAPI, and SSH tunnel configuration.
+`automation/LinSCP.psm1`, a PowerShell 7 wrapper over the CLI, is installed by
+the Makefile but no automated test runs it.
 
 ## Documentation
 

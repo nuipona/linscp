@@ -8809,6 +8809,10 @@ int Script::RunInteractive(const std::string & initialUrl)
         {
             ExecuteLine(expanded);
         }
+        /* A Ctrl-C that stopped 'keepuptodate' leaves the flag set, and the
+         * engines that watch it would then abort the next command before it
+         * transferred anything. The prompt is a fresh start. */
+        ClearInterrupt();
     }
     return mErrors != 0 ? 1 : 0;
 }
@@ -8851,6 +8855,9 @@ int Script::RunServer()
         {
             break;
         }
+        /* As at the interactive prompt: an interrupt that stopped the command
+         * just reported must not stop the next one before it starts. */
+        ClearInterrupt();
     }
     return mErrors != 0 ? 1 : 0;
 }

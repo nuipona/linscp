@@ -8,6 +8,7 @@
 #include "ListingParse.h"
 
 #include <cstring>
+#include <ctime>
 #include <sstream>
 
 #include "Platform.h"
@@ -67,16 +68,60 @@ bool LooksLikePermissions(const std::string & text)
 
 unsigned long PermissionsFromString(const std::string & text)
 {
-    unsigned long mode = text[0] == 'd' ? 0040000UL : 0100000UL;
+    /* The type column decides the file type. Reading only 'd' lost every
+     * other kind: a symbolic link arrived as a regular file, so a caller
+     * that transfers or compares by type acted on the wrong thing. These
+     * are the same type bits PermissionsString() prints. */
+    unsigned long mode;
+    switch (text.empty() ? '-' : text[0])
+    {
+    case 'd': mode = 0040000UL; break;
+    case 'l': mode = 0120000UL; break;
+    case 'c': mode = 0020000UL; break;
+    case 'b': mode = 0060000UL; break;
+    case 'p': mode = 0010000UL; break;
+    case 's': mode = 0140000UL; break;
+    default:  mode = 0100000UL; break;
+    }
     static const unsigned long bits[9] = {
         0400, 0200, 0100, 0040, 0020, 0010, 0004, 0002, 0001
     };
     for (size_t i = 0; i < 9 && i + 1 < text.size(); i++)
     {
         char c = text[i + 1];
-        if (c == 'r' || c == 'w' || c == 'x' || c == 's' || c == 't')
+        if (c == 'r' || c == 'w' || c == 'x' || c == 's' || c == 'S' ||
+            c == 't' || c == 'T')
         {
             mode |= bits[i];
+        }
+    }
+    /* 's'/'S' and 't'/'T' carry the special bits as well as the execute
+     * bit the letter stands in for. An upper-case letter means the
+     * execute bit is absent, so only the special bit is left. Dropping
+     * these made PermissionsString(PermissionsFromString(x)) != x for
+     * every setuid, setgid and sticky entry a server can list. */
+    if (text.size() > 3 && (text[3] == 's' || text[3] == 'S'))
+    {
+        mode |= 04000UL;
+        if (text[3] == 'S')
+        {
+            mode &= ~0100UL;
+        }
+    }
+    if (text.size() > 6 && (text[6] == 's' || text[6] == 'S'))
+    {
+        mode |= 02000UL;
+        if (text[6] == 'S')
+        {
+            mode &= ~0010UL;
+        }
+    }
+    if (text.size() > 9 && (text[9] == 't' || text[9] == 'T'))
+    {
+        mode |= 01000UL;
+        if (text[9] == 'T')
+        {
+            mode &= ~0001UL;
         }
     }
     return mode;
@@ -93,6 +138,24 @@ bool ParseUnixListingLine(const std::string & line, ListingEntry & entry)
     entry.typeKnown = true;
     entry.isDir = fields[0][0] == 'd';
     entry.permissions = PermissionsFromString(fields[0]);
+    /* A symbolic link line carries its target after the name. The target
+     * says where the link points, not what the link is called, so it is
+     * not part of the name a later 'get' or 'rm' would be given. Only a
+     * link line has a target to remove: a regular file may be called
+     * 'odd -> name.txt' and keeps its whole name. Doing this here rather
+     * than in one backend keeps the three producers of an entry in
+     * agreement, which is what this file exists for. */
+    if ((entry.permissions & 0170000UL) == 0120000UL)
+    {
+        const std::string::size_type arrow = entry.name.find(" -> ");
+        if (arrow != std::string::npos)
+        {
+            entry.name = entry.name.substr(0, arrow);
+        }
+        /* The size column of a link line is the length of the target
+         * path, which is neither the entry's size nor a directory's. */
+        entry.isDir = false;
+    }
     try
     {
         entry.size = std::stoull(fields[4]);
@@ -339,6 +402,65 @@ bool ParseDosListingLine(const std::string & line, ListingEntry & entry)
  * the first semicolon.  A .DIR extension marks a directory.
  */
 
+namespace {
+
+/* VMS servers disagree about the case of a listing: Multinet writes
+ * upper-case months and protections, UCX and several emulators write
+ * lower case. Detection and parsing have to agree on that, or a
+ * lower-case listing is not recognized as one and the caller is left
+ * with a directory it cannot read. */
+std::string UpperAscii(const std::string & text)
+{
+    std::string upper = text;
+    for (size_t i = 0; i < upper.size(); i++)
+    {
+        if (upper[i] >= 'a' && upper[i] <= 'z')
+        {
+            upper[i] = static_cast<char>(upper[i] - 'a' + 'A');
+        }
+    }
+    return upper;
+}
+
+int VmsMonthIndex(const std::string & text)
+{
+    static const char * months[] = {
+        "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
+        "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
+    };
+    const std::string upper = UpperAscii(text);
+    for (int i = 0; i < 12; i++)
+    {
+        if (upper == months[i])
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+/* All digits, and at least one of them: what a numeric column has to be
+ * before it is turned into a number. Reading a '[' or a '-' as a digit
+ * produced a negative hour that mktime() silently folded into another
+ * day, so an entry claimed a time it never had. */
+bool AllDigits(const std::string & text)
+{
+    if (text.empty())
+    {
+        return false;
+    }
+    for (size_t i = 0; i < text.size(); i++)
+    {
+        if (text[i] < '0' || text[i] > '9')
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 bool LooksLikeVmsListing(const std::string & line)
 {
     /* A VMS listing has a semicolon-delimited version, a numeric size,
@@ -362,22 +484,9 @@ bool LooksLikeVmsListing(const std::string & line)
     {
         return false;
     }
-    /* The month abbreviation after the dash */
-    static const char * months[] = {
-        "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-        "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
-    };
-    bool foundMonth = false;
-    std::string after = line.substr(dash + 1, 3);
-    for (int i = 0; i < 12; i++)
-    {
-        if (after == months[i])
-        {
-            foundMonth = true;
-            break;
-        }
-    }
-    if (!foundMonth)
+    /* The month abbreviation after the dash, in whichever case the
+     * server wrote it. */
+    if (VmsMonthIndex(line.substr(dash + 1, 3)) < 0)
     {
         return false;
     }
@@ -390,26 +499,71 @@ namespace {
 
 int VmsMonthFromText(const std::string & text)
 {
-    static const char * months[] = {
-        "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-        "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"
-    };
-    std::string upper = text;
-    for (size_t i = 0; i < upper.size(); i++)
+    return VmsMonthIndex(text);
+}
+
+/*
+ * A VMS protection field is four comma-separated classes of letters
+ * inside parentheses, as in '(RWED,RWED,RE,RE)': system, owner, group
+ * and world. Read, write and execute map onto the POSIX bits of the
+ * matching class; delete has no bit of its own, so it is shown through
+ * the write bit, which is the closest thing a chmod-only client has.
+ * A listing whose field is absent or is not four classes keeps the
+ * conservative default rather than a mode guessed from part of it.
+ */
+unsigned long VmsPermissionsFromProtection(const std::string & line, bool isDir)
+{
+    const unsigned long fallback = isDir ? 0040755UL : 0100644UL;
+    const size_t open = line.rfind('(');
+    const size_t close = line.rfind(')');
+    if (open == std::string::npos || close == std::string::npos ||
+        close < open + 2)
     {
-        if (upper[i] >= 'a' && upper[i] <= 'z')
+        return fallback;
+    }
+    const std::string field = UpperAscii(line.substr(open + 1, close - open - 1));
+    std::vector<std::string> classes;
+    size_t start = 0;
+    while (true)
+    {
+        const size_t comma = field.find(',', start);
+        classes.push_back(field.substr(start,
+            comma == std::string::npos ? std::string::npos : comma - start));
+        if (comma == std::string::npos)
         {
-            upper[i] = static_cast<char>(upper[i] - 'a' + 'A');
+            break;
+        }
+        start = comma + 1;
+    }
+    if (classes.size() != 4)
+    {
+        return fallback;
+    }
+    /* An empty class is a real answer, not a malformed one: it grants
+     * that class nothing, as in '(RWED,RWED,,)' where only the system and
+     * the owner may reach the file. Anything but the protection letters
+     * is not a field this can read. */
+    for (size_t i = 0; i < classes.size(); i++)
+    {
+        if (classes[i].find_first_not_of("RWED-") != std::string::npos)
+        {
+            return fallback;
         }
     }
-    for (int i = 0; i < 12; i++)
+    /* classes[1..3] are owner, group and world. */
+    static const unsigned int shift[3] = { 6, 3, 0 };
+    unsigned long mode = isDir ? 0040000UL : 0100000UL;
+    for (size_t i = 0; i < 3; i++)
     {
-        if (upper == months[i])
-        {
-            return i;
-        }
+        const std::string & letters = classes[i + 1];
+        unsigned long bits = 0;
+        if (letters.find('R') != std::string::npos) { bits |= 04UL; }
+        if (letters.find('W') != std::string::npos ||
+            letters.find('D') != std::string::npos) { bits |= 02UL; }
+        if (letters.find('E') != std::string::npos) { bits |= 01UL; }
+        mode |= bits << shift[i];
     }
-    return -1;
+    return mode;
 }
 
 } // namespace
@@ -480,7 +634,10 @@ bool ParseVmsListingLine(const std::string & line, ListingEntry & entry)
     {
         return false;
     }
-    day = 0;
+    if (!AllDigits(datePart.substr(0, d1)))
+    {
+        return false;
+    }
     for (size_t i = 0; i < d1; i++)
     {
         day = day * 10 + (datePart[i] - '0');
@@ -495,36 +652,61 @@ bool ParseVmsListingLine(const std::string & line, ListingEntry & entry)
     {
         return false;
     }
-    year = 0;
-    for (size_t i = d2 + 1; i < datePart.size(); i++)
+    const std::string yearText = datePart.substr(d2 + 1);
+    if (!AllDigits(yearText) || yearText.size() != 4)
     {
-        if (datePart[i] >= '0' && datePart[i] <= '9')
-        {
-            year = year * 10 + (datePart[i] - '0');
-        }
+        return false;
+    }
+    for (size_t i = 0; i < yearText.size(); i++)
+    {
+        year = year * 10 + (yearText[i] - '0');
+    }
+    if (day < 1 || day > 31 || year < 1970 || year > 2106)
+    {
+        return false;
     }
 
-    /* Parse time HH:MM:SS */
+    /* Parse time HH:MM:SS. A listing that stops at the date, or whose
+     * next column is not a time, has no time to report: saying otherwise
+     * hands mktime() letters as digits and it folds them into some other
+     * moment, which then drives a 'synchronize -criteria=time' decision. */
     pos = dateEnd + 1;
     int hour = 0, minute = 0;
-    if (pos + 7 < line.size())
+    bool haveTime = false;
+    if (pos + 5 <= line.size() && line[pos + 2] == ':' &&
+        AllDigits(line.substr(pos, 2)) && AllDigits(line.substr(pos + 3, 2)))
     {
         hour = (line[pos] - '0') * 10 + (line[pos + 1] - '0');
         minute = (line[pos + 3] - '0') * 10 + (line[pos + 4] - '0');
+        if (pos + 8 <= line.size() && line[pos + 5] == ':' &&
+            AllDigits(line.substr(pos + 6, 2)))
+        {
+            /* Seconds are read for validation; a mode has no place for
+             * them and mktime() truncates to the minute anyway. */
+            haveTime = hour <= 23 && minute <= 59 &&
+                (line[pos + 6] - '0') * 10 + (line[pos + 7] - '0') <= 59;
+        }
+        else
+        {
+            haveTime = hour <= 23 && minute <= 59;
+        }
     }
 
     unsigned long mtime = 0;
-    struct tm tm = {};
-    tm.tm_year = year - 1900;
-    tm.tm_mon = month;
-    tm.tm_mday = day;
-    tm.tm_hour = hour;
-    tm.tm_min = minute;
-    tm.tm_isdst = -1;
-    time_t t = mktime(&tm);
-    if (t != static_cast<time_t>(-1))
+    if (haveTime)
     {
-        mtime = static_cast<unsigned long>(t);
+        struct tm tm = {};
+        tm.tm_year = year - 1900;
+        tm.tm_mon = month;
+        tm.tm_mday = day;
+        tm.tm_hour = hour;
+        tm.tm_min = minute;
+        tm.tm_isdst = -1;
+        time_t t = mktime(&tm);
+        if (t != static_cast<time_t>(-1))
+        {
+            mtime = static_cast<unsigned long>(t);
+        }
     }
 
     /* Determine whether it is a directory (.DIR extension). */
@@ -557,7 +739,10 @@ bool ParseVmsListingLine(const std::string & line, ListingEntry & entry)
     entry.name = name;
     entry.typeKnown = true;
     entry.isDir = isDir;
-    entry.permissions = isDir ? 0040755UL : 0100644UL;
+    /* The protection field is the permissions this listing actually
+     * carries; a fixed 0644 threw away the one column of the line that
+     * says who may do what. */
+    entry.permissions = VmsPermissionsFromProtection(line, isDir);
     entry.size = isDir ? 0 : size;
     entry.timeKnown = mtime != 0;
     entry.mtime = mtime;

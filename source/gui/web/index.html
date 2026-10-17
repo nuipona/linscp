@@ -60,11 +60,19 @@
                 onclick="toggleMenu('commandsMenu', this)">Commands</button>
         <div class="menu-dropdown" id="commandsMenu" role="menu">
           <button role="menuitem" onclick="menuAction(openSynchronize)">Synchronize directories</button>
+          <button role="menuitem" onclick="menuAction(openKeepUpToDate)">Keep remote directory up to date</button>
           <button role="menuitem" onclick="menuAction(openSearch)">Find files</button>
           <button role="menuitem" onclick="menuAction(openTerminal)">Open remote terminal</button>
           <button role="menuitem" onclick="menuAction(() => switchTab('cli'))">LinSCP command console</button>
           <div class="menu-separator"></div>
+          <button role="menuitem" onclick="menuAction(openProperties)">Properties</button>
+          <button role="menuitem" onclick="menuAction(openChecksum)">Calculate checksum</button>
+          <button role="menuitem" onclick="menuAction(promptRemoteCopy)">Copy on the server</button>
+          <button role="menuitem" onclick="menuAction(promptRemoteLink)">Create symbolic link</button>
+          <button role="menuitem" onclick="menuAction(promptCopyId)">Upload public key to the server</button>
+          <div class="menu-separator"></div>
           <button role="menuitem" onclick="menuAction(toggleSyncBrowse)">Toggle synchronized browsing</button>
+          <button role="menuitem" onclick="menuAction(toggleExplorerMode)">Toggle single-panel view</button>
           <div class="menu-separator"></div>
           <button role="menuitem" onclick="menuAction(openCustomCommands)">Custom commands...</button>
         </div>
@@ -84,8 +92,11 @@
                 onclick="toggleMenu('optionsMenu', this)">Options</button>
         <div class="menu-dropdown" id="optionsMenu" role="menu">
           <button id="themeToggleMenuItem" role="menuitem" onclick="menuAction(toggleTheme)">Switch to light theme</button>
+          <button role="menuitem" onclick="menuAction(openTransferSettings)">Transfer settings...</button>
           <button role="menuitem" onclick="menuAction(() => switchTab('queue'))">Transfer queue</button>
           <button role="menuitem" onclick="menuAction(() => switchTab('log'))">Command log</button>
+          <div class="menu-separator" id="accountSeparator" style="display:none;"></div>
+          <button role="menuitem" id="accountMenuItem" onclick="menuAction(openLogin)" style="display:none;">Sign in</button>
         </div>
       </div>
 
@@ -534,25 +545,193 @@
     </div>
   </div>
 
-  <!-- Help -->
+  <!-- Custom commands -->
   <div class="modal-overlay" id="customCommandsModal" role="dialog" aria-modal="true" aria-label="Custom commands">
-    <div class="modal-box" style="width:580px;">
+    <div class="modal-box" style="width:600px;">
       <div class="modal-header">
         <span>Custom commands</span>
         <span style="cursor:pointer;" onclick="closeModal('customCommandsModal')">&#10005;</span>
       </div>
       <div class="modal-body">
-        <p class="hint">Saved command templates. Use <code>{file}</code> as a placeholder for the selected file name. Commands run through the active session.</p>
-        <div id="customCommandsList" style="max-height:200px; overflow-y:auto; margin-bottom:12px; border:1px solid var(--border, #ccc); border-radius:4px; padding:4px;"></div>
+        <p class="hint">Saved command templates. Write {file} where the
+        selected name belongs; it is quoted the way the LinSCP command line
+        reads quotes, never handed to a shell. A remote command runs in the
+        session the panel is connected to, a local one through the same
+        engine. Every run asks first and shows the command it will use.</p>
+        <div id="customCommandsList" class="custom-command-list" role="listbox"
+             aria-label="Saved commands"></div>
         <div class="form-row"><label>Name:</label><input type="text" id="customCmdName" class="input-field" placeholder="e.g. Checksum SHA-256"></div>
         <div class="form-row"><label>Command:</label><input type="text" id="customCmdCommand" class="input-field" placeholder="e.g. checksum sha-256 {file}"></div>
-        <div id="customCommandsResult" style="margin-top:8px; font-size:11px; white-space:pre-wrap; max-height:120px; overflow-y:auto;"></div>
+        <div class="form-row"><label>Applies to:</label>
+          <select id="customCmdScope" class="select-field">
+            <option value="remote">The remote side (the open session)</option>
+            <option value="local">The local side</option>
+          </select>
+        </div>
+        <div id="customCommandsResult" class="custom-command-results"
+             role="status" aria-live="polite"></div>
       </div>
       <div class="modal-footer">
         <button class="btn" onclick="saveCustomCommand()">Save</button>
         <button class="btn" onclick="deleteCustomCommand()">Delete</button>
-        <button class="btn primary" onclick="runCustomCommand()">Run on selection</button>
+        <button class="btn btn-primary" onclick="runCustomCommand()">Run on selection</button>
         <button class="btn" onclick="closeModal('customCommandsModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sign-in (only used when the server was started with --accounts-file) -->
+  <div class="modal-overlay login-modal" id="loginModal" role="dialog" aria-modal="true" aria-label="Sign in">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span>Sign in</span>
+      </div>
+      <div class="modal-body">
+        <p class="hint">This server was started with user accounts, so every
+        request needs a signed-in session before it is answered.</p>
+        <div class="form-row"><label>User name:</label>
+          <input type="text" id="loginUser" class="input-field" autocomplete="username"></div>
+        <div class="form-row"><label>Password:</label>
+          <input type="password" id="loginPassword" class="input-field" autocomplete="current-password"></div>
+        <div class="login-error" id="loginError" role="alert"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="submitLogin()">Sign in</button>
+        <button class="btn" id="loginLogoutBtn" onclick="submitLogout()" style="display:none;">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Transfer settings -->
+  <div class="modal-overlay" id="transferModal" role="dialog" aria-modal="true" aria-label="Transfer settings">
+    <div class="modal-box" style="width:560px;">
+      <div class="modal-header">
+        <span>Transfer settings</span>
+        <span style="cursor:pointer;" onclick="closeModal('transferModal')">&#10005;</span>
+      </div>
+      <div class="modal-body" onchange="if (event.target.id === 'transferResumeSupport') resumeSupportChanged()">
+        <p class="hint">These apply to the transfers you start next: F5, F6,
+        the toolbar buttons and a drop from the desktop. They are the same
+        switches the console client's get and put commands take.</p>
+        <div class="form-row"><label>Transfer mode:</label>
+          <select id="transferMode" class="select-field">
+            <option value="">Automatic (decide per file)</option>
+            <option value="binary">Binary</option>
+            <option value="ascii">ASCII (convert line ends)</option>
+            <option value="automatic">Automatic by mask</option>
+          </select>
+        </div>
+        <div class="form-row"><label>File mask:</label>
+          <input type="text" id="transferMask" class="input-field" placeholder="e.g. *.txt|*.bak (empty = every file)"></div>
+        <div class="form-row"><label>Speed limit:</label>
+          <div class="speed-row">
+            <input type="number" id="transferSpeed" class="input-field" min="0" step="1" placeholder="0">
+            <span class="hint">KiB/s, 0 = unlimited</span>
+          </div>
+        </div>
+        <div class="form-row"><label>Resume support:</label>
+          <select id="transferResumeSupport" class="select-field">
+            <option value="">Decide per file (the default)</option>
+            <option value="on">Always resume</option>
+            <option value="off">Never resume</option>
+            <option value="bytes">Resume above a size</option>
+          </select>
+        </div>
+        <div class="form-row" id="transferResumeBytesRow" style="display:none;">
+          <label>Resume above:</label>
+          <div class="speed-row">
+            <input type="number" id="transferResumeBytes" class="input-field" min="0" step="1" placeholder="0">
+            <span class="hint">bytes</span>
+          </div>
+        </div>
+        <div class="form-row"><label></label>
+          <label class="checkbox-row" style="flex:1;">
+            <input type="checkbox" id="transferResume" checked> Resume a part-transferred file
+          </label>
+        </div>
+        <div class="form-row"><label></label>
+          <label class="checkbox-row" style="flex:1;">
+            <input type="checkbox" id="transferPreserveTime" checked> Preserve the modification time
+          </label>
+        </div>
+        <div class="form-row"><label></label>
+          <label class="checkbox-row" style="flex:1;">
+            <input type="checkbox" id="transferNewerOnly"> Skip files the destination already has newer
+          </label>
+        </div>
+        <div class="form-row"><label></label>
+          <label class="checkbox-row" style="flex:1;">
+            <input type="checkbox" id="transferAppend"> Append to the destination instead of replacing it (SFTP)
+          </label>
+        </div>
+        <div class="form-row"><label></label>
+          <label class="checkbox-row" style="flex:1;">
+            <input type="checkbox" id="transferNoPermissions"> Do not set permissions on the destination
+          </label>
+        </div>
+        <div class="form-row"><label></label>
+          <label class="checkbox-row" style="flex:1;">
+            <input type="checkbox" id="transferPriority"> Put new transfers at the front of the queue
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="resetTransferSettings()">Restore defaults</button>
+        <button class="btn btn-primary" onclick="saveTransferSettings()">Save</button>
+        <button class="btn" onclick="closeModal('transferModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Properties -->
+  <div class="modal-overlay" id="propertiesModal" role="dialog" aria-modal="true" aria-label="Properties">
+    <div class="modal-box" style="width:560px;">
+      <div class="modal-header">
+        <span id="propertiesTitle">Properties</span>
+        <span style="cursor:pointer;" onclick="closeModal('propertiesModal')">&#10005;</span>
+      </div>
+      <div class="modal-body">
+        <div id="propertiesBody" style="max-height:340px; overflow-y:auto;"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeModal('propertiesModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keep the remote directory up to date -->
+  <div class="modal-overlay" id="keepUpToDateModal" role="dialog" aria-modal="true" aria-label="Keep remote directory up to date">
+    <div class="modal-box" style="width:520px;">
+      <div class="modal-header">
+        <span>Keep remote directory up to date</span>
+        <span style="cursor:pointer;" onclick="closeModal('keepUpToDateModal')">&#10005;</span>
+      </div>
+      <div class="modal-body">
+        <p class="hint">Watches the local directory and copies what changes in
+        it to the remote one. It runs as a queue item until you cancel it, so
+        it can be stopped without disturbing the session.</p>
+        <div class="form-row"><label>Local directory:</label>
+          <input type="text" id="kudLocal" class="input-field"></div>
+        <div class="form-row"><label>Remote directory:</label>
+          <input type="text" id="kudRemote" class="input-field"></div>
+        <div class="form-row"><label>File mask:</label>
+          <input type="text" id="kudMask" class="input-field" placeholder="e.g. *.txt|*.bak (empty = every file)"></div>
+        <div class="form-row"><label>Also rescan every:</label>
+          <div class="speed-row">
+            <input type="number" id="kudInterval" class="input-field" min="0" max="86400" step="1" placeholder="0">
+            <span class="hint">seconds, 0 = watch only</span>
+          </div>
+        </div>
+        <div class="form-row"><label>Stop after:</label>
+          <div class="speed-row">
+            <input type="number" id="kudCount" class="input-field" min="0" step="1" placeholder="0">
+            <span class="hint">passes, 0 = until cancelled</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="startKeepUpToDate()">Start</button>
+        <button class="btn" onclick="closeModal('keepUpToDateModal')">Close</button>
       </div>
     </div>
   </div>
@@ -596,7 +775,7 @@
   // Catalog data is generated by tools/compile_translations.py. No remote
   // resources are required, including when running from an installed prefix.
   /* BEGIN GENERATED GUI CATALOGS */
-  const GUI_CATALOGS = {"en": {"\n(exit code {code})": "\n(exit code {code})", " (search limit reached; refine the mask)": " (search limit reached; refine the mask)", " \u00b7 read-only": " \u00b7 read-only", "(F3) opens a selected text file read-only.": "(F3) opens a selected text file read-only.", "(F4)\n        opens a local or remote text file in the built-in editor. Saving checks that\n        the file has not changed since it was opened; remote edits upload to the server.": "(F4)\n        opens a local or remote text file in the built-in editor. Saving checks that\n        the file has not changed since it was opened; remote edits upload to the server.", "(none: this page was not served by the backend)": "(none: this page was not served by the backend)", "(not stored by default)": "(not stored by default)", ", selected: {count}": ", selected: {count}", ", {count} selected": ", {count} selected", ", {scanned} file(s) scanned, {skipped} skipped ({size})": ", {scanned} file(s) scanned, {skipped} skipped ({size})", "A dropped item has an invalid relative path.": "A dropped item has an invalid relative path.", "A host name is required.": "A host name is required.", "A preview does not change anything; it only compares the two trees.": "A preview does not change anything; it only compares the two trees.", "A site name is required.": "A site name is required.", "A terminal window was opened on the desktop running the backend.": "A terminal window was opened on the desktop running the backend.", "Accepted the host key {key} without checking it (session \"{name}\").": "Accepted the host key {key} without checking it (session \"{name}\").", "Always copy": "Always copy", "Amazon S3": "Amazon S3", "Backspace": "Backspace", "Both (the side that changed wins)": "Both (the side that changed wins)", "Both directions compare the record of the previous synchronization, so the contents of the files are not read.": "Both directions compare the record of the previous synchronization, so the contents of the files are not read.", "Cancel": "Cancel", "Cancel all": "Cancel all", "Cancelled": "Cancelled", "Cancelling": "Cancelling", "Cannot change the permissions.": "Cannot change the permissions.", "Cannot connect with that host key.": "Cannot connect with that host key.", "Cannot connect.": "Cannot connect.", "Cannot create the folder.": "Cannot create the folder.", "Cannot delete.": "Cannot delete.", "Cannot open a terminal.": "Cannot open a terminal.", "Cannot open the file.": "Cannot open the file.", "Cannot queue the move.": "Cannot queue the move.", "Cannot queue the synchronization.": "Cannot queue the synchronization.", "Cannot queue the transfer.": "Cannot queue the transfer.", "Cannot reach the LinSCP backend: {error}": "Cannot reach the LinSCP backend: {error}", "Cannot read the directory.": "Cannot read the directory.", "Cannot read the dropped folder: {error}": "Cannot read the dropped folder: {error}", "Cannot read the plan.": "Cannot read the plan.", "Cannot reconnect.": "Cannot reconnect.", "Cannot remove the folder.": "Cannot remove the folder.", "Cannot remove the site.": "Cannot remove the site.", "Cannot rename.": "Cannot rename.", "Cannot save the session.": "Cannot save the session.", "Cannot save the site.": "Cannot save the site.", "Cannot save.": "Cannot save.", "Cannot search.": "Cannot search.", "Cannot store the language preference.": "Cannot store the language preference.", "Case sensitive": "Case sensitive", "Change rights": "Change rights", "Changed": "Changed", "Clear finished": "Clear finished", "Clear selection": "Clear selection", "Close": "Close", "Close current session": "Close current session", "Close the active session": "Close the active session", "Close without saving your changes?": "Close without saving your changes?", "Command Log": "Command Log", "Command log": "Command log", "Command:": "Command:", "Commander function keys": "Commander function keys", "Commander keys:": "Commander keys:", "Commander \u00b7 secure file transfer": "Commander \u00b7 secure file transfer", "Commands": "Commands", "Compare by:": "Compare by:", "Compare this fingerprint with the one the server's own console shows, or\n          with the one your server administrator published. Connecting without\n          checking it lets anybody who can redirect your connection read and change\n          your files.": "Compare this fingerprint with the one the server's own console shows, or\n          with the one your server administrator published. Connecting without\n          checking it lets anybody who can redirect your connection read and change\n          your files.", "Completed": "Completed", "Connect": "Connect", "Connected to {host}.": "Connected to {host}.", "Connected, with that host key pinned.": "Connected, with that host key pinned.", "Connected: {name}": "Connected: {name}", "Connection abandoned.": "Connection abandoned.", "Contains text:": "Contains text:", "Contents (checksum)": "Contents (checksum)", "Copy": "Copy", "Copy the selection to the opposite panel (F5)": "Copy the selection to the opposite panel (F5)", "Copy to other panel": "Copy to other panel", "Copy to the opposite panel": "Copy to the opposite panel", "Create a directory": "Create a directory", "Create directory": "Create directory", "Cross-panel move currently supports files only. Copy folders, then remove them separately.": "Cross-panel move currently supports files only. Copy folders, then remove them separately.", "Ctrl+A": "Ctrl+A", "Ctrl+L": "Ctrl+L", "Ctrl+N": "Ctrl+N", "Ctrl+R": "Ctrl+R", "Custom commands": "Custom commands", "Custom commands...": "Custom commands...", "Delete": "Delete", "Delete folder \"{folder}\"": "Delete folder \"{folder}\"", "Delete obsolete files as part of this synchronization?": "Delete obsolete files as part of this synchronization?", "Delete obsolete files on the target side": "Delete obsolete files on the target side", "Delete selected item": "Delete selected item", "Delete {count} item(s) from the {side} side?\n\n{names}": "Delete {count} item(s) from the {side} side?\n\n{names}", "Destination": "Destination", "Direction:": "Direction:", "Discard your changes and reload?": "Discard your changes and reload?", "Disconnected": "Disconnected", "Disconnected: {name}": "Disconnected: {name}", "Dismiss": "Dismiss", "Done": "Done", "Download": "Download", "Dropping onto the same pane does nothing - drop it on the {side} side to transfer.": "Dropping onto the same pane does nothing - drop it on the {side} side to transfer.", "Edit": "Edit", "Edit selected remote file": "Edit selected remote file", "Edit the selected file (F4)": "Edit the selected file (F4)", "Editing": "Editing", "Editing {path}": "Editing {path}", "Editor": "Editor", "English": "English", "Enter text to search for.": "Enter text to search for.", "Espa\u00f1ol": "Espa\u00f1ol", "Every request the page makes carries it, and the backend refuses an": "Every request the page makes carries it, and the backend refuses an", "F1": "F1", "F1 help, F2 rename, F3 view, F4 edit, F5 copy to the\n        other panel, F6 move files to the other panel, F7 new directory, F8 delete,\n        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a\n        directory; Backspace goes up one level. Move is available for files; folders\n        can still be copied, but are not moved by the cross-panel move action.": "F1 help, F2 rename, F3 view, F4 edit, F5 copy to the\n        other panel, F6 move files to the other panel, F7 new directory, F8 delete,\n        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a\n        directory; Backspace goes up one level. Move is available for files; folders\n        can still be copied, but are not moved by the cross-panel move action.", "F10": "F10", "F2": "F2", "F3": "F3", "F4": "F4", "F5": "F5", "F6": "F6", "F7": "F7", "F8": "F8", "F9": "F9", "FTP": "FTP", "FTPS": "FTPS", "Failed": "Failed", "File mask:": "File mask:", "File operations": "File operations", "File size": "File size", "Filename mask:": "Filename mask:", "Files": "Files", "Find": "Find", "Find files": "Find files", "Find remote files": "Find remote files", "Folder \"{name}\" does not exist on the {side} side.": "Folder \"{name}\" does not exist on the {side} side.", "Go": "Go", "Go to directory": "Go to directory", "Help": "Help", "Host key verification": "Host key verification", "Host key:": "Host key:", "Host name:": "Host name:", "Include subdirectories": "Include subdirectories", "Invert selection": "Invert selection", "Language": "Language", "Leave the host key empty and the first connection asks you to check\n            the server's fingerprint before it goes ahead; tick the box there to\n            remember it. '*' accepts any key for one connection, which is only\n            sensible when you are about to pin the key it reports.": "Leave the host key empty and the first connection asks you to check\n            the server's fingerprint before it goes ahead; tick the box there to\n            remember it. '*' accepts any key for one connection, which is only\n            sensible when you are about to pin the key it reports.", "LinSCP": "LinSCP", "LinSCP Commander": "LinSCP Commander", "LinSCP Commander \u2014 Secure File Transfer": "LinSCP Commander \u2014 Secure File Transfer", "LinSCP Help": "LinSCP Help", "LinSCP command console": "LinSCP command console", "LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').": "LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').", "Line {line}: {snippet}": "Line {line}: {snippet}", "Literal UTF-8 text": "Literal UTF-8 text", "Local": "Local", "Local dir:": "Local dir:", "Local directory path": "Local directory path", "Local files": "Local files", "Local panel": "Local panel", "Local wins": "Local wins", "Local wins (upload local over remote)": "Local wins (upload local over remote)", "Local \u2192 Remote (update the remote directory)": "Local \u2192 Remote (update the remote directory)", "Local:": "Local:", "Main menu": "Main menu", "Mark": "Mark", "Modification time": "Modification time", "Modified - not saved": "Modified - not saved", "Move": "Move", "Move (download)": "Move (download)", "Move (upload)": "Move (upload)", "Move files to the opposite panel (F6)": "Move files to the opposite panel (F6)", "Move to front of queue": "Move to front of queue", "Move to local": "Move to local", "Move to other panel": "Move to other panel", "Move to remote": "Move to remote", "Move to the opposite panel": "Move to the opposite panel", "Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.": "Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.", "Name": "Name", "Name of the new folder in {path}": "Name of the new folder in {path}", "Name:": "Name:", "New directory": "New directory", "New folder": "New folder", "New name:": "New name:", "New session": "New session", "New site": "New site", "Newer wins": "Newer wins", "Newer wins (compare modification times)": "Newer wins (compare modification times)", "No changes": "No changes", "No files": "No files", "No search yet.": "No search yet.", "No stored sessions yet.": "No stored sessions yet.", "No transfers in the queue.": "No transfers in the queue.", "Not connected": "Not connected", "Not connected.": "Not connected.", "Nothing to do: the two directories are in sync.": "Nothing to do: the two directories are in sync.", "On conflict:": "On conflict:", "Open a terminal on the remote server": "Open a terminal on the remote server", "Open another session": "Open another session", "Open remote terminal": "Open remote terminal", "Open sessions": "Open sessions", "Open the session manager": "Open the session manager", "Options": "Options", "Parent Directory": "Parent Directory", "Parent directory": "Parent directory", "Password:": "Password:", "Pause": "Pause", "Permissions (octal), e.g. 644:": "Permissions (octal), e.g. 644:", "Port number:": "Port number:", "Preview": "Preview", "Preview or run a directory synchronization": "Preview or run a directory synchronization", "Private key:": "Private key:", "Progress": "Progress", "Properties": "Properties", "Properties / rights": "Properties / rights", "Protocol:": "Protocol:", "Queued": "Queued", "Queued {count} desktop item for upload.": "Queued {count} desktop item for upload.", "Queued {count} desktop item(s) for upload.": "Queued {count} desktop item(s) for upload.", "Queued {count} desktop items for upload.": "Queued {count} desktop items for upload.", "Quick actions": "Quick actions", "Reconnect": "Reconnect", "Reconnect the active session": "Reconnect the active session", "Reconnected.": "Reconnected.", "Refresh": "Refresh", "Refresh both file panels": "Refresh both file panels", "Reload": "Reload", "Remember this key": "Remember this key", "Remember this key, so the next connection is silent": "Remember this key, so the next connection is silent", "Remote": "Remote", "Remote dir:": "Remote dir:", "Remote directory path": "Remote directory path", "Remote editor": "Remote editor", "Remote files": "Remote files", "Remote panel": "Remote panel", "Remote wins": "Remote wins", "Remote wins (download remote over local)": "Remote wins (download remote over local)", "Remote \u2192 Local (update the local directory)": "Remote \u2192 Local (update the local directory)", "Remote:": "Remote:", "Remove all stored sessions in folder \"{folder}\"?": "Remove all stored sessions in folder \"{folder}\"?", "Remove the stored session \"{name}\"?": "Remove the stored session \"{name}\"?", "Rename": "Rename", "Rename selected item": "Rename selected item", "Resolve:": "Resolve:", "Resume": "Resume", "Retry": "Retry", "Rights": "Rights", "Run": "Run", "Run on selection": "Run on selection", "Running": "Running", "SCP": "SCP", "SFTP (SSH)": "SFTP (SSH)", "Save": "Save", "Save (Ctrl+S)": "Save (Ctrl+S)", "Save as": "Save as", "Save as (remote path):": "Save as (remote path):", "Save as is available for remote files only.": "Save as is available for remote files only.", "Save this host key in which stored session?": "Save this host key in which stored session?", "Saved \"{name}\".": "Saved \"{name}\".", "Saved as {path}": "Saved as {path}", "Saved command templates. Use": "Saved command templates. Use", "Saved {count} desktop item to local directory.": "Saved {count} desktop item to local directory.", "Saved {count} desktop item(s) to local directory.": "Saved {count} desktop item(s) to local directory.", "Saved {count} desktop items to local directory.": "Saved {count} desktop items to local directory.", "Saved {path}": "Saved {path}", "Saved.": "Saved.", "Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.": "Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.", "Search": "Search", "Search inside files": "Search inside files", "Search remote directory": "Search remote directory", "Search the remote directory": "Search the remote directory", "Select a file, not a directory.": "Select a file, not a directory.", "Select a site first.": "Select a site first.", "Select all": "Select all", "Select an item in the {side} panel first.": "Select an item in the {side} panel first.", "Select exactly one file in the {side} panel.": "Select exactly one file in the {side} panel.", "Select exactly one item to rename.": "Select exactly one item to rename.", "Select files in the {side} panel first.": "Select files in the {side} panel first.", "Select something in the {side} pane first.": "Select something in the {side} pane first.", "Select something to delete first.": "Select something to delete first.", "Servers/web1": "Servers/web1", "Sessions": "Sessions", "Site Manager": "Site Manager", "Site name:": "Site name:", "Size": "Size", "Skip conflicting files (safest)": "Skip conflicting files (safest)", "Source": "Source", "Start in:": "Start in:", "Status": "Status", "Store the password in the session file": "Store the password in the session file", "Stored sessions": "Stored sessions", "Switch to dark theme": "Switch to dark theme", "Switch to light theme": "Switch to light theme", "Sync browsing": "Sync browsing", "Synchronization queued.": "Synchronization queued.", "Synchronize": "Synchronize", "Synchronize (both)": "Synchronize (both)", "Synchronize (local)": "Synchronize (local)", "Synchronize (remote)": "Synchronize (remote)", "Synchronize directories": "Synchronize directories", "Synchronize the current directories": "Synchronize the current directories", "Synchronized browsing is off: each pane browses on its own": "Synchronized browsing is off: each pane browses on its own", "Synchronized browsing is on: the other pane follows your directory changes": "Synchronized browsing is on: the other pane follows your directory changes", "Synchronized browsing off.": "Synchronized browsing off.", "Synchronized browsing on.": "Synchronized browsing on.", "System default": "System default", "Tabs": "Tabs", "Terminal": "Terminal", "The LinSCP command console runs commands in the live session of the current tab.": "The LinSCP command console runs commands in the live session of the current tab.", "The backend refused this request.": "The backend refused this request.", "The drop has more than {count} entries.": "The drop has more than {count} entries.", "The folder is too deeply nested.": "The folder is too deeply nested.", "The host key is now pinned for \"{name}\".": "The host key is now pinned for \"{name}\".", "There is no active session.": "There is no active session.", "This browser did not expose the dropped files or folder contents.": "This browser did not expose the dropped files or folder contents.", "This plan deletes files. In \"both\" mode only files that the record of the previous synchronization proves were removed on the other side are deleted, and nothing is deleted while a conflict is unresolved.": "This plan deletes files. In \"both\" mode only files that the record of the previous synchronization proves were removed on the other side are deleted, and nothing is deleted while a conflict is unresolved.", "This run's API token:": "This run's API token:", "Time and contents": "Time and contents", "Time or size": "Time or size", "Toggle synchronized browsing": "Toggle synchronized browsing", "Top": "Top", "Transfer Queue (0)": "Transfer Queue (0)", "Transfer Queue ({count})": "Transfer Queue ({count})", "Transfer queue": "Transfer queue", "Transfers": "Transfers", "Type": "Type", "Unknown host key": "Unknown host key", "Upload": "Upload", "User name:": "User name:", "View": "View", "View or change permissions": "View or change permissions", "View selected file": "View selected file", "View the selected file (F3)": "View the selected file (F3)", "Viewing": "Viewing", "WebDAV": "WebDAV", "as a placeholder for the selected file name. Commands run through the active session.": "as a placeholder for the selected file name. Commands run through the active session.", "call without it, so only a page served by this run of the\n        server can drive it.": "call without it, so only a page served by this run of the\n        server can drive it.", "compares the two panes and shows the plan before it\n        changes anything. \"Both\" uses the record of the previous synchronization to\n        tell a change from a conflict.": "compares the two panes and shows the plan before it\n        changes anything. \"Both\" uses the record of the previous synchronization to\n        tell a change from a conflict.", "conflict": "conflict", "conflict resolved in favour of the local file": "conflict resolved in favour of the local file", "conflict resolved in favour of the newer local file": "conflict resolved in favour of the newer local file", "conflict resolved in favour of the newer remote file": "conflict resolved in favour of the newer remote file", "conflict resolved in favour of the remote file": "conflict resolved in favour of the remote file", "delete-local": "delete-local", "delete-remote": "delete-remote", "download": "download", "e.g. *.txt|*.bak (empty = every file)": "e.g. *.txt|*.bak (empty = every file)", "e.g. Checksum SHA-256": "e.g. Checksum SHA-256", "e.g. checksum sha-256 {file}": "e.g. checksum sha-256 {file}", "empty = check it on the first connection": "empty = check it on the first connection", "every file is copied when the criteria are 'none'": "every file is copied when the criteria are 'none'", "it changed locally since the last synchronization": "it changed locally since the last synchronization", "it changed on both sides since the last synchronization": "it changed on both sides since the last synchronization", "it changed remotely since the last synchronization": "it changed remotely since the last synchronization", "it is a directory on one side and a file on the other": "it is a directory on one side and a file on the other", "it is new on the local side": "it is new on the local side", "it is new on the remote side": "it is new on the remote side", "it only exists locally": "it only exists locally", "it only exists remotely": "it only exists remotely", "it was removed on the other side since the last synchronization": "it was removed on the other side since the last synchronization", "lscp\u003e": "lscp\u003e", "opens the site manager: stored sessions are shared with the\n        console client, and each tab keeps its own connection open.": "opens the site manager: stored sessions are shared with the\n        console client, and each tab keeps its own connection open.", "part of a directory that exists on one side only": "part of a directory that exists on one side only", "path/to/key": "path/to/key", "run in the queue at the bottom. They can be paused,\n        cancelled and retried; a cancelled transfer does not disturb the session.\n        You can also drop individual files from your desktop onto the remote pane to upload them.": "run in the queue at the bottom. They can be paused,\n        cancelled and retried; a cancelled transfer does not disturb the session.\n        You can also drop individual files from your desktop onto the remote pane to upload them.", "the contents differ (the local checksum is not the remote one)": "the contents differ (the local checksum is not the remote one)", "the contents differ (the remote checksum is not the local one)": "the contents differ (the remote checksum is not the local one)", "the local directory does not exist yet": "the local directory does not exist yet", "the local file differs": "the local file differs", "the local file is newer": "the local file is newer", "the local file is newer and there is no previous synchronization to compare with": "the local file is newer and there is no previous synchronization to compare with", "the other side does not have it": "the other side does not have it", "the remote directory does not exist yet": "the remote directory does not exist yet", "the remote file differs": "the remote file differs", "the remote file is newer": "the remote file is newer", "the remote file is newer and there is no previous synchronization to compare with": "the remote file is newer and there is no previous synchronization to compare with", "the sizes differ": "the sizes differ", "the timestamps are equal but the sizes differ, and there is no previous synchronization to compare with": "the timestamps are equal but the sizes differ, and there is no previous synchronization to compare with", "unchanged": "unchanged", "upload": "upload", "{count} desktop item refused.": "{count} desktop item refused.", "{count} desktop item(s) refused.": "{count} desktop item(s) refused.", "{count} desktop items refused.": "{count} desktop items refused.", "{count} item(s), {size}{selection}": "{count} item(s), {size}{selection}", "{count} item, {size}{selection}": "{count} item, {size}{selection}", "{count} items, {size}{selection}": "{count} items, {size}{selection}", "{count} match": "{count} match", "{count} match(es)": "{count} match(es)", "{count} matches": "{count} matches", "{count} move(s) queued. Source files are removed after successful transfer.": "{count} move(s) queued. Source files are removed after successful transfer.", "{count} transfer queued.": "{count} transfer queued.", "{count} transfer(s) queued.": "{count} transfer(s) queued.", "{count} transfers queued.": "{count} transfers queued.", "{host} (port {port}) offers this key, and it is not cached yet. Connect only if the fingerprint is the one you expect:": "{host} (port {port}) offers this key, and it is not cached yet. Connect only if the fingerprint is the one you expect:", "{mode} {path}": "{mode} {path}", "{reason} ({source} against {target} bytes)": "{reason} ({source} against {target} bytes)", "{size} bytes, modified {date}{readonly}": "{size} bytes, modified {date}{readonly}", "{upload} to upload, {download} to download, {local} local and {remote} remote deletions, {conflicts} conflict(s), {unchanged} unchanged.": "{upload} to upload, {download} to download, {local} local and {remote} remote deletions, {conflicts} conflict(s), {unchanged} unchanged."}, "es": {"\n(exit code {code})": "\n(c\u00f3digo de salida {code})", " (search limit reached; refine the mask)": " (se alcanz\u00f3 el l\u00edmite de b\u00fasqueda; refine la m\u00e1scara)", " \u00b7 read-only": " \u00b7 solo lectura", "(F3) opens a selected text file read-only.": "(F3) abre el archivo de texto seleccionado en modo de solo lectura.", "(F4)\n        opens a local or remote text file in the built-in editor. Saving checks that\n        the file has not changed since it was opened; remote edits upload to the server.": "(F4) abre un archivo de texto local o remoto en el editor integrado. Al guardar se comprueba que no haya cambiado desde que se abri\u00f3; las ediciones remotas se suben al servidor.", "(none: this page was not served by the backend)": "(ninguno: esta p\u00e1gina no fue servida por el servidor de LinSCP)", "(not stored by default)": "(no se guarda por defecto)", ", selected: {count}": ", seleccionados: {count}", ", {count} selected": ", seleccionados: {count}", ", {scanned} file(s) scanned, {skipped} skipped ({size})": ", {scanned} archivo(s) examinado(s), {skipped} omitido(s) ({size})", "A dropped item has an invalid relative path.": "Un elemento arrastrado tiene una ruta relativa no v\u00e1lida.", "A host name is required.": "Se requiere un nombre de servidor.", "A preview does not change anything; it only compares the two trees.": "La vista previa no modifica nada; solo compara los dos \u00e1rboles.", "A site name is required.": "Se requiere un nombre para el sitio.", "A terminal window was opened on the desktop running the backend.": "Se abri\u00f3 un terminal en el escritorio donde se ejecuta el servidor de LinSCP.", "Accepted the host key {key} without checking it (session \"{name}\").": "Se acept\u00f3 la clave del servidor {key} sin verificarla (sesi\u00f3n \u00ab{name}\u00bb).", "Always copy": "Copiar siempre", "Amazon S3": "Amazon S3", "Backspace": "Retroceso", "Both (the side that changed wins)": "Ambas (prevalece el lado modificado)", "Both directions compare the record of the previous synchronization, so the contents of the files are not read.": "La sincronizaci\u00f3n en ambas direcciones compara el registro anterior; no lee el contenido de los archivos.", "Cancel": "Cancelar", "Cancel all": "Cancelar todo", "Cancelled": "Cancelada", "Cancelling": "Cancelando", "Cannot change the permissions.": "No se pueden cambiar los permisos.", "Cannot connect with that host key.": "No se puede conectar con esa clave del servidor.", "Cannot connect.": "No se puede conectar.", "Cannot create the folder.": "No se puede crear la carpeta.", "Cannot delete.": "No se puede eliminar.", "Cannot open a terminal.": "No se puede abrir un terminal.", "Cannot open the file.": "No se puede abrir el archivo.", "Cannot queue the move.": "No se puede a\u00f1adir el movimiento a la cola.", "Cannot queue the synchronization.": "No se puede a\u00f1adir la sincronizaci\u00f3n a la cola.", "Cannot queue the transfer.": "No se puede a\u00f1adir la transferencia a la cola.", "Cannot reach the LinSCP backend: {error}": "No se puede contactar con el servidor de LinSCP: {error}", "Cannot read the directory.": "No se puede leer el directorio.", "Cannot read the dropped folder: {error}": "No se puede leer la carpeta arrastrada: {error}", "Cannot read the plan.": "No se puede leer el plan.", "Cannot reconnect.": "No se puede reconectar.", "Cannot remove the folder.": "No se puede eliminar la carpeta.", "Cannot remove the site.": "No se puede eliminar el sitio.", "Cannot rename.": "No se puede renombrar.", "Cannot save the session.": "No se puede guardar la sesi\u00f3n.", "Cannot save the site.": "No se puede guardar el sitio.", "Cannot save.": "No se puede guardar.", "Cannot search.": "No se puede buscar.", "Cannot store the language preference.": "No se puede guardar la preferencia de idioma.", "Case sensitive": "Distinguir may\u00fasculas", "Change rights": "Cambiar permisos", "Changed": "Modificado", "Clear finished": "Borrar terminadas", "Clear selection": "Borrar selecci\u00f3n", "Close": "Cerrar", "Close current session": "Cerrar sesi\u00f3n actual", "Close the active session": "Cerrar la sesi\u00f3n activa", "Close without saving your changes?": "\u00bfCerrar sin guardar los cambios?", "Command Log": "Registro de \u00f3rdenes", "Command log": "Registro de \u00f3rdenes", "Command:": "Comando:", "Commander function keys": "Teclas de funci\u00f3n de Commander", "Commander keys:": "Teclas de Commander:", "Commander \u00b7 secure file transfer": "Commander \u00b7 transferencia segura de archivos", "Commands": "\u00d3rdenes", "Compare by:": "Comparar por:", "Compare this fingerprint with the one the server's own console shows, or\n          with the one your server administrator published. Connecting without\n          checking it lets anybody who can redirect your connection read and change\n          your files.": "Compare esta huella con la que muestra la consola del propio servidor o con la publicada por su administrador. Conectarse sin verificarla permite que cualquiera que redirija su conexi\u00f3n lea y modifique sus archivos.", "Completed": "Completada", "Connect": "Conectar", "Connected to {host}.": "Conectado a {host}.", "Connected, with that host key pinned.": "Conectado con esa clave del servidor fijada.", "Connected: {name}": "Conectado: {name}", "Connection abandoned.": "Conexi\u00f3n cancelada.", "Contains text:": "Contiene el texto:", "Contents (checksum)": "Contenido (suma de comprobaci\u00f3n)", "Copy": "Copiar", "Copy the selection to the opposite panel (F5)": "Copiar la selecci\u00f3n al panel opuesto (F5)", "Copy to other panel": "Copiar al otro panel", "Copy to the opposite panel": "Copiar al panel opuesto", "Create a directory": "Crear un directorio", "Create directory": "Crear directorio", "Cross-panel move currently supports files only. Copy folders, then remove them separately.": "El movimiento entre paneles solo admite archivos. Copie las carpetas y luego elim\u00ednelas por separado.", "Ctrl+A": "Ctrl+A", "Ctrl+L": "Ctrl+L", "Ctrl+N": "Ctrl+N", "Ctrl+R": "Ctrl+R", "Custom commands": "Comandos personalizados", "Custom commands...": "Comandos personalizados...", "Delete": "Eliminar", "Delete folder \"{folder}\"": "Eliminar carpeta \u00ab{folder}\u00bb", "Delete obsolete files as part of this synchronization?": "\u00bfEliminar los archivos obsoletos durante esta sincronizaci\u00f3n?", "Delete obsolete files on the target side": "Eliminar archivos obsoletos en el destino", "Delete selected item": "Eliminar el elemento seleccionado", "Delete {count} item(s) from the {side} side?\n\n{names}": "\u00bfEliminar {count} elemento(s) del lado {side}?\n\n{names}", "Destination": "Destino", "Direction:": "Direcci\u00f3n:", "Discard your changes and reload?": "\u00bfDescartar los cambios y recargar?", "Disconnected": "Desconectado", "Disconnected: {name}": "Desconectado: {name}", "Dismiss": "Descartar", "Done": "Terminada", "Download": "Descarga", "Dropping onto the same pane does nothing - drop it on the {side} side to transfer.": "Arrastrar al mismo panel no hace nada: suelte en el lado {side} para transferir.", "Edit": "Editar", "Edit selected remote file": "Editar el archivo remoto seleccionado", "Edit the selected file (F4)": "Editar el archivo seleccionado (F4)", "Editing": "Editando", "Editing {path}": "Editando {path}", "Editor": "Editor", "English": "English", "Enter text to search for.": "Introduzca el texto que desea buscar.", "Espa\u00f1ol": "Espa\u00f1ol", "Every request the page makes carries it, and the backend refuses an": "Cada petici\u00f3n de la p\u00e1gina lo incluye y el servidor rechaza una llamada", "F1": "F1", "F1 help, F2 rename, F3 view, F4 edit, F5 copy to the\n        other panel, F6 move files to the other panel, F7 new directory, F8 delete,\n        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a\n        directory; Backspace goes up one level. Move is available for files; folders\n        can still be copied, but are not moved by the cross-panel move action.": "F1 ayuda, F2 renombrar, F3 ver, F4 editar, F5 copiar al otro panel, F6 mover archivos al otro panel, F7 nuevo directorio, F8 eliminar, F9 propiedades/permisos, F10 cerrar sesi\u00f3n. Ctrl+A selecciona todo; Intro abre un directorio; Retroceso sube un nivel. Solo se pueden mover archivos entre paneles; las carpetas pueden copiarse.", "F10": "F10", "F2": "F2", "F3": "F3", "F4": "F4", "F5": "F5", "F6": "F6", "F7": "F7", "F8": "F8", "F9": "F9", "FTP": "FTP", "FTPS": "FTPS", "Failed": "Fallida", "File mask:": "M\u00e1scara de archivos:", "File operations": "Operaciones de archivos", "File size": "Tama\u00f1o del archivo", "Filename mask:": "M\u00e1scara de nombres:", "Files": "Archivos", "Find": "Buscar", "Find files": "Buscar archivos", "Find remote files": "Buscar archivos remotos", "Folder \"{name}\" does not exist on the {side} side.": "La carpeta \u00ab{name}\u00bb no existe en el lado {side}.", "Go": "Ir", "Go to directory": "Ir al directorio", "Help": "Ayuda", "Host key verification": "Verificaci\u00f3n de la clave del servidor", "Host key:": "Clave del servidor:", "Host name:": "Servidor:", "Include subdirectories": "Incluir subdirectorios", "Invert selection": "Invertir selecci\u00f3n", "Language": "Idioma", "Leave the host key empty and the first connection asks you to check\n            the server's fingerprint before it goes ahead; tick the box there to\n            remember it. '*' accepts any key for one connection, which is only\n            sensible when you are about to pin the key it reports.": "Deje vac\u00eda la clave del servidor para verificar su huella en la primera conexi\u00f3n; marque la casilla de ese di\u00e1logo para recordarla. '*' acepta cualquier clave durante una conexi\u00f3n: \u00faselo solo si va a fijar inmediatamente la clave que se muestre.", "LinSCP": "LinSCP", "LinSCP Commander": "LinSCP Commander", "LinSCP Commander \u2014 Secure File Transfer": "LinSCP Commander \u2014 Transferencia segura de archivos", "LinSCP Help": "Ayuda de LinSCP", "LinSCP command console": "Consola de \u00f3rdenes de LinSCP", "LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').": "Consola de \u00f3rdenes de LinSCP. Las \u00f3rdenes se ejecutan en la sesi\u00f3n activa de esta pesta\u00f1a (pruebe 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').", "Line {line}: {snippet}": "L\u00ednea {line}: {snippet}", "Literal UTF-8 text": "Texto literal UTF-8", "Local": "Local", "Local dir:": "Directorio local:", "Local directory path": "Ruta del directorio local", "Local files": "Archivos locales", "Local panel": "Panel local", "Local wins": "Prevalece el local", "Local wins (upload local over remote)": "Prevalece el local (subir sobre el remoto)", "Local \u2192 Remote (update the remote directory)": "Local \u2192 Remoto (actualizar el directorio remoto)", "Local:": "Local:", "Main menu": "Men\u00fa principal", "Mark": "Marcar", "Modification time": "Fecha de modificaci\u00f3n", "Modified - not saved": "Modificado - sin guardar", "Move": "Mover", "Move (download)": "Mover (descarga)", "Move (upload)": "Mover (subida)", "Move files to the opposite panel (F6)": "Mover archivos al panel opuesto (F6)", "Move to front of queue": "Mover al principio de la cola", "Move to local": "Mover al local", "Move to other panel": "Mover al otro panel", "Move to remote": "Mover al remoto", "Move to the opposite panel": "Mover al panel opuesto", "Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.": "\u00bfMover {count} archivo(s) a {destination}?\n\nEl origen solo se elimina tras completar correctamente la transferencia.", "Name": "Nombre", "Name of the new folder in {path}": "Nombre de la nueva carpeta en {path}", "Name:": "Nombre:", "New directory": "Nuevo directorio", "New folder": "Nueva carpeta", "New name:": "Nuevo nombre:", "New session": "Nueva sesi\u00f3n", "New site": "Nuevo sitio", "Newer wins": "Prevalece el m\u00e1s reciente", "Newer wins (compare modification times)": "Prevalece el m\u00e1s reciente (comparar fechas)", "No changes": "Sin cambios", "No files": "Sin archivos", "No search yet.": "Todav\u00eda no se ha buscado.", "No stored sessions yet.": "Todav\u00eda no hay sesiones guardadas.", "No transfers in the queue.": "No hay transferencias en la cola.", "Not connected": "Sin conexi\u00f3n", "Not connected.": "Sin conexi\u00f3n.", "Nothing to do: the two directories are in sync.": "No hay nada que hacer: los dos directorios est\u00e1n sincronizados.", "On conflict:": "En caso de conflicto:", "Open a terminal on the remote server": "Abrir un terminal en el servidor remoto", "Open another session": "Abrir otra sesi\u00f3n", "Open remote terminal": "Abrir terminal remoto", "Open sessions": "Sesiones abiertas", "Open the session manager": "Abrir el gestor de sesiones", "Options": "Opciones", "Parent Directory": "Directorio superior", "Parent directory": "Directorio superior", "Password:": "Contrase\u00f1a:", "Pause": "Pausar", "Permissions (octal), e.g. 644:": "Permisos (octal), p. ej. 644:", "Port number:": "Puerto:", "Preview": "Vista previa", "Preview or run a directory synchronization": "Previsualizar o ejecutar una sincronizaci\u00f3n de directorios", "Private key:": "Clave privada:", "Progress": "Progreso", "Properties": "Propiedades", "Properties / rights": "Propiedades / permisos", "Protocol:": "Protocolo:", "Queued": "En cola", "Queued {count} desktop item for upload.": "Se a\u00f1adi\u00f3 {count} elemento del escritorio a la cola de subida.", "Queued {count} desktop item(s) for upload.": "Se a\u00f1adieron {count} elemento(s) del escritorio a la cola de subida.", "Queued {count} desktop items for upload.": "Se a\u00f1adieron {count} elementos del escritorio a la cola de subida.", "Quick actions": "Acciones r\u00e1pidas", "Reconnect": "Reconectar", "Reconnect the active session": "Reconectar la sesi\u00f3n activa", "Reconnected.": "Se ha reconectado.", "Refresh": "Actualizar", "Refresh both file panels": "Actualizar ambos paneles de archivos", "Reload": "Recargar", "Remember this key": "Recordar esta clave", "Remember this key, so the next connection is silent": "Recordar esta clave para no preguntar en la pr\u00f3xima conexi\u00f3n", "Remote": "Remoto", "Remote dir:": "Directorio remoto:", "Remote directory path": "Ruta del directorio remoto", "Remote editor": "Editor remoto", "Remote files": "Archivos remotos", "Remote panel": "Panel remoto", "Remote wins": "Prevalece el remoto", "Remote wins (download remote over local)": "Prevalece el remoto (descargar sobre el local)", "Remote \u2192 Local (update the local directory)": "Remoto \u2192 Local (actualizar el directorio local)", "Remote:": "Remoto:", "Remove all stored sessions in folder \"{folder}\"?": "\u00bfEliminar todas las sesiones guardadas en la carpeta \u00ab{folder}\u00bb?", "Remove the stored session \"{name}\"?": "\u00bfEliminar la sesi\u00f3n guardada \u00ab{name}\u00bb?", "Rename": "Renombrar", "Rename selected item": "Renombrar el elemento seleccionado", "Resolve:": "Resolver:", "Resume": "Reanudar", "Retry": "Reintentar", "Rights": "Permisos", "Run": "Ejecutar", "Run on selection": "Ejecutar en la selecci\u00f3n", "Running": "En curso", "SCP": "SCP", "SFTP (SSH)": "SFTP (SSH)", "Save": "Guardar", "Save (Ctrl+S)": "Guardar (Ctrl+S)", "Save as": "Guardar como", "Save as (remote path):": "Guardar como (ruta remota):", "Save as is available for remote files only.": "Guardar como solo est\u00e1 disponible para archivos remotos.", "Save this host key in which stored session?": "\u00bfEn qu\u00e9 sesi\u00f3n guardada desea guardar esta clave del servidor?", "Saved \"{name}\".": "Se guard\u00f3 \u00ab{name}\u00bb.", "Saved as {path}": "Se guard\u00f3 como {path}", "Saved command templates. Use": "Plantillas de comandos guardadas. Use", "Saved {count} desktop item to local directory.": "Se guard\u00f3 {count} elemento del escritorio en el directorio local.", "Saved {count} desktop item(s) to local directory.": "Se guardaron {count} elemento(s) del escritorio en el directorio local.", "Saved {count} desktop items to local directory.": "Se guardaron {count} elementos del escritorio en el directorio local.", "Saved {path}": "Se guard\u00f3 {path}", "Saved.": "Guardado.", "Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.": "Examina archivos de texto UTF-8 de hasta 8 MiB cada uno y 64 MiB en total; omite archivos mayores, binarios o que no sean UTF-8.", "Search": "Buscar", "Search inside files": "Buscar dentro de archivos", "Search remote directory": "Buscar en el directorio remoto", "Search the remote directory": "Buscar en el directorio remoto", "Select a file, not a directory.": "Seleccione un archivo, no un directorio.", "Select a site first.": "Seleccione primero un sitio.", "Select all": "Seleccionar todo", "Select an item in the {side} panel first.": "Seleccione primero un elemento en el panel {side}.", "Select exactly one file in the {side} panel.": "Seleccione exactamente un archivo en el panel {side}.", "Select exactly one item to rename.": "Seleccione exactamente un elemento para renombrarlo.", "Select files in the {side} panel first.": "Seleccione primero archivos en el panel {side}.", "Select something in the {side} pane first.": "Seleccione primero alg\u00fan elemento en el panel {side}.", "Select something to delete first.": "Seleccione primero alg\u00fan elemento para eliminarlo.", "Servers/web1": "Servers/web1", "Sessions": "Sesiones", "Site Manager": "Gestor de sitios", "Site name:": "Nombre del sitio:", "Size": "Tama\u00f1o", "Skip conflicting files (safest)": "Omitir archivos en conflicto (m\u00e1s seguro)", "Source": "Origen", "Start in:": "Iniciar en:", "Status": "Estado", "Store the password in the session file": "Guardar la contrase\u00f1a en el archivo de sesiones", "Stored sessions": "Sesiones guardadas", "Switch to dark theme": "Cambiar al tema oscuro", "Switch to light theme": "Cambiar al tema claro", "Sync browsing": "Navegaci\u00f3n sincronizada", "Synchronization queued.": "Sincronizaci\u00f3n a\u00f1adida a la cola.", "Synchronize": "Sincronizar", "Synchronize (both)": "Sincronizar (ambas)", "Synchronize (local)": "Sincronizar (local)", "Synchronize (remote)": "Sincronizar (remoto)", "Synchronize directories": "Sincronizar directorios", "Synchronize the current directories": "Sincronizar los directorios actuales", "Synchronized browsing is off: each pane browses on its own": "Navegaci\u00f3n sincronizada desactivada: cada panel navega por separado", "Synchronized browsing is on: the other pane follows your directory changes": "Navegaci\u00f3n sincronizada activada: el otro panel sigue los cambios de directorio", "Synchronized browsing off.": "Navegaci\u00f3n sincronizada desactivada.", "Synchronized browsing on.": "Navegaci\u00f3n sincronizada activada.", "System default": "Predeterminado del sistema", "Tabs": "Pesta\u00f1as", "Terminal": "Terminal", "The LinSCP command console runs commands in the live session of the current tab.": "La consola de LinSCP ejecuta \u00f3rdenes en la sesi\u00f3n activa de la pesta\u00f1a actual.", "The backend refused this request.": "El servidor rechaz\u00f3 esta petici\u00f3n.", "The drop has more than {count} entries.": "Los elementos arrastrados superan el l\u00edmite de {count}.", "The folder is too deeply nested.": "La carpeta supera el l\u00edmite de profundidad.", "The host key is now pinned for \"{name}\".": "La clave del servidor est\u00e1 fijada para \u00ab{name}\u00bb.", "There is no active session.": "No hay ninguna sesi\u00f3n activa.", "This browser did not expose the dropped files or folder contents.": "Este navegador no facilit\u00f3 los archivos arrastrados o el contenido de las carpetas.", "This plan deletes files. In \"both\" mode only files that the record of the previous synchronization proves were removed on the other side are deleted, and nothing is deleted while a conflict is unresolved.": "Este plan elimina archivos. En modo \u00abambas\u00bb solo se eliminan los archivos que, seg\u00fan el registro de la sincronizaci\u00f3n anterior, se borraron en el otro lado. No se elimina nada mientras haya conflictos sin resolver.", "This run's API token:": "Token de API de esta ejecuci\u00f3n:", "Time and contents": "Fecha y contenido", "Time or size": "Fecha o tama\u00f1o", "Toggle synchronized browsing": "Alternar navegaci\u00f3n sincronizada", "Top": "Primero", "Transfer Queue (0)": "Cola de transferencias (0)", "Transfer Queue ({count})": "Cola de transferencias ({count})", "Transfer queue": "Cola de transferencias", "Transfers": "Transferencias", "Type": "Tipo", "Unknown host key": "Clave del servidor desconocida", "Upload": "Subida", "User name:": "Usuario:", "View": "Ver", "View or change permissions": "Ver o cambiar permisos", "View selected file": "Ver el archivo seleccionado", "View the selected file (F3)": "Ver el archivo seleccionado (F3)", "Viewing": "Viendo", "WebDAV": "WebDAV", "as a placeholder for the selected file name. Commands run through the active session.": "como marcador del nombre del archivo seleccionado. Los comandos se ejecutan en la sesi\u00f3n activa.", "call without it, so only a page served by this run of the\n        server can drive it.": "sin \u00e9l, por lo que solo una p\u00e1gina servida por esta ejecuci\u00f3n del servidor puede controlarlo.", "compares the two panes and shows the plan before it\n        changes anything. \"Both\" uses the record of the previous synchronization to\n        tell a change from a conflict.": "compara los dos paneles y muestra el plan antes de cambiar nada. \u00abAmbas\u00bb usa el registro de la sincronizaci\u00f3n anterior para distinguir cambios y conflictos.", "conflict": "conflicto", "conflict resolved in favour of the local file": "conflicto resuelto a favor del archivo local", "conflict resolved in favour of the newer local file": "conflicto resuelto a favor del archivo local m\u00e1s reciente", "conflict resolved in favour of the newer remote file": "conflicto resuelto a favor del archivo remoto m\u00e1s reciente", "conflict resolved in favour of the remote file": "conflicto resuelto a favor del archivo remoto", "delete-local": "eliminar local", "delete-remote": "eliminar remoto", "download": "descargar", "e.g. *.txt|*.bak (empty = every file)": "p. ej. *.txt|*.bak (vac\u00edo = todos los archivos)", "e.g. Checksum SHA-256": "p. ej. Suma SHA-256", "e.g. checksum sha-256 {file}": "p. ej. checksum sha-256 {file}", "empty = check it on the first connection": "vac\u00edo = verificar en la primera conexi\u00f3n", "every file is copied when the criteria are 'none'": "se copia cada archivo cuando el criterio es 'none'", "it changed locally since the last synchronization": "cambi\u00f3 localmente desde la \u00faltima sincronizaci\u00f3n", "it changed on both sides since the last synchronization": "cambi\u00f3 en ambos lados desde la \u00faltima sincronizaci\u00f3n", "it changed remotely since the last synchronization": "cambi\u00f3 en el remoto desde la \u00faltima sincronizaci\u00f3n", "it is a directory on one side and a file on the other": "es un directorio en un lado y un archivo en el otro", "it is new on the local side": "es nuevo en el lado local", "it is new on the remote side": "es nuevo en el lado remoto", "it only exists locally": "solo existe localmente", "it only exists remotely": "solo existe en el remoto", "it was removed on the other side since the last synchronization": "se elimin\u00f3 en el otro lado desde la \u00faltima sincronizaci\u00f3n", "lscp\u003e": "lscp\u003e", "opens the site manager: stored sessions are shared with the\n        console client, and each tab keeps its own connection open.": "abre el gestor de sitios: las sesiones guardadas se comparten con el cliente de consola y cada pesta\u00f1a mantiene su propia conexi\u00f3n.", "part of a directory that exists on one side only": "parte de un directorio que solo existe en un lado", "path/to/key": "path/to/key", "run in the queue at the bottom. They can be paused,\n        cancelled and retried; a cancelled transfer does not disturb the session.\n        You can also drop individual files from your desktop onto the remote pane to upload them.": "se ejecutan en la cola inferior. Pueden pausarse, cancelarse y reintentarse; cancelar una transferencia no interrumpe la sesi\u00f3n. Tambi\u00e9n puede arrastrar archivos del escritorio al panel remoto para subirlos.", "the contents differ (the local checksum is not the remote one)": "el contenido difiere (la suma local no coincide con la remota)", "the contents differ (the remote checksum is not the local one)": "el contenido difiere (la suma remota no coincide con la local)", "the local directory does not exist yet": "el directorio local a\u00fan no existe", "the local file differs": "el archivo local difiere", "the local file is newer": "el archivo local es m\u00e1s reciente", "the local file is newer and there is no previous synchronization to compare with": "el archivo local es m\u00e1s reciente y no hay una sincronizaci\u00f3n anterior con la que comparar", "the other side does not have it": "no existe en el otro lado", "the remote directory does not exist yet": "el directorio remoto a\u00fan no existe", "the remote file differs": "el archivo remoto difiere", "the remote file is newer": "el archivo remoto es m\u00e1s reciente", "the remote file is newer and there is no previous synchronization to compare with": "el archivo remoto es m\u00e1s reciente y no hay una sincronizaci\u00f3n anterior con la que comparar", "the sizes differ": "los tama\u00f1os difieren", "the timestamps are equal but the sizes differ, and there is no previous synchronization to compare with": "las fechas son iguales pero los tama\u00f1os difieren y no hay una sincronizaci\u00f3n anterior con la que comparar", "unchanged": "sin cambios", "upload": "subir", "{count} desktop item refused.": "Se rechaz\u00f3 {count} elemento del escritorio.", "{count} desktop item(s) refused.": "Se rechazaron {count} elemento(s) del escritorio.", "{count} desktop items refused.": "Se rechazaron {count} elementos del escritorio.", "{count} item(s), {size}{selection}": "{count} elemento(s), {size}{selection}", "{count} item, {size}{selection}": "{count} elemento, {size}{selection}", "{count} items, {size}{selection}": "{count} elementos, {size}{selection}", "{count} match": "{count} coincidencia", "{count} match(es)": "{count} coincidencia(s)", "{count} matches": "{count} coincidencias", "{count} move(s) queued. Source files are removed after successful transfer.": "Se a\u00f1adieron {count} movimiento(s) a la cola. Los archivos de origen se eliminan tras transferirlos correctamente.", "{count} transfer queued.": "Se a\u00f1adi\u00f3 {count} transferencia a la cola.", "{count} transfer(s) queued.": "Se a\u00f1adieron {count} transferencia(s) a la cola.", "{count} transfers queued.": "Se a\u00f1adieron {count} transferencias a la cola.", "{host} (port {port}) offers this key, and it is not cached yet. Connect only if the fingerprint is the one you expect:": "{host} (puerto {port}) ofrece esta clave, que a\u00fan no est\u00e1 guardada. Con\u00e9ctese solo si la huella es la que esperaba:", "{mode} {path}": "{mode} {path}", "{reason} ({source} against {target} bytes)": "{reason} ({source} frente a {target} bytes)", "{size} bytes, modified {date}{readonly}": "{size} bytes, modificado {date}{readonly}", "{upload} to upload, {download} to download, {local} local and {remote} remote deletions, {conflicts} conflict(s), {unchanged} unchanged.": "{upload} por subir, {download} por descargar, {local} eliminaciones locales y {remote} remotas, {conflicts} conflicto(s), {unchanged} sin cambios."}};
+  const GUI_CATALOGS = {"en": {"\n(exit code {code})": "\n(exit code {code})", " (search limit reached; refine the mask)": " (search limit reached; refine the mask)", " \u00b7 read-only": " \u00b7 read-only", "(F3) opens a selected text file read-only.": "(F3) opens a selected text file read-only.", "(F4)\n        opens a local or remote text file in the built-in editor. Saving checks that\n        the file has not changed since it was opened; remote edits upload to the server.": "(F4)\n        opens a local or remote text file in the built-in editor. Saving checks that\n        the file has not changed since it was opened; remote edits upload to the server.", "(broken link)": "(broken link)", "(none: this page was not served by the backend)": "(none: this page was not served by the backend)", "(not stored by default)": "(not stored by default)", ", selected: {count}": ", selected: {count}", ", {count} selected": ", {count} selected", ", {scanned} file(s) scanned, {skipped} skipped ({size})": ", {scanned} file(s) scanned, {skipped} skipped ({size})", "0": "0", "A checksum is read from the remote side; select the remote panel.": "A checksum is read from the remote side; select the remote panel.", "A dropped item has an invalid relative path.": "A dropped item has an invalid relative path.", "A host name is required.": "A host name is required.", "A name and a command are required.": "A name and a command are required.", "A preview does not change anything; it only compares the two trees.": "A preview does not change anything; it only compares the two trees.", "A site name is required.": "A site name is required.", "A terminal window was opened on the desktop running the backend.": "A terminal window was opened on the desktop running the backend.", "A user name and a password are required.": "A user name and a password are required.", "ASCII (convert line ends)": "ASCII (convert line ends)", "Accepted the host key {key} without checking it (session \"{name}\").": "Accepted the host key {key} without checking it (session \"{name}\").", "Add this public key to the server, so it accepts your key from now on?": "Add this public key to the server, so it accepts your key from now on?", "Algorithm (sha-256, sha-1, md5 or crc32):": "Algorithm (sha-256, sha-1, md5 or crc32):", "Also rescan every:": "Also rescan every:", "Always copy": "Always copy", "Always resume": "Always resume", "Amazon S3": "Amazon S3", "Append to the destination instead of replacing it (SFTP)": "Append to the destination instead of replacing it (SFTP)", "Applies to:": "Applies to:", "Automatic (decide per file)": "Automatic (decide per file)", "Automatic by mask": "Automatic by mask", "Backspace": "Backspace", "Binary": "Binary", "Both (the side that changed wins)": "Both (the side that changed wins)", "Both directions compare the record of the previous synchronization, so the contents of the files are not read.": "Both directions compare the record of the previous synchronization, so the contents of the files are not read.", "Both directories are required.": "Both directories are required.", "Calculate checksum": "Calculate checksum", "Cancel": "Cancel", "Cancel all": "Cancel all", "Cancelled": "Cancelled", "Cancelling": "Cancelling", "Cannot change the permissions.": "Cannot change the permissions.", "Cannot connect with that host key.": "Cannot connect with that host key.", "Cannot connect.": "Cannot connect.", "Cannot copy on the server.": "Cannot copy on the server.", "Cannot create the folder.": "Cannot create the folder.", "Cannot create the symbolic link.": "Cannot create the symbolic link.", "Cannot delete.": "Cannot delete.", "Cannot open a terminal.": "Cannot open a terminal.", "Cannot open the file.": "Cannot open the file.", "Cannot queue the move.": "Cannot queue the move.", "Cannot queue the synchronization.": "Cannot queue the synchronization.", "Cannot queue the transfer.": "Cannot queue the transfer.", "Cannot reach the LinSCP backend: {error}": "Cannot reach the LinSCP backend: {error}", "Cannot read the checksum.": "Cannot read the checksum.", "Cannot read the directory.": "Cannot read the directory.", "Cannot read the dropped folder: {error}": "Cannot read the dropped folder: {error}", "Cannot read the plan.": "Cannot read the plan.", "Cannot reconnect.": "Cannot reconnect.", "Cannot remove the command.": "Cannot remove the command.", "Cannot remove the folder.": "Cannot remove the folder.", "Cannot remove the site.": "Cannot remove the site.", "Cannot rename.": "Cannot rename.", "Cannot run the command.": "Cannot run the command.", "Cannot save the command.": "Cannot save the command.", "Cannot save the session.": "Cannot save the session.", "Cannot save the site.": "Cannot save the site.", "Cannot save.": "Cannot save.", "Cannot search.": "Cannot search.", "Cannot start watching the directory.": "Cannot start watching the directory.", "Cannot store the language preference.": "Cannot store the language preference.", "Cannot store the transfer settings.": "Cannot store the transfer settings.", "Cannot upload the public key.": "Cannot upload the public key.", "Case sensitive": "Case sensitive", "Change rights": "Change rights", "Changed": "Changed", "Checksums ({algorithm})": "Checksums ({algorithm})", "Clear finished": "Clear finished", "Clear selection": "Clear selection", "Close": "Close", "Close current session": "Close current session", "Close the active session": "Close the active session", "Close without saving your changes?": "Close without saving your changes?", "Command Log": "Command Log", "Command log": "Command log", "Command:": "Command:", "Commander function keys": "Commander function keys", "Commander keys:": "Commander keys:", "Commander \u00b7 secure file transfer": "Commander \u00b7 secure file transfer", "Commands": "Commands", "Compare by:": "Compare by:", "Compare this fingerprint with the one the server's own console shows, or\n          with the one your server administrator published. Connecting without\n          checking it lets anybody who can redirect your connection read and change\n          your files.": "Compare this fingerprint with the one the server's own console shows, or\n          with the one your server administrator published. Connecting without\n          checking it lets anybody who can redirect your connection read and change\n          your files.", "Completed": "Completed", "Connect": "Connect", "Connected to {host}.": "Connected to {host}.", "Connected, with that host key pinned.": "Connected, with that host key pinned.", "Connected: {name}": "Connected: {name}", "Connection abandoned.": "Connection abandoned.", "Contains text:": "Contains text:", "Contents (checksum)": "Contents (checksum)", "Copied on the server.": "Copied on the server.", "Copy": "Copy", "Copy \"{source}\" on the server to:": "Copy \"{source}\" on the server to:", "Copy on the server": "Copy on the server", "Copy the selection to the opposite panel (F5)": "Copy the selection to the opposite panel (F5)", "Copy to other panel": "Copy to other panel", "Copy to the opposite panel": "Copy to the opposite panel", "Create a directory": "Create a directory", "Create directory": "Create directory", "Create symbolic link": "Create symbolic link", "Created the symbolic link.": "Created the symbolic link.", "Cross-panel move currently supports files only. Copy folders, then remove them separately.": "Cross-panel move currently supports files only. Copy folders, then remove them separately.", "Ctrl+A": "Ctrl+A", "Ctrl+L": "Ctrl+L", "Ctrl+N": "Ctrl+N", "Ctrl+R": "Ctrl+R", "Custom commands": "Custom commands", "Custom commands...": "Custom commands...", "Decide per file (the default)": "Decide per file (the default)", "Delete": "Delete", "Delete folder \"{folder}\"": "Delete folder \"{folder}\"", "Delete obsolete files as part of this synchronization?": "Delete obsolete files as part of this synchronization?", "Delete obsolete files on the target side": "Delete obsolete files on the target side", "Delete selected item": "Delete selected item", "Delete {count} item(s) from the {side} side?\n\n{names}": "Delete {count} item(s) from the {side} side?\n\n{names}", "Destination": "Destination", "Direction:": "Direction:", "Directory": "Directory", "Discard your changes and reload?": "Discard your changes and reload?", "Disconnected": "Disconnected", "Disconnected: {name}": "Disconnected: {name}", "Dismiss": "Dismiss", "Do not set permissions on the destination": "Do not set permissions on the destination", "Done": "Done", "Download": "Download", "Dropping onto the same pane does nothing - drop it on the {side} side to transfer.": "Dropping onto the same pane does nothing - drop it on the {side} side to transfer.", "Edit": "Edit", "Edit selected remote file": "Edit selected remote file", "Edit the selected file (F4)": "Edit the selected file (F4)", "Editing": "Editing", "Editing {path}": "Editing {path}", "Editor": "Editor", "English": "English", "Enter text to search for.": "Enter text to search for.", "Espa\u00f1ol": "Espa\u00f1ol", "Every request the page makes carries it, and the backend refuses an": "Every request the page makes carries it, and the backend refuses an", "F1": "F1", "F1 help, F2 rename, F3 view, F4 edit, F5 copy to the\n        other panel, F6 move files to the other panel, F7 new directory, F8 delete,\n        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a\n        directory; Backspace goes up one level. Move is available for files; folders\n        can still be copied, but are not moved by the cross-panel move action.": "F1 help, F2 rename, F3 view, F4 edit, F5 copy to the\n        other panel, F6 move files to the other panel, F7 new directory, F8 delete,\n        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a\n        directory; Backspace goes up one level. Move is available for files; folders\n        can still be copied, but are not moved by the cross-panel move action.", "F10": "F10", "F2": "F2", "F3": "F3", "F4": "F4", "F5": "F5", "F6": "F6", "F7": "F7", "F8": "F8", "F9": "F9", "FTP": "FTP", "FTPS": "FTPS", "Failed": "Failed", "File": "File", "File mask:": "File mask:", "File operations": "File operations", "File size": "File size", "Filename mask:": "Filename mask:", "Files": "Files", "Find": "Find", "Find files": "Find files", "Find remote files": "Find remote files", "Folder \"{name}\" does not exist on the {side} side.": "Folder \"{name}\" does not exist on the {side} side.", "Go": "Go", "Go to directory": "Go to directory", "Help": "Help", "Host key verification": "Host key verification", "Host key:": "Host key:", "Host name:": "Host name:", "Include subdirectories": "Include subdirectories", "Invalid username or password.": "Invalid username or password.", "Invert selection": "Invert selection", "Keep remote directory up to date": "Keep remote directory up to date", "KiB/s, 0 = unlimited": "KiB/s, 0 = unlimited", "Language": "Language", "Leave the host key empty and the first connection asks you to check\n            the server's fingerprint before it goes ahead; tick the box there to\n            remember it. '*' accepts any key for one connection, which is only\n            sensible when you are about to pin the key it reports.": "Leave the host key empty and the first connection asks you to check\n            the server's fingerprint before it goes ahead; tick the box there to\n            remember it. '*' accepts any key for one connection, which is only\n            sensible when you are about to pin the key it reports.", "LinSCP": "LinSCP", "LinSCP Commander": "LinSCP Commander", "LinSCP Commander \u2014 Secure File Transfer": "LinSCP Commander \u2014 Secure File Transfer", "LinSCP Help": "LinSCP Help", "LinSCP command console": "LinSCP command console", "LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').": "LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').", "Line {line}: {snippet}": "Line {line}: {snippet}", "Link target": "Link target", "Literal UTF-8 text": "Literal UTF-8 text", "Local": "Local", "Local dir:": "Local dir:", "Local directory path": "Local directory path", "Local directory:": "Local directory:", "Local files": "Local files", "Local panel": "Local panel", "Local wins": "Local wins", "Local wins (upload local over remote)": "Local wins (upload local over remote)", "Local \u2192 Remote (update the remote directory)": "Local \u2192 Remote (update the remote directory)", "Local:": "Local:", "Main menu": "Main menu", "Mark": "Mark", "Mode": "Mode", "Modification time": "Modification time", "Modified": "Modified", "Modified - not saved": "Modified - not saved", "Move": "Move", "Move (download)": "Move (download)", "Move (upload)": "Move (upload)", "Move files to the opposite panel (F6)": "Move files to the opposite panel (F6)", "Move to front of queue": "Move to front of queue", "Move to local": "Move to local", "Move to other panel": "Move to other panel", "Move to remote": "Move to remote", "Move to the opposite panel": "Move to the opposite panel", "Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.": "Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.", "Name": "Name", "Name of the new folder in {path}": "Name of the new folder in {path}", "Name of the symbolic link to \"{target}\":": "Name of the symbolic link to \"{target}\":", "Name:": "Name:", "Never resume": "Never resume", "New directory": "New directory", "New folder": "New folder", "New name:": "New name:", "New session": "New session", "New site": "New site", "Newer wins": "Newer wins", "Newer wins (compare modification times)": "Newer wins (compare modification times)", "No changes": "No changes", "No custom commands saved yet.": "No custom commands saved yet.", "No files": "No files", "No search yet.": "No search yet.", "No stored sessions yet.": "No stored sessions yet.", "No transfers in the queue.": "No transfers in the queue.", "Not connected": "Not connected", "Not connected.": "Not connected.", "Nothing to do: the two directories are in sync.": "Nothing to do: the two directories are in sync.", "On conflict:": "On conflict:", "Open a terminal on the remote server": "Open a terminal on the remote server", "Open another session": "Open another session", "Open remote terminal": "Open remote terminal", "Open sessions": "Open sessions", "Open the session manager": "Open the session manager", "Options": "Options", "Owner": "Owner", "Parent Directory": "Parent Directory", "Parent directory": "Parent directory", "Password:": "Password:", "Path on the server": "Path on the server", "Pause": "Pause", "Permissions": "Permissions", "Permissions (octal), e.g. 644:": "Permissions (octal), e.g. 644:", "Port number:": "Port number:", "Preserve the modification time": "Preserve the modification time", "Preview": "Preview", "Preview or run a directory synchronization": "Preview or run a directory synchronization", "Private key:": "Private key:", "Progress": "Progress", "Properties": "Properties", "Properties / rights": "Properties / rights", "Properties of {name}": "Properties of {name}", "Protocol:": "Protocol:", "Public key file to upload to the server (blank for the default id_ed25519.pub or id_rsa.pub):": "Public key file to upload to the server (blank for the default id_ed25519.pub or id_rsa.pub):", "Put new transfers at the front of the queue": "Put new transfers at the front of the queue", "Queued": "Queued", "Queued {count} desktop item for upload.": "Queued {count} desktop item for upload.", "Queued {count} desktop item(s) for upload.": "Queued {count} desktop item(s) for upload.", "Queued {count} desktop items for upload.": "Queued {count} desktop items for upload.", "Quick actions": "Quick actions", "Reconnect": "Reconnect", "Reconnect the active session": "Reconnect the active session", "Reconnected.": "Reconnected.", "Refresh": "Refresh", "Refresh both file panels": "Refresh both file panels", "Reload": "Reload", "Remember this key": "Remember this key", "Remember this key, so the next connection is silent": "Remember this key, so the next connection is silent", "Remote": "Remote", "Remote dir:": "Remote dir:", "Remote directory path": "Remote directory path", "Remote directory:": "Remote directory:", "Remote editor": "Remote editor", "Remote files": "Remote files", "Remote panel": "Remote panel", "Remote wins": "Remote wins", "Remote wins (download remote over local)": "Remote wins (download remote over local)", "Remote \u2192 Local (update the local directory)": "Remote \u2192 Local (update the local directory)", "Remote:": "Remote:", "Remove all stored sessions in folder \"{folder}\"?": "Remove all stored sessions in folder \"{folder}\"?", "Remove the command \"{name}\"?": "Remove the command \"{name}\"?", "Remove the stored session \"{name}\"?": "Remove the stored session \"{name}\"?", "Removed the command \"{name}\".": "Removed the command \"{name}\".", "Rename": "Rename", "Rename selected item": "Rename selected item", "Resolve:": "Resolve:", "Restore defaults": "Restore defaults", "Resume": "Resume", "Resume a part-transferred file": "Resume a part-transferred file", "Resume above a size": "Resume above a size", "Resume above:": "Resume above:", "Resume support:": "Resume support:", "Retry": "Retry", "Rights": "Rights", "Run": "Run", "Run on selection": "Run on selection", "Run this command on {count} item(s) of the {side} panel?\n\n{command}\n\n{names}": "Run this command on {count} item(s) of the {side} panel?\n\n{command}\n\n{names}", "Running": "Running", "Running\u2026": "Running\u2026", "SCP": "SCP", "SFTP (SSH)": "SFTP (SSH)", "Save": "Save", "Save (Ctrl+S)": "Save (Ctrl+S)", "Save as": "Save as", "Save as (remote path):": "Save as (remote path):", "Save as is available for remote files only.": "Save as is available for remote files only.", "Save the command before running it.": "Save the command before running it.", "Save this host key in which stored session?": "Save this host key in which stored session?", "Saved \"{name}\".": "Saved \"{name}\".", "Saved as {path}": "Saved as {path}", "Saved command templates. Use": "Saved command templates. Use", "Saved command templates. Write {file} where the\n        selected name belongs; it is quoted the way the LinSCP command line\n        reads quotes, never handed to a shell. A remote command runs in the\n        session the panel is connected to, a local one through the same\n        engine. Every run asks first and shows the command it will use.": "Saved command templates. Write {file} where the\n        selected name belongs; it is quoted the way the LinSCP command line\n        reads quotes, never handed to a shell. A remote command runs in the\n        session the panel is connected to, a local one through the same\n        engine. Every run asks first and shows the command it will use.", "Saved commands": "Saved commands", "Saved the command \"{name}\".": "Saved the command \"{name}\".", "Saved {count} desktop item to local directory.": "Saved {count} desktop item to local directory.", "Saved {count} desktop item(s) to local directory.": "Saved {count} desktop item(s) to local directory.", "Saved {count} desktop items to local directory.": "Saved {count} desktop items to local directory.", "Saved {path}": "Saved {path}", "Saved.": "Saved.", "Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.": "Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.", "Search": "Search", "Search inside files": "Search inside files", "Search remote directory": "Search remote directory", "Search the remote directory": "Search the remote directory", "Select a command to remove.": "Select a command to remove.", "Select a file, not a directory.": "Select a file, not a directory.", "Select a site first.": "Select a site first.", "Select all": "Select all", "Select an item in the {side} panel first.": "Select an item in the {side} panel first.", "Select exactly one file in the {side} panel.": "Select exactly one file in the {side} panel.", "Select exactly one item in the {side} panel.": "Select exactly one item in the {side} panel.", "Select exactly one item to rename.": "Select exactly one item to rename.", "Select files in the {side} panel first.": "Select files in the {side} panel first.", "Select one or more files in the {side} panel first.": "Select one or more files in the {side} panel first.", "Select or enter a command name first.": "Select or enter a command name first.", "Select something in the {side} pane first.": "Select something in the {side} pane first.", "Select something to delete first.": "Select something to delete first.", "Servers/web1": "Servers/web1", "Sessions": "Sessions", "Sign in": "Sign in", "Sign out": "Sign out", "Sign out ({name})": "Sign out ({name})", "Signed in as {name}.": "Signed in as {name}.", "Signed out.": "Signed out.", "Single-panel view: the panel in focus fills the window.": "Single-panel view: the panel in focus fills the window.", "Site Manager": "Site Manager", "Site name:": "Site name:", "Size": "Size", "Size in bytes": "Size in bytes", "Skip conflicting files (safest)": "Skip conflicting files (safest)", "Skip files the destination already has newer": "Skip files the destination already has newer", "Source": "Source", "Speed limit:": "Speed limit:", "Start": "Start", "Start in:": "Start in:", "Status": "Status", "Stop after:": "Stop after:", "Store the password in the session file": "Store the password in the session file", "Stored sessions": "Stored sessions", "Switch to dark theme": "Switch to dark theme", "Switch to light theme": "Switch to light theme", "Symbolic link": "Symbolic link", "Sync browsing": "Sync browsing", "Synchronization queued.": "Synchronization queued.", "Synchronize": "Synchronize", "Synchronize (both)": "Synchronize (both)", "Synchronize (local)": "Synchronize (local)", "Synchronize (remote)": "Synchronize (remote)", "Synchronize directories": "Synchronize directories", "Synchronize the current directories": "Synchronize the current directories", "Synchronized browsing is off: each pane browses on its own": "Synchronized browsing is off: each pane browses on its own", "Synchronized browsing is on: the other pane follows your directory changes": "Synchronized browsing is on: the other pane follows your directory changes", "Synchronized browsing off.": "Synchronized browsing off.", "Synchronized browsing on.": "Synchronized browsing on.", "System default": "System default", "Tabs": "Tabs", "Terminal": "Terminal", "That item is no longer listed.": "That item is no longer listed.", "The LinSCP command console runs commands in the live session of the current tab.": "The LinSCP command console runs commands in the live session of the current tab.", "The backend refused this request.": "The backend refused this request.", "The command finished.": "The command finished.", "The drop has more than {count} entries.": "The drop has more than {count} entries.", "The file this link points at does not exist.": "The file this link points at does not exist.", "The folder is too deeply nested.": "The folder is too deeply nested.", "The host key is now pinned for \"{name}\".": "The host key is now pinned for \"{name}\".", "The local side": "The local side", "The public key was uploaded.": "The public key was uploaded.", "The remote side (the open session)": "The remote side (the open session)", "The resume size cannot be negative.": "The resume size cannot be negative.", "The server did not report the attributes.": "The server did not report the attributes.", "The speed limit must be between 0 and 100000000 KiB/s.": "The speed limit must be between 0 and 100000000 KiB/s.", "There is no active session.": "There is no active session.", "These apply to the transfers you start next: F5, F6,\n        the toolbar buttons and a drop from the desktop. They are the same\n        switches the console client's get and put commands take.": "These apply to the transfers you start next: F5, F6,\n        the toolbar buttons and a drop from the desktop. They are the same\n        switches the console client's get and put commands take.", "This browser did not expose the dropped files or folder contents.": "This browser did not expose the dropped files or folder contents.", "This plan deletes files. In \"both\" mode only files that the record of the previous synchronization proves were removed on the other side are deleted, and nothing is deleted while a conflict is unresolved.": "This plan deletes files. In \"both\" mode only files that the record of the previous synchronization proves were removed on the other side are deleted, and nothing is deleted while a conflict is unresolved.", "This run's API token:": "This run's API token:", "This server was started with user accounts, so every\n        request needs a signed-in session before it is answered.": "This server was started with user accounts, so every\n        request needs a signed-in session before it is answered.", "Time and contents": "Time and contents", "Time or size": "Time or size", "Toggle single-panel view": "Toggle single-panel view", "Toggle synchronized browsing": "Toggle synchronized browsing", "Too many failed sign-ins. Try again in {seconds} seconds.": "Too many failed sign-ins. Try again in {seconds} seconds.", "Top": "Top", "Transfer Queue (0)": "Transfer Queue (0)", "Transfer Queue ({count})": "Transfer Queue ({count})", "Transfer mode:": "Transfer mode:", "Transfer queue": "Transfer queue", "Transfer settings": "Transfer settings", "Transfer settings restored to their defaults.": "Transfer settings restored to their defaults.", "Transfer settings saved.": "Transfer settings saved.", "Transfer settings...": "Transfer settings...", "Transfers": "Transfers", "Two-panel view.": "Two-panel view.", "Type": "Type", "Unknown host key": "Unknown host key", "Upload": "Upload", "Upload public key to the server": "Upload public key to the server", "User name:": "User name:", "View": "View", "View or change permissions": "View or change permissions", "View selected file": "View selected file", "View the selected file (F3)": "View the selected file (F3)", "Viewing": "Viewing", "Watches the local directory and copies what changes in\n        it to the remote one. It runs as a queue item until you cancel it, so\n        it can be stopped without disturbing the session.": "Watches the local directory and copies what changes in\n        it to the remote one. It runs as a queue item until you cancel it, so\n        it can be stopped without disturbing the session.", "Watching the local directory; changes are copied as they happen.": "Watching the local directory; changes are copied as they happen.", "WebDAV": "WebDAV", "as a placeholder for the selected file name. Commands run through the active session.": "as a placeholder for the selected file name. Commands run through the active session.", "bytes": "bytes", "call without it, so only a page served by this run of the\n        server can drive it.": "call without it, so only a page served by this run of the\n        server can drive it.", "compares the two panes and shows the plan before it\n        changes anything. \"Both\" uses the record of the previous synchronization to\n        tell a change from a conflict.": "compares the two panes and shows the plan before it\n        changes anything. \"Both\" uses the record of the previous synchronization to\n        tell a change from a conflict.", "conflict": "conflict", "conflict resolved in favour of the local file": "conflict resolved in favour of the local file", "conflict resolved in favour of the newer local file": "conflict resolved in favour of the newer local file", "conflict resolved in favour of the newer remote file": "conflict resolved in favour of the newer remote file", "conflict resolved in favour of the remote file": "conflict resolved in favour of the remote file", "delete-local": "delete-local", "delete-remote": "delete-remote", "download": "download", "e.g. *.txt|*.bak (empty = every file)": "e.g. *.txt|*.bak (empty = every file)", "e.g. Checksum SHA-256": "e.g. Checksum SHA-256", "e.g. checksum sha-256 {file}": "e.g. checksum sha-256 {file}", "empty = check it on the first connection": "empty = check it on the first connection", "every file is copied when the criteria are 'none'": "every file is copied when the criteria are 'none'", "it changed locally since the last synchronization": "it changed locally since the last synchronization", "it changed on both sides since the last synchronization": "it changed on both sides since the last synchronization", "it changed remotely since the last synchronization": "it changed remotely since the last synchronization", "it is a directory on one side and a file on the other": "it is a directory on one side and a file on the other", "it is new on the local side": "it is new on the local side", "it is new on the remote side": "it is new on the remote side", "it only exists locally": "it only exists locally", "it only exists remotely": "it only exists remotely", "it was removed on the other side since the last synchronization": "it was removed on the other side since the last synchronization", "lscp\u003e": "lscp\u003e", "opens the site manager: stored sessions are shared with the\n        console client, and each tab keeps its own connection open.": "opens the site manager: stored sessions are shared with the\n        console client, and each tab keeps its own connection open.", "part of a directory that exists on one side only": "part of a directory that exists on one side only", "passes, 0 = until cancelled": "passes, 0 = until cancelled", "path/to/key": "path/to/key", "run in the queue at the bottom. They can be paused,\n        cancelled and retried; a cancelled transfer does not disturb the session.\n        You can also drop individual files from your desktop onto the remote pane to upload them.": "run in the queue at the bottom. They can be paused,\n        cancelled and retried; a cancelled transfer does not disturb the session.\n        You can also drop individual files from your desktop onto the remote pane to upload them.", "seconds, 0 = watch only": "seconds, 0 = watch only", "the contents differ (the local checksum is not the remote one)": "the contents differ (the local checksum is not the remote one)", "the contents differ (the remote checksum is not the local one)": "the contents differ (the remote checksum is not the local one)", "the local directory does not exist yet": "the local directory does not exist yet", "the local file differs": "the local file differs", "the local file is newer": "the local file is newer", "the local file is newer and there is no previous synchronization to compare with": "the local file is newer and there is no previous synchronization to compare with", "the other side does not have it": "the other side does not have it", "the remote directory does not exist yet": "the remote directory does not exist yet", "the remote file differs": "the remote file differs", "the remote file is newer": "the remote file is newer", "the remote file is newer and there is no previous synchronization to compare with": "the remote file is newer and there is no previous synchronization to compare with", "the sizes differ": "the sizes differ", "the timestamps are equal but the sizes differ, and there is no previous synchronization to compare with": "the timestamps are equal but the sizes differ, and there is no previous synchronization to compare with", "unchanged": "unchanged", "upload": "upload", "{count} command failed.": "{count} command failed.", "{count} commands failed.": "{count} commands failed.", "{count} desktop item refused.": "{count} desktop item refused.", "{count} desktop item(s) refused.": "{count} desktop item(s) refused.", "{count} desktop items refused.": "{count} desktop items refused.", "{count} item(s), {size}{selection}": "{count} item(s), {size}{selection}", "{count} item, {size}{selection}": "{count} item, {size}{selection}", "{count} items, {size}{selection}": "{count} items, {size}{selection}", "{count} match": "{count} match", "{count} match(es)": "{count} match(es)", "{count} matches": "{count} matches", "{count} move(s) queued. Source files are removed after successful transfer.": "{count} move(s) queued. Source files are removed after successful transfer.", "{count} transfer queued.": "{count} transfer queued.", "{count} transfer(s) queued.": "{count} transfer(s) queued.", "{count} transfers queued.": "{count} transfers queued.", "{host} (port {port}) offers this key, and it is not cached yet. Connect only if the fingerprint is the one you expect:": "{host} (port {port}) offers this key, and it is not cached yet. Connect only if the fingerprint is the one you expect:", "{mode} {path}": "{mode} {path}", "{reason} ({source} against {target} bytes)": "{reason} ({source} against {target} bytes)", "{size} bytes, modified {date}{readonly}": "{size} bytes, modified {date}{readonly}", "{upload} to upload, {download} to download, {local} local and {remote} remote deletions, {conflicts} conflict(s), {unchanged} unchanged.": "{upload} to upload, {download} to download, {local} local and {remote} remote deletions, {conflicts} conflict(s), {unchanged} unchanged."}, "es": {"\n(exit code {code})": "\n(c\u00f3digo de salida {code})", " (search limit reached; refine the mask)": " (se alcanz\u00f3 el l\u00edmite de b\u00fasqueda; refine la m\u00e1scara)", " \u00b7 read-only": " \u00b7 solo lectura", "(F3) opens a selected text file read-only.": "(F3) abre el archivo de texto seleccionado en modo de solo lectura.", "(F4)\n        opens a local or remote text file in the built-in editor. Saving checks that\n        the file has not changed since it was opened; remote edits upload to the server.": "(F4) abre un archivo de texto local o remoto en el editor integrado. Al guardar se comprueba que no haya cambiado desde que se abri\u00f3; las ediciones remotas se suben al servidor.", "(broken link)": "(enlace roto)", "(none: this page was not served by the backend)": "(ninguno: esta p\u00e1gina no fue servida por el servidor de LinSCP)", "(not stored by default)": "(no se guarda por defecto)", ", selected: {count}": ", seleccionados: {count}", ", {count} selected": ", seleccionados: {count}", ", {scanned} file(s) scanned, {skipped} skipped ({size})": ", {scanned} archivo(s) examinado(s), {skipped} omitido(s) ({size})", "0": "0", "A checksum is read from the remote side; select the remote panel.": "La suma de comprobaci\u00f3n se lee del lado remoto; seleccione el panel remoto.", "A dropped item has an invalid relative path.": "Un elemento arrastrado tiene una ruta relativa no v\u00e1lida.", "A host name is required.": "Se requiere un nombre de servidor.", "A name and a command are required.": "Se necesitan un nombre y un comando.", "A preview does not change anything; it only compares the two trees.": "La vista previa no modifica nada; solo compara los dos \u00e1rboles.", "A site name is required.": "Se requiere un nombre para el sitio.", "A terminal window was opened on the desktop running the backend.": "Se abri\u00f3 un terminal en el escritorio donde se ejecuta el servidor de LinSCP.", "A user name and a password are required.": "Se necesitan un usuario y una contrase\u00f1a.", "ASCII (convert line ends)": "ASCII (convertir fines de l\u00ednea)", "Accepted the host key {key} without checking it (session \"{name}\").": "Se acept\u00f3 la clave del servidor {key} sin verificarla (sesi\u00f3n \u00ab{name}\u00bb).", "Add this public key to the server, so it accepts your key from now on?": "\u00bfA\u00f1adir esta clave p\u00fablica al servidor para que acepte su clave a partir de ahora?", "Algorithm (sha-256, sha-1, md5 or crc32):": "Algoritmo (sha-256, sha-1, md5 o crc32):", "Also rescan every:": "Volver a examinar cada:", "Always copy": "Copiar siempre", "Always resume": "Reanudar siempre", "Amazon S3": "Amazon S3", "Append to the destination instead of replacing it (SFTP)": "A\u00f1adir al destino en lugar de reemplazarlo (SFTP)", "Applies to:": "Se aplica a:", "Automatic (decide per file)": "Autom\u00e1tico (decidir por archivo)", "Automatic by mask": "Autom\u00e1tico por m\u00e1scara", "Backspace": "Retroceso", "Binary": "Binario", "Both (the side that changed wins)": "Ambas (prevalece el lado modificado)", "Both directions compare the record of the previous synchronization, so the contents of the files are not read.": "La sincronizaci\u00f3n en ambas direcciones compara el registro anterior; no lee el contenido de los archivos.", "Both directories are required.": "Se necesitan ambos directorios.", "Calculate checksum": "Calcular la suma de comprobaci\u00f3n", "Cancel": "Cancelar", "Cancel all": "Cancelar todo", "Cancelled": "Cancelada", "Cancelling": "Cancelando", "Cannot change the permissions.": "No se pueden cambiar los permisos.", "Cannot connect with that host key.": "No se puede conectar con esa clave del servidor.", "Cannot connect.": "No se puede conectar.", "Cannot copy on the server.": "No se puede copiar en el servidor.", "Cannot create the folder.": "No se puede crear la carpeta.", "Cannot create the symbolic link.": "No se puede crear el enlace simb\u00f3lico.", "Cannot delete.": "No se puede eliminar.", "Cannot open a terminal.": "No se puede abrir un terminal.", "Cannot open the file.": "No se puede abrir el archivo.", "Cannot queue the move.": "No se puede a\u00f1adir el movimiento a la cola.", "Cannot queue the synchronization.": "No se puede a\u00f1adir la sincronizaci\u00f3n a la cola.", "Cannot queue the transfer.": "No se puede a\u00f1adir la transferencia a la cola.", "Cannot reach the LinSCP backend: {error}": "No se puede contactar con el servidor de LinSCP: {error}", "Cannot read the checksum.": "No se puede leer la suma de comprobaci\u00f3n.", "Cannot read the directory.": "No se puede leer el directorio.", "Cannot read the dropped folder: {error}": "No se puede leer la carpeta arrastrada: {error}", "Cannot read the plan.": "No se puede leer el plan.", "Cannot reconnect.": "No se puede reconectar.", "Cannot remove the command.": "No se puede eliminar el comando.", "Cannot remove the folder.": "No se puede eliminar la carpeta.", "Cannot remove the site.": "No se puede eliminar el sitio.", "Cannot rename.": "No se puede renombrar.", "Cannot run the command.": "No se puede ejecutar el comando.", "Cannot save the command.": "No se puede guardar el comando.", "Cannot save the session.": "No se puede guardar la sesi\u00f3n.", "Cannot save the site.": "No se puede guardar el sitio.", "Cannot save.": "No se puede guardar.", "Cannot search.": "No se puede buscar.", "Cannot start watching the directory.": "No se puede empezar a vigilar el directorio.", "Cannot store the language preference.": "No se puede guardar la preferencia de idioma.", "Cannot store the transfer settings.": "No se puede guardar la configuraci\u00f3n de transferencia.", "Cannot upload the public key.": "No se puede subir la clave p\u00fablica.", "Case sensitive": "Distinguir may\u00fasculas", "Change rights": "Cambiar permisos", "Changed": "Modificado", "Checksums ({algorithm})": "Sumas de comprobaci\u00f3n ({algorithm})", "Clear finished": "Borrar terminadas", "Clear selection": "Borrar selecci\u00f3n", "Close": "Cerrar", "Close current session": "Cerrar sesi\u00f3n actual", "Close the active session": "Cerrar la sesi\u00f3n activa", "Close without saving your changes?": "\u00bfCerrar sin guardar los cambios?", "Command Log": "Registro de \u00f3rdenes", "Command log": "Registro de \u00f3rdenes", "Command:": "Comando:", "Commander function keys": "Teclas de funci\u00f3n de Commander", "Commander keys:": "Teclas de Commander:", "Commander \u00b7 secure file transfer": "Commander \u00b7 transferencia segura de archivos", "Commands": "\u00d3rdenes", "Compare by:": "Comparar por:", "Compare this fingerprint with the one the server's own console shows, or\n          with the one your server administrator published. Connecting without\n          checking it lets anybody who can redirect your connection read and change\n          your files.": "Compare esta huella con la que muestra la consola del propio servidor o con la publicada por su administrador. Conectarse sin verificarla permite que cualquiera que redirija su conexi\u00f3n lea y modifique sus archivos.", "Completed": "Completada", "Connect": "Conectar", "Connected to {host}.": "Conectado a {host}.", "Connected, with that host key pinned.": "Conectado con esa clave del servidor fijada.", "Connected: {name}": "Conectado: {name}", "Connection abandoned.": "Conexi\u00f3n cancelada.", "Contains text:": "Contiene el texto:", "Contents (checksum)": "Contenido (suma de comprobaci\u00f3n)", "Copied on the server.": "Copiado en el servidor.", "Copy": "Copiar", "Copy \"{source}\" on the server to:": "Copiar \u00ab{source}\u00bb en el servidor a:", "Copy on the server": "Copiar en el servidor", "Copy the selection to the opposite panel (F5)": "Copiar la selecci\u00f3n al panel opuesto (F5)", "Copy to other panel": "Copiar al otro panel", "Copy to the opposite panel": "Copiar al panel opuesto", "Create a directory": "Crear un directorio", "Create directory": "Crear directorio", "Create symbolic link": "Crear un enlace simb\u00f3lico", "Created the symbolic link.": "Se cre\u00f3 el enlace simb\u00f3lico.", "Cross-panel move currently supports files only. Copy folders, then remove them separately.": "El movimiento entre paneles solo admite archivos. Copie las carpetas y luego elim\u00ednelas por separado.", "Ctrl+A": "Ctrl+A", "Ctrl+L": "Ctrl+L", "Ctrl+N": "Ctrl+N", "Ctrl+R": "Ctrl+R", "Custom commands": "Comandos personalizados", "Custom commands...": "Comandos personalizados...", "Decide per file (the default)": "Decidir por archivo (predeterminado)", "Delete": "Eliminar", "Delete folder \"{folder}\"": "Eliminar carpeta \u00ab{folder}\u00bb", "Delete obsolete files as part of this synchronization?": "\u00bfEliminar los archivos obsoletos durante esta sincronizaci\u00f3n?", "Delete obsolete files on the target side": "Eliminar archivos obsoletos en el destino", "Delete selected item": "Eliminar el elemento seleccionado", "Delete {count} item(s) from the {side} side?\n\n{names}": "\u00bfEliminar {count} elemento(s) del lado {side}?\n\n{names}", "Destination": "Destino", "Direction:": "Direcci\u00f3n:", "Directory": "Directorio", "Discard your changes and reload?": "\u00bfDescartar los cambios y recargar?", "Disconnected": "Desconectado", "Disconnected: {name}": "Desconectado: {name}", "Dismiss": "Descartar", "Do not set permissions on the destination": "No establecer permisos en el destino", "Done": "Terminada", "Download": "Descarga", "Dropping onto the same pane does nothing - drop it on the {side} side to transfer.": "Arrastrar al mismo panel no hace nada: suelte en el lado {side} para transferir.", "Edit": "Editar", "Edit selected remote file": "Editar el archivo remoto seleccionado", "Edit the selected file (F4)": "Editar el archivo seleccionado (F4)", "Editing": "Editando", "Editing {path}": "Editando {path}", "Editor": "Editor", "English": "English", "Enter text to search for.": "Introduzca el texto que desea buscar.", "Espa\u00f1ol": "Espa\u00f1ol", "Every request the page makes carries it, and the backend refuses an": "Cada petici\u00f3n de la p\u00e1gina lo incluye y el servidor rechaza una llamada", "F1": "F1", "F1 help, F2 rename, F3 view, F4 edit, F5 copy to the\n        other panel, F6 move files to the other panel, F7 new directory, F8 delete,\n        F9 properties/rights, F10 close session. Ctrl+A selects all; Enter opens a\n        directory; Backspace goes up one level. Move is available for files; folders\n        can still be copied, but are not moved by the cross-panel move action.": "F1 ayuda, F2 renombrar, F3 ver, F4 editar, F5 copiar al otro panel, F6 mover archivos al otro panel, F7 nuevo directorio, F8 eliminar, F9 propiedades/permisos, F10 cerrar sesi\u00f3n. Ctrl+A selecciona todo; Intro abre un directorio; Retroceso sube un nivel. Solo se pueden mover archivos entre paneles; las carpetas pueden copiarse.", "F10": "F10", "F2": "F2", "F3": "F3", "F4": "F4", "F5": "F5", "F6": "F6", "F7": "F7", "F8": "F8", "F9": "F9", "FTP": "FTP", "FTPS": "FTPS", "Failed": "Fallida", "File": "Archivo", "File mask:": "M\u00e1scara de archivos:", "File operations": "Operaciones de archivos", "File size": "Tama\u00f1o del archivo", "Filename mask:": "M\u00e1scara de nombres:", "Files": "Archivos", "Find": "Buscar", "Find files": "Buscar archivos", "Find remote files": "Buscar archivos remotos", "Folder \"{name}\" does not exist on the {side} side.": "La carpeta \u00ab{name}\u00bb no existe en el lado {side}.", "Go": "Ir", "Go to directory": "Ir al directorio", "Help": "Ayuda", "Host key verification": "Verificaci\u00f3n de la clave del servidor", "Host key:": "Clave del servidor:", "Host name:": "Servidor:", "Include subdirectories": "Incluir subdirectorios", "Invalid username or password.": "Usuario o contrase\u00f1a no v\u00e1lidos.", "Invert selection": "Invertir selecci\u00f3n", "Keep remote directory up to date": "Mantener actualizado el directorio remoto", "KiB/s, 0 = unlimited": "KiB/s, 0 = sin l\u00edmite", "Language": "Idioma", "Leave the host key empty and the first connection asks you to check\n            the server's fingerprint before it goes ahead; tick the box there to\n            remember it. '*' accepts any key for one connection, which is only\n            sensible when you are about to pin the key it reports.": "Deje vac\u00eda la clave del servidor para verificar su huella en la primera conexi\u00f3n; marque la casilla de ese di\u00e1logo para recordarla. '*' acepta cualquier clave durante una conexi\u00f3n: \u00faselo solo si va a fijar inmediatamente la clave que se muestre.", "LinSCP": "LinSCP", "LinSCP Commander": "LinSCP Commander", "LinSCP Commander \u2014 Secure File Transfer": "LinSCP Commander \u2014 Transferencia segura de archivos", "LinSCP Help": "Ayuda de LinSCP", "LinSCP command console": "Consola de \u00f3rdenes de LinSCP", "LinSCP command console. Commands run in the live session of this tab (try 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').": "Consola de \u00f3rdenes de LinSCP. Las \u00f3rdenes se ejecutan en la sesi\u00f3n activa de esta pesta\u00f1a (pruebe 'pwd', 'ls', 'stat keep.txt', 'synchronize local -preview', 'session').", "Line {line}: {snippet}": "L\u00ednea {line}: {snippet}", "Link target": "Destino del enlace", "Literal UTF-8 text": "Texto literal UTF-8", "Local": "Local", "Local dir:": "Directorio local:", "Local directory path": "Ruta del directorio local", "Local directory:": "Directorio local:", "Local files": "Archivos locales", "Local panel": "Panel local", "Local wins": "Prevalece el local", "Local wins (upload local over remote)": "Prevalece el local (subir sobre el remoto)", "Local \u2192 Remote (update the remote directory)": "Local \u2192 Remoto (actualizar el directorio remoto)", "Local:": "Local:", "Main menu": "Men\u00fa principal", "Mark": "Marcar", "Mode": "Modo", "Modification time": "Fecha de modificaci\u00f3n", "Modified": "Modificado", "Modified - not saved": "Modificado - sin guardar", "Move": "Mover", "Move (download)": "Mover (descarga)", "Move (upload)": "Mover (subida)", "Move files to the opposite panel (F6)": "Mover archivos al panel opuesto (F6)", "Move to front of queue": "Mover al principio de la cola", "Move to local": "Mover al local", "Move to other panel": "Mover al otro panel", "Move to remote": "Mover al remoto", "Move to the opposite panel": "Mover al panel opuesto", "Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.": "\u00bfMover {count} archivo(s) a {destination}?\n\nEl origen solo se elimina tras completar correctamente la transferencia.", "Name": "Nombre", "Name of the new folder in {path}": "Nombre de la nueva carpeta en {path}", "Name of the symbolic link to \"{target}\":": "Nombre del enlace simb\u00f3lico a \u00ab{target}\u00bb:", "Name:": "Nombre:", "Never resume": "No reanudar nunca", "New directory": "Nuevo directorio", "New folder": "Nueva carpeta", "New name:": "Nuevo nombre:", "New session": "Nueva sesi\u00f3n", "New site": "Nuevo sitio", "Newer wins": "Prevalece el m\u00e1s reciente", "Newer wins (compare modification times)": "Prevalece el m\u00e1s reciente (comparar fechas)", "No changes": "Sin cambios", "No custom commands saved yet.": "Todav\u00eda no hay comandos personalizados guardados.", "No files": "Sin archivos", "No search yet.": "Todav\u00eda no se ha buscado.", "No stored sessions yet.": "Todav\u00eda no hay sesiones guardadas.", "No transfers in the queue.": "No hay transferencias en la cola.", "Not connected": "Sin conexi\u00f3n", "Not connected.": "Sin conexi\u00f3n.", "Nothing to do: the two directories are in sync.": "No hay nada que hacer: los dos directorios est\u00e1n sincronizados.", "On conflict:": "En caso de conflicto:", "Open a terminal on the remote server": "Abrir un terminal en el servidor remoto", "Open another session": "Abrir otra sesi\u00f3n", "Open remote terminal": "Abrir terminal remoto", "Open sessions": "Sesiones abiertas", "Open the session manager": "Abrir el gestor de sesiones", "Options": "Opciones", "Owner": "Propietario", "Parent Directory": "Directorio superior", "Parent directory": "Directorio superior", "Password:": "Contrase\u00f1a:", "Path on the server": "Ruta en el servidor", "Pause": "Pausar", "Permissions": "Permisos", "Permissions (octal), e.g. 644:": "Permisos (octal), p. ej. 644:", "Port number:": "Puerto:", "Preserve the modification time": "Conservar la fecha de modificaci\u00f3n", "Preview": "Vista previa", "Preview or run a directory synchronization": "Previsualizar o ejecutar una sincronizaci\u00f3n de directorios", "Private key:": "Clave privada:", "Progress": "Progreso", "Properties": "Propiedades", "Properties / rights": "Propiedades / permisos", "Properties of {name}": "Propiedades de {name}", "Protocol:": "Protocolo:", "Public key file to upload to the server (blank for the default id_ed25519.pub or id_rsa.pub):": "Archivo de clave p\u00fablica que subir al servidor (en blanco para id_ed25519.pub o id_rsa.pub):", "Put new transfers at the front of the queue": "Poner las nuevas transferencias al principio de la cola", "Queued": "En cola", "Queued {count} desktop item for upload.": "Se a\u00f1adi\u00f3 {count} elemento del escritorio a la cola de subida.", "Queued {count} desktop item(s) for upload.": "Se a\u00f1adieron {count} elemento(s) del escritorio a la cola de subida.", "Queued {count} desktop items for upload.": "Se a\u00f1adieron {count} elementos del escritorio a la cola de subida.", "Quick actions": "Acciones r\u00e1pidas", "Reconnect": "Reconectar", "Reconnect the active session": "Reconectar la sesi\u00f3n activa", "Reconnected.": "Se ha reconectado.", "Refresh": "Actualizar", "Refresh both file panels": "Actualizar ambos paneles de archivos", "Reload": "Recargar", "Remember this key": "Recordar esta clave", "Remember this key, so the next connection is silent": "Recordar esta clave para no preguntar en la pr\u00f3xima conexi\u00f3n", "Remote": "Remoto", "Remote dir:": "Directorio remoto:", "Remote directory path": "Ruta del directorio remoto", "Remote directory:": "Directorio remoto:", "Remote editor": "Editor remoto", "Remote files": "Archivos remotos", "Remote panel": "Panel remoto", "Remote wins": "Prevalece el remoto", "Remote wins (download remote over local)": "Prevalece el remoto (descargar sobre el local)", "Remote \u2192 Local (update the local directory)": "Remoto \u2192 Local (actualizar el directorio local)", "Remote:": "Remoto:", "Remove all stored sessions in folder \"{folder}\"?": "\u00bfEliminar todas las sesiones guardadas en la carpeta \u00ab{folder}\u00bb?", "Remove the command \"{name}\"?": "\u00bfEliminar el comando \u00ab{name}\u00bb?", "Remove the stored session \"{name}\"?": "\u00bfEliminar la sesi\u00f3n guardada \u00ab{name}\u00bb?", "Removed the command \"{name}\".": "Se elimin\u00f3 el comando \u00ab{name}\u00bb.", "Rename": "Renombrar", "Rename selected item": "Renombrar el elemento seleccionado", "Resolve:": "Resolver:", "Restore defaults": "Restaurar los valores predeterminados", "Resume": "Reanudar", "Resume a part-transferred file": "Reanudar un archivo transferido en parte", "Resume above a size": "Reanudar por encima de un tama\u00f1o", "Resume above:": "Reanudar por encima de:", "Resume support:": "Reanudaci\u00f3n:", "Retry": "Reintentar", "Rights": "Permisos", "Run": "Ejecutar", "Run on selection": "Ejecutar en la selecci\u00f3n", "Run this command on {count} item(s) of the {side} panel?\n\n{command}\n\n{names}": "\u00bfEjecutar este comando sobre {count} elemento(s) del panel {side}?\n\n{command}\n\n{names}", "Running": "En curso", "Running\u2026": "Ejecutando\u2026", "SCP": "SCP", "SFTP (SSH)": "SFTP (SSH)", "Save": "Guardar", "Save (Ctrl+S)": "Guardar (Ctrl+S)", "Save as": "Guardar como", "Save as (remote path):": "Guardar como (ruta remota):", "Save as is available for remote files only.": "Guardar como solo est\u00e1 disponible para archivos remotos.", "Save the command before running it.": "Guarde el comando antes de ejecutarlo.", "Save this host key in which stored session?": "\u00bfEn qu\u00e9 sesi\u00f3n guardada desea guardar esta clave del servidor?", "Saved \"{name}\".": "Se guard\u00f3 \u00ab{name}\u00bb.", "Saved as {path}": "Se guard\u00f3 como {path}", "Saved command templates. Use": "Plantillas de comandos guardadas. Use", "Saved command templates. Write {file} where the\n        selected name belongs; it is quoted the way the LinSCP command line\n        reads quotes, never handed to a shell. A remote command runs in the\n        session the panel is connected to, a local one through the same\n        engine. Every run asks first and shows the command it will use.": "Plantillas de comandos guardadas. Escriba {file} donde va el nombre seleccionado; se entrecomilla como lo hace la l\u00ednea de comandos de LinSCP y nunca se entrega a un int\u00e9rprete. Un comando remoto se ejecuta en la sesi\u00f3n a la que est\u00e1 conectado el panel; uno local, a trav\u00e9s del mismo motor. Cada ejecuci\u00f3n pregunta antes y muestra el comando que va a usar.", "Saved commands": "Comandos guardados", "Saved the command \"{name}\".": "Se guard\u00f3 el comando \u00ab{name}\u00bb.", "Saved {count} desktop item to local directory.": "Se guard\u00f3 {count} elemento del escritorio en el directorio local.", "Saved {count} desktop item(s) to local directory.": "Se guardaron {count} elemento(s) del escritorio en el directorio local.", "Saved {count} desktop items to local directory.": "Se guardaron {count} elementos del escritorio en el directorio local.", "Saved {path}": "Se guard\u00f3 {path}", "Saved.": "Guardado.", "Scans UTF-8 text files up to 8 MiB each and 64 MiB total; larger, binary, or non-UTF-8 files are skipped.": "Examina archivos de texto UTF-8 de hasta 8 MiB cada uno y 64 MiB en total; omite archivos mayores, binarios o que no sean UTF-8.", "Search": "Buscar", "Search inside files": "Buscar dentro de archivos", "Search remote directory": "Buscar en el directorio remoto", "Search the remote directory": "Buscar en el directorio remoto", "Select a command to remove.": "Seleccione un comando para eliminarlo.", "Select a file, not a directory.": "Seleccione un archivo, no un directorio.", "Select a site first.": "Seleccione primero un sitio.", "Select all": "Seleccionar todo", "Select an item in the {side} panel first.": "Seleccione primero un elemento en el panel {side}.", "Select exactly one file in the {side} panel.": "Seleccione exactamente un archivo en el panel {side}.", "Select exactly one item in the {side} panel.": "Seleccione exactamente un elemento en el panel {side}.", "Select exactly one item to rename.": "Seleccione exactamente un elemento para renombrarlo.", "Select files in the {side} panel first.": "Seleccione primero archivos en el panel {side}.", "Select one or more files in the {side} panel first.": "Seleccione antes uno o m\u00e1s archivos en el panel {side}.", "Select or enter a command name first.": "Seleccione o escriba antes un nombre de comando.", "Select something in the {side} pane first.": "Seleccione primero alg\u00fan elemento en el panel {side}.", "Select something to delete first.": "Seleccione primero alg\u00fan elemento para eliminarlo.", "Servers/web1": "Servers/web1", "Sessions": "Sesiones", "Sign in": "Iniciar sesi\u00f3n", "Sign out": "Cerrar sesi\u00f3n", "Sign out ({name})": "Cerrar sesi\u00f3n ({name})", "Signed in as {name}.": "Sesi\u00f3n iniciada como {name}.", "Signed out.": "Sesi\u00f3n cerrada.", "Single-panel view: the panel in focus fills the window.": "Vista de un panel: el panel activo ocupa la ventana.", "Site Manager": "Gestor de sitios", "Site name:": "Nombre del sitio:", "Size": "Tama\u00f1o", "Size in bytes": "Tama\u00f1o en bytes", "Skip conflicting files (safest)": "Omitir archivos en conflicto (m\u00e1s seguro)", "Skip files the destination already has newer": "Omitir los archivos que el destino ya tiene m\u00e1s recientes", "Source": "Origen", "Speed limit:": "L\u00edmite de velocidad:", "Start": "Iniciar", "Start in:": "Iniciar en:", "Status": "Estado", "Stop after:": "Detener tras:", "Store the password in the session file": "Guardar la contrase\u00f1a en el archivo de sesiones", "Stored sessions": "Sesiones guardadas", "Switch to dark theme": "Cambiar al tema oscuro", "Switch to light theme": "Cambiar al tema claro", "Symbolic link": "Enlace simb\u00f3lico", "Sync browsing": "Navegaci\u00f3n sincronizada", "Synchronization queued.": "Sincronizaci\u00f3n a\u00f1adida a la cola.", "Synchronize": "Sincronizar", "Synchronize (both)": "Sincronizar (ambas)", "Synchronize (local)": "Sincronizar (local)", "Synchronize (remote)": "Sincronizar (remoto)", "Synchronize directories": "Sincronizar directorios", "Synchronize the current directories": "Sincronizar los directorios actuales", "Synchronized browsing is off: each pane browses on its own": "Navegaci\u00f3n sincronizada desactivada: cada panel navega por separado", "Synchronized browsing is on: the other pane follows your directory changes": "Navegaci\u00f3n sincronizada activada: el otro panel sigue los cambios de directorio", "Synchronized browsing off.": "Navegaci\u00f3n sincronizada desactivada.", "Synchronized browsing on.": "Navegaci\u00f3n sincronizada activada.", "System default": "Predeterminado del sistema", "Tabs": "Pesta\u00f1as", "Terminal": "Terminal", "That item is no longer listed.": "Ese elemento ya no aparece en la lista.", "The LinSCP command console runs commands in the live session of the current tab.": "La consola de LinSCP ejecuta \u00f3rdenes en la sesi\u00f3n activa de la pesta\u00f1a actual.", "The backend refused this request.": "El servidor rechaz\u00f3 esta petici\u00f3n.", "The command finished.": "El comando termin\u00f3.", "The drop has more than {count} entries.": "Los elementos arrastrados superan el l\u00edmite de {count}.", "The file this link points at does not exist.": "El archivo al que apunta este enlace no existe.", "The folder is too deeply nested.": "La carpeta supera el l\u00edmite de profundidad.", "The host key is now pinned for \"{name}\".": "La clave del servidor est\u00e1 fijada para \u00ab{name}\u00bb.", "The local side": "El lado local", "The public key was uploaded.": "Se subi\u00f3 la clave p\u00fablica.", "The remote side (the open session)": "El lado remoto (la sesi\u00f3n abierta)", "The resume size cannot be negative.": "El tama\u00f1o de reanudaci\u00f3n no puede ser negativo.", "The server did not report the attributes.": "El servidor no inform\u00f3 de los atributos.", "The speed limit must be between 0 and 100000000 KiB/s.": "El l\u00edmite de velocidad debe estar entre 0 y 100000000 KiB/s.", "There is no active session.": "No hay ninguna sesi\u00f3n activa.", "These apply to the transfers you start next: F5, F6,\n        the toolbar buttons and a drop from the desktop. They are the same\n        switches the console client's get and put commands take.": "Se aplican a las pr\u00f3ximas transferencias: F5, F6, los botones de la barra y lo que arrastre desde el escritorio. Son los mismos modificadores que aceptan las \u00f3rdenes get y put del cliente de consola.", "This browser did not expose the dropped files or folder contents.": "Este navegador no facilit\u00f3 los archivos arrastrados o el contenido de las carpetas.", "This plan deletes files. In \"both\" mode only files that the record of the previous synchronization proves were removed on the other side are deleted, and nothing is deleted while a conflict is unresolved.": "Este plan elimina archivos. En modo \u00abambas\u00bb solo se eliminan los archivos que, seg\u00fan el registro de la sincronizaci\u00f3n anterior, se borraron en el otro lado. No se elimina nada mientras haya conflictos sin resolver.", "This run's API token:": "Token de API de esta ejecuci\u00f3n:", "This server was started with user accounts, so every\n        request needs a signed-in session before it is answered.": "Este servidor se inici\u00f3 con cuentas de usuario, as\u00ed que cada petici\u00f3n necesita una sesi\u00f3n iniciada antes de responderse.", "Time and contents": "Fecha y contenido", "Time or size": "Fecha o tama\u00f1o", "Toggle single-panel view": "Alternar la vista de un panel", "Toggle synchronized browsing": "Alternar navegaci\u00f3n sincronizada", "Too many failed sign-ins. Try again in {seconds} seconds.": "Demasiados intentos fallidos. Vuelva a probar en {seconds} segundos.", "Top": "Primero", "Transfer Queue (0)": "Cola de transferencias (0)", "Transfer Queue ({count})": "Cola de transferencias ({count})", "Transfer mode:": "Modo de transferencia:", "Transfer queue": "Cola de transferencias", "Transfer settings": "Configuraci\u00f3n de transferencia", "Transfer settings restored to their defaults.": "Se restaur\u00f3 la configuraci\u00f3n de transferencia predeterminada.", "Transfer settings saved.": "Se guard\u00f3 la configuraci\u00f3n de transferencia.", "Transfer settings...": "Configuraci\u00f3n de transferencia...", "Transfers": "Transferencias", "Two-panel view.": "Vista de dos paneles.", "Type": "Tipo", "Unknown host key": "Clave del servidor desconocida", "Upload": "Subida", "Upload public key to the server": "Subir la clave p\u00fablica al servidor", "User name:": "Usuario:", "View": "Ver", "View or change permissions": "Ver o cambiar permisos", "View selected file": "Ver el archivo seleccionado", "View the selected file (F3)": "Ver el archivo seleccionado (F3)", "Viewing": "Viendo", "Watches the local directory and copies what changes in\n        it to the remote one. It runs as a queue item until you cancel it, so\n        it can be stopped without disturbing the session.": "Vigila el directorio local y copia al remoto lo que cambia en \u00e9l. Se ejecuta como un elemento de la cola hasta que lo cancele, as\u00ed que puede detenerse sin perturbar la sesi\u00f3n.", "Watching the local directory; changes are copied as they happen.": "Vigilando el directorio local; los cambios se copian seg\u00fan ocurren.", "WebDAV": "WebDAV", "as a placeholder for the selected file name. Commands run through the active session.": "como marcador del nombre del archivo seleccionado. Los comandos se ejecutan en la sesi\u00f3n activa.", "bytes": "bytes", "call without it, so only a page served by this run of the\n        server can drive it.": "sin \u00e9l, por lo que solo una p\u00e1gina servida por esta ejecuci\u00f3n del servidor puede controlarlo.", "compares the two panes and shows the plan before it\n        changes anything. \"Both\" uses the record of the previous synchronization to\n        tell a change from a conflict.": "compara los dos paneles y muestra el plan antes de cambiar nada. \u00abAmbas\u00bb usa el registro de la sincronizaci\u00f3n anterior para distinguir cambios y conflictos.", "conflict": "conflicto", "conflict resolved in favour of the local file": "conflicto resuelto a favor del archivo local", "conflict resolved in favour of the newer local file": "conflicto resuelto a favor del archivo local m\u00e1s reciente", "conflict resolved in favour of the newer remote file": "conflicto resuelto a favor del archivo remoto m\u00e1s reciente", "conflict resolved in favour of the remote file": "conflicto resuelto a favor del archivo remoto", "delete-local": "eliminar local", "delete-remote": "eliminar remoto", "download": "descargar", "e.g. *.txt|*.bak (empty = every file)": "p. ej. *.txt|*.bak (vac\u00edo = todos los archivos)", "e.g. Checksum SHA-256": "p. ej. Suma SHA-256", "e.g. checksum sha-256 {file}": "p. ej. checksum sha-256 {file}", "empty = check it on the first connection": "vac\u00edo = verificar en la primera conexi\u00f3n", "every file is copied when the criteria are 'none'": "se copia cada archivo cuando el criterio es 'none'", "it changed locally since the last synchronization": "cambi\u00f3 localmente desde la \u00faltima sincronizaci\u00f3n", "it changed on both sides since the last synchronization": "cambi\u00f3 en ambos lados desde la \u00faltima sincronizaci\u00f3n", "it changed remotely since the last synchronization": "cambi\u00f3 en el remoto desde la \u00faltima sincronizaci\u00f3n", "it is a directory on one side and a file on the other": "es un directorio en un lado y un archivo en el otro", "it is new on the local side": "es nuevo en el lado local", "it is new on the remote side": "es nuevo en el lado remoto", "it only exists locally": "solo existe localmente", "it only exists remotely": "solo existe en el remoto", "it was removed on the other side since the last synchronization": "se elimin\u00f3 en el otro lado desde la \u00faltima sincronizaci\u00f3n", "lscp\u003e": "lscp\u003e", "opens the site manager: stored sessions are shared with the\n        console client, and each tab keeps its own connection open.": "abre el gestor de sitios: las sesiones guardadas se comparten con el cliente de consola y cada pesta\u00f1a mantiene su propia conexi\u00f3n.", "part of a directory that exists on one side only": "parte de un directorio que solo existe en un lado", "passes, 0 = until cancelled": "pasadas, 0 = hasta cancelarlo", "path/to/key": "path/to/key", "run in the queue at the bottom. They can be paused,\n        cancelled and retried; a cancelled transfer does not disturb the session.\n        You can also drop individual files from your desktop onto the remote pane to upload them.": "se ejecutan en la cola inferior. Pueden pausarse, cancelarse y reintentarse; cancelar una transferencia no interrumpe la sesi\u00f3n. Tambi\u00e9n puede arrastrar archivos del escritorio al panel remoto para subirlos.", "seconds, 0 = watch only": "segundos, 0 = solo vigilar", "the contents differ (the local checksum is not the remote one)": "el contenido difiere (la suma local no coincide con la remota)", "the contents differ (the remote checksum is not the local one)": "el contenido difiere (la suma remota no coincide con la local)", "the local directory does not exist yet": "el directorio local a\u00fan no existe", "the local file differs": "el archivo local difiere", "the local file is newer": "el archivo local es m\u00e1s reciente", "the local file is newer and there is no previous synchronization to compare with": "el archivo local es m\u00e1s reciente y no hay una sincronizaci\u00f3n anterior con la que comparar", "the other side does not have it": "no existe en el otro lado", "the remote directory does not exist yet": "el directorio remoto a\u00fan no existe", "the remote file differs": "el archivo remoto difiere", "the remote file is newer": "el archivo remoto es m\u00e1s reciente", "the remote file is newer and there is no previous synchronization to compare with": "el archivo remoto es m\u00e1s reciente y no hay una sincronizaci\u00f3n anterior con la que comparar", "the sizes differ": "los tama\u00f1os difieren", "the timestamps are equal but the sizes differ, and there is no previous synchronization to compare with": "las fechas son iguales pero los tama\u00f1os difieren y no hay una sincronizaci\u00f3n anterior con la que comparar", "unchanged": "sin cambios", "upload": "subir", "{count} command failed.": "Fall\u00f3 {count} comando.", "{count} commands failed.": "Fallaron {count} comandos.", "{count} desktop item refused.": "Se rechaz\u00f3 {count} elemento del escritorio.", "{count} desktop item(s) refused.": "Se rechazaron {count} elemento(s) del escritorio.", "{count} desktop items refused.": "Se rechazaron {count} elementos del escritorio.", "{count} item(s), {size}{selection}": "{count} elemento(s), {size}{selection}", "{count} item, {size}{selection}": "{count} elemento, {size}{selection}", "{count} items, {size}{selection}": "{count} elementos, {size}{selection}", "{count} match": "{count} coincidencia", "{count} match(es)": "{count} coincidencia(s)", "{count} matches": "{count} coincidencias", "{count} move(s) queued. Source files are removed after successful transfer.": "Se a\u00f1adieron {count} movimiento(s) a la cola. Los archivos de origen se eliminan tras transferirlos correctamente.", "{count} transfer queued.": "Se a\u00f1adi\u00f3 {count} transferencia a la cola.", "{count} transfer(s) queued.": "Se a\u00f1adieron {count} transferencia(s) a la cola.", "{count} transfers queued.": "Se a\u00f1adieron {count} transferencias a la cola.", "{host} (port {port}) offers this key, and it is not cached yet. Connect only if the fingerprint is the one you expect:": "{host} (puerto {port}) ofrece esta clave, que a\u00fan no est\u00e1 guardada. Con\u00e9ctese solo si la huella es la que esperaba:", "{mode} {path}": "{mode} {path}", "{reason} ({source} against {target} bytes)": "{reason} ({source} frente a {target} bytes)", "{size} bytes, modified {date}{readonly}": "{size} bytes, modificado {date}{readonly}", "{upload} to upload, {download} to download, {local} local and {remote} remote deletions, {conflicts} conflict(s), {unchanged} unchanged.": "{upload} por subir, {download} por descargar, {local} eliminaciones locales y {remote} remotas, {conflicts} conflicto(s), {unchanged} sin cambios."}};
   /* END GENERATED GUI CATALOGS */
 
   function normalizeLanguage(value) {
@@ -693,6 +872,10 @@
       try { return localStorage.getItem('lscp-sync-browse') === '1'; }
       catch (error) { return false; }
     })(),
+    explorer: (() => {
+      try { return localStorage.getItem('lscp-explorer') === '1'; }
+      catch (error) { return false; }
+    })(),
     dragSide: null
   };
 
@@ -755,9 +938,24 @@
     if (window.LSCP_TOKEN) {
       options.headers['X-LSCP-Token'] = window.LSCP_TOKEN;
     }
+    // A server started with user accounts asks every state-changing request
+    // for the token its own login answered with.
+    if (csrfToken && (options.method || 'GET').toUpperCase() === 'POST') {
+      options.headers['X-LSCP-CSRF'] = csrfToken;
+    }
     try {
       const response = await fetch(url, options);
       const data = await response.json().catch(() => ({}));
+      if (data && data.login_required) {
+        // The signed-in session expired, or this run has accounts and the
+        // page has not signed in at all. Asking is the only way forward,
+        // so the answer is a dialog rather than a toast that fades.
+        signedInAs = '';
+        csrfToken = '';
+        setAccountMenu();
+        openLogin();
+        return { success: false, error: data.error || 'login_required' };
+      }
       if (response.status === 401 || response.status === 403) {
         toast(errorMessage(data.error, t("The backend refused this request.")), true);
         return { success: false, error: data.error || 'refused' };
@@ -809,7 +1007,11 @@
   }
 
   function joinPath(base, name) {
-    return (base.replace(/\/+$/, '') || '/') + '/' + name;
+    // Stripping the trailing slashes first and then adding one back is what
+    // keeps the root from producing '//name': at '/', the stripped base is
+    // empty and only the separator is added.
+    const trimmed = String(base || '').replace(/\/+$/, '');
+    return trimmed + '/' + name;
   }
 
   function parentPath(path) {
@@ -1018,7 +1220,6 @@
     const pane = state[side];
     const tbody = $(side + 'FileList');
     tbody.innerHTML = '';
-    let total = 0;
     let selected = 0;
     for (const entry of pane.entries) {
       const row = document.createElement('tr');
@@ -1028,10 +1229,15 @@
         row.className = 'selected';
         selected++;
       }
-      if (entry.is_dir) total++;
-      const icon = entry.is_dir ? '📁' : '📄';
+      const icon = entry.is_dir ? '📁' : (entry.is_link ? '🔗' : '📄');
+      // A broken link is still an entry: it is on disk, it takes a name,
+      // and the panel is the only place the user can remove it from.
+      const label = escapeHtml(entry.name) +
+        (entry.is_link ? escapeHtml(entry.link_target ? ' \u2192 ' + entry.link_target : '') : '') +
+        (entry.is_broken ? ' ' + escapeHtml(t('(broken link)')) : '');
+      if (entry.is_broken) row.classList.add('broken-link');
       row.innerHTML =
-        '<td title="' + escapeHtml(entry.name) + '">' + icon + ' ' + escapeHtml(entry.name) + '</td>' +
+        '<td title="' + escapeHtml(entry.name) + '">' + icon + ' ' + label + '</td>' +
         '<td>' + (entry.is_dir ? '&lt;DIR&gt;' : formatBytes(entry.size)) + '</td>' +
         '<td>' + escapeHtml(entry.date || '') + '</td>' +
         '<td>' + escapeHtml(entry.permissions || '') + '</td>';
@@ -1182,7 +1388,7 @@
     const transfer = event.dataTransfer;
     const externalFiles = transfer &&
       ((transfer.files && transfer.files.length > 0) ||
-       (transfer.types && Array.from(transfer.types).indexOf(t("Files")) >= 0) ||
+       (transfer.types && Array.from(transfer.types).indexOf('Files') >= 0) ||
        (transfer.items && Array.from(transfer.items).some(item => item.kind === 'file')));
     if (externalFiles) {
       event.preventDefault();
@@ -1321,7 +1527,7 @@
     if (!event || !event.dataTransfer) return;
     const dataTransfer = event.dataTransfer;
     const externalFileDrop =
-      (dataTransfer.types && Array.from(dataTransfer.types).includes(t("Files"))) ||
+      (dataTransfer.types && Array.from(dataTransfer.types).includes('Files')) ||
       (dataTransfer.files && dataTransfer.files.length > 0) ||
       (dataTransfer.items && Array.from(dataTransfer.items).some(item => item.kind === 'file'));
     if (externalFileDrop) {
@@ -1388,6 +1594,7 @@
     state.focusPane = side;
     $('localPane').classList.toggle('active', side === 'local');
     $('remotePane').classList.toggle('active', side === 'remote');
+    if (state.explorer) applyExplorerMode();
   }
 
   function selectAllInFocusedPane() {
@@ -1444,15 +1651,18 @@
     const direction = source === 'local' ? 'upload' : 'download';
     const destination = source === 'local' ? state.remote.path : state.local.path;
     if (!confirm(t("Move {count} file(s) to {destination}?\n\nThe source is removed only after its transfer completes successfully.", {count: names.length, destination}))) return;
-    const result = await apiPost('/api/transfer/move', {
+    // A move deletes its source when the transfer lands, so it never takes
+    // the mask or the speed limit from the dialog by accident: those decide
+    // which files go, and a move was asked for these specific ones.
+    const result = await apiPost('/api/transfer/move', Object.assign({
       tab: tab.id,
       direction: direction,
       names: names,
       local_dir: state.local.path,
       remote_dir: state.remote.path,
-      resume: true,
-      preserve_time: true
-    });
+      resume: transferSettings.resume !== false,
+      preserve_time: transferSettings.preserveTime !== false
+    }, transferSettings.priority ? { priority: true } : {}));
     if (result.success) {
       toast(t("{count} move(s) queued. Source files are removed after successful transfer.", {count: names.length}));
       switchTab('queue');
@@ -1473,15 +1683,12 @@
     const tab = activeTab();
     if (!tab || !tab.connected) { toast(t("Not connected."), true); return; }
     const endpoint = direction === 'upload' ? '/api/transfer/upload' : '/api/transfer/download';
-    const payload = {
+    const payload = Object.assign({
       tab: tab.id,
       names: names,
       local_dir: state.local.path,
-      remote_dir: state.remote.path,
-      resume: true,
-      recursive: true,
-      preserve_time: true
-    };
+      remote_dir: state.remote.path
+    }, transferOptions());
     const result = await apiPost(endpoint, payload);
     if (result.success) {
       toast(tn("{count} transfer queued.", "{count} transfers queued.", names.length));
@@ -1623,7 +1830,11 @@
     $('siteUser').value = site.username || '';
     $('sitePass').value = site.password || '';
     $('siteKey').value = site.keyfile || '';
-    $('siteHostKey').value = site.hostkey || '*';
+    // Empty means 'verify': the first connection reports the fingerprint
+    // and waits for it to be pinned. Defaulting the form to '*' turned
+    // every stored site into one that accepts any key, which is the
+    // opposite of what the dialog below it says it does.
+    $('siteHostKey').value = site.hostkey || '';
     $('siteRemoteDir').value = site.initial_dir || '/';
     $('siteLocalDir').value = site.local_dir || state.local.path || '';
     $('siteRemember').checked = !!site.password;
@@ -2055,6 +2266,10 @@
     }
   }
 
+  // The levels add_log() uses. One that is not here would put an unknown
+  // class in the markup, so it falls back to the plain one.
+  const LOG_LEVELS = ['info', 'error', 'cmd', 'success'];
+
   async function refreshLogs() {
     const data = await apiGet('/api/logs');
     if (!data) return;
@@ -2063,8 +2278,13 @@
     for (const entry of data.logs) {
       const div = document.createElement('div');
       div.className = 'log-line';
+      // The level names a style, so it is reduced to one before it is put
+      // in markup: an entry that arrived with a quote in its level would
+      // otherwise end the attribute and start an element of its own.
+      const level = String(entry.level || 'info').replace(/[^a-z]/g, '');
       div.innerHTML = '<span class="log-time">' + escapeHtml(entry.time) + '</span>' +
-        '<span class="log-' + entry.level + '">' + escapeHtml(entry.text) + '</span>';
+        '<span class="log-' + (LOG_LEVELS.includes(level) ? level : 'info') + '">' +
+        escapeHtml(entry.text) + '</span>';
       box.appendChild(div);
     }
     box.scrollTop = box.scrollHeight;
@@ -2198,133 +2418,637 @@
    * Custom commands (Explorer-style persisted command templates)       *
    * ------------------------------------------------------------------ */
 
-  let _customCommands = [];
+  /* A template is a command line with {file} where the selected name goes.
+   * The list is kept here so the dialog can render it without asking the
+   * backend again between edits, and so a run can name the exact template
+   * the user picked rather than one that happens to share a name. */
+  let customCommands = [];
+  let selectedCustomCommand = null;
+
+  async function loadCustomCommands() {
+    const data = await apiPost('/api/custom-commands', { action: 'list' });
+    customCommands = (data && data.commands) || [];
+    return customCommands;
+  }
 
   async function openCustomCommands() {
-    try {
-      const resp = await fetch('/api/custom-commands', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-LSCP-Token': API_TOKEN},
-        body: JSON.stringify({action: 'list'})
-      });
-      const data = await resp.json();
-      _customCommands = data.commands || [];
-    } catch (e) {
-      _customCommands = [];
-    }
+    await loadCustomCommands();
+    selectedCustomCommand = null;
+    $('customCmdName').value = '';
+    $('customCmdCommand').value = '';
+    $('customCmdScope').value = 'remote';
+    $('customCommandsResult').textContent = '';
     renderCustomCommandsList();
     openModal('customCommandsModal');
   }
 
   function renderCustomCommandsList() {
-    const list = document.getElementById('customCommandsList');
-    if (!_customCommands.length) {
-      list.innerHTML = '<div style="padding:8px; color:#888; font-size:11px;">No custom commands saved yet.</div>';
+    const list = $('customCommandsList');
+    list.innerHTML = '';
+    if (!customCommands.length) {
+      const empty = document.createElement('div');
+      empty.className = 'custom-command-empty';
+      empty.textContent = t('No custom commands saved yet.');
+      list.appendChild(empty);
       return;
     }
-    list.innerHTML = _customCommands.map((cmd, idx) =>
-      `<div style="padding:4px 8px; cursor:pointer; border-bottom:1px solid var(--border, #eee); font-size:12px;"
-            onclick="selectCustomCommand(${idx})"
-            ondblclick="selectCustomCommand(${idx}); runCustomCommand()">
-        <strong>${cmd.name}</strong> &mdash; <code>${cmd.command}</code>
-      </div>`
-    ).join('');
+    customCommands.forEach((command, index) => {
+      const row = document.createElement('div');
+      row.className = 'custom-command' +
+        (selectedCustomCommand === command.name ? ' selected' : '');
+      row.setAttribute('role', 'button');
+      row.tabIndex = 0;
+      // Every field is text, never markup: a command name lives in a file
+      // the user can edit by hand, and this dialog holds this run's API
+      // token, so an element injected here would hold it too.
+      const title = document.createElement('strong');
+      title.textContent = command.name;
+      const scope = document.createElement('span');
+      scope.className = 'custom-command-scope';
+      scope.textContent = command.scope === 'local' ? t('Local') : t('Remote');
+      const body = document.createElement('code');
+      body.textContent = command.command;
+      row.appendChild(title);
+      row.appendChild(scope);
+      row.appendChild(body);
+      row.onclick = () => selectCustomCommand(index);
+      row.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          selectCustomCommand(index);
+        }
+      };
+      list.appendChild(row);
+    });
   }
 
-  function selectCustomCommand(idx) {
-    const cmd = _customCommands[idx];
-    if (!cmd) return;
-    document.getElementById('customCmdName').value = cmd.name;
-    document.getElementById('customCmdCommand').value = cmd.command;
-    // Highlight selection
-    const items = document.getElementById('customCommandsList').children;
-    for (let i = 0; i < items.length; i++) {
-      items[i].style.background = i === idx ? 'var(--accent, #0078d4)' : '';
-      items[i].style.color = i === idx ? '#fff' : '';
-    }
+  function selectCustomCommand(index) {
+    const command = customCommands[index];
+    if (!command) return;
+    selectedCustomCommand = command.name;
+    $('customCmdName').value = command.name;
+    $('customCmdCommand').value = command.command;
+    $('customCmdScope').value = command.scope === 'local' ? 'local' : 'remote';
+    $('customCommandsResult').textContent = '';
+    renderCustomCommandsList();
+  }
+
+  function customCommandForm() {
+    return {
+      name: $('customCmdName').value.trim(),
+      command: $('customCmdCommand').value.trim(),
+      scope: $('customCmdScope').value === 'local' ? 'local' : 'remote'
+    };
   }
 
   async function saveCustomCommand() {
-    const name = document.getElementById('customCmdName').value.trim();
-    const command = document.getElementById('customCmdCommand').value.trim();
-    if (!name || !command) {
-      toast('Name and command are required.', true);
+    const form = customCommandForm();
+    if (!form.name || !form.command) {
+      toast(t('A name and a command are required.'), true);
       return;
     }
-    try {
-      await fetch('/api/custom-commands', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-LSCP-Token': API_TOKEN},
-        body: JSON.stringify({action: 'save', name: name, command: command})
-      });
-      toast('Saved custom command: ' + name);
-      await openCustomCommands();
-    } catch (e) {
-      toast('Cannot save the custom command: ' + e, true);
+    const result = await apiPost('/api/custom-commands',
+      Object.assign({ action: 'save' }, form));
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot save the command.')), true);
+      return;
     }
+    customCommands = result.commands || [];
+    selectedCustomCommand = form.name;
+    toast(t('Saved the command "{name}".', { name: form.name }));
+    renderCustomCommandsList();
   }
 
   async function deleteCustomCommand() {
-    const name = document.getElementById('customCmdName').value.trim();
-    if (!name) return;
-    try {
-      await fetch('/api/custom-commands', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-LSCP-Token': API_TOKEN},
-        body: JSON.stringify({action: 'delete', name: name})
-      });
-      document.getElementById('customCmdName').value = '';
-      document.getElementById('customCmdCommand').value = '';
-      toast('Removed custom command: ' + name);
-      await openCustomCommands();
-    } catch (e) {
-      toast('Cannot remove the custom command: ' + e, true);
+    const name = $('customCmdName').value.trim();
+    if (!name) { toast(t('Select a command to remove.'), true); return; }
+    if (!confirm(t('Remove the command "{name}"?', { name }))) return;
+    const result = await apiPost('/api/custom-commands',
+      { action: 'delete', name: name });
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot remove the command.')), true);
+      return;
     }
+    customCommands = result.commands || [];
+    if (selectedCustomCommand === name) selectedCustomCommand = null;
+    $('customCmdName').value = '';
+    $('customCmdCommand').value = '';
+    $('customCommandsResult').textContent = '';
+    toast(t('Removed the command "{name}".', { name }));
+    renderCustomCommandsList();
+  }
+
+  /* The names a run applies to: the selection of the panel in focus, read
+   * from the Set the panel actually keeps. An entry has no 'selected'
+   * property, so the version of this that looked for one always found
+   * nothing and the run button could only report that no file was chosen. */
+  function customCommandTargets() {
+    const side = state.focusPane;
+    return { side: side, names: selectedNames(side) };
   }
 
   async function runCustomCommand() {
-    const name = document.getElementById('customCmdName').value.trim();
-    if (!name) {
-      toast('Select or enter a command name first.', true);
+    const form = customCommandForm();
+    const resultEl = $('customCommandsResult');
+    if (!form.name) {
+      toast(t('Select or enter a command name first.'), true);
       return;
     }
-    // Collect selected file names from the focused pane
-    const pane = state.focusPane === 'remote' ? state.remote : state.local;
-    const filenames = [];
-    if (pane.entries) {
-      for (const entry of pane.entries) {
-        if (entry.selected) filenames.push(entry.name);
-      }
-    }
-    if (!filenames.length) {
-      toast('No files selected. Select one or more files first.', true);
+    const template = customCommands.find(item => item.name === form.name);
+    if (!template) {
+      toast(t('Save the command before running it.'), true);
       return;
     }
-    const resultEl = document.getElementById('customCommandsResult');
-    resultEl.textContent = 'Running...';
-    try {
-      const resp = await fetch('/api/custom-commands', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-LSCP-Token': API_TOKEN},
-        body: JSON.stringify({action: 'run', name: name, filenames: filenames})
-      });
-      const data = await resp.json();
-      if (!data.success) {
-        resultEl.textContent = data.error || 'Command failed.';
-        return;
+    const targets = customCommandTargets();
+    if (!targets.names.length) {
+      toast(t('Select one or more files in the {side} panel first.',
+        { side: sideLabel(targets.side) }), true);
+      return;
+    }
+    // A template is an arbitrary command line, and this is the moment it
+    // runs, so the command and the names it will get are shown first.
+    const preview = template.command.split('{file}').join(
+      targets.names.length === 1 ? targets.names[0] : '\u2026');
+    if (!confirm(t('Run this command on {count} item(s) of the {side} panel?\n\n{command}\n\n{names}',
+      { count: targets.names.length, side: sideLabel(targets.side),
+        command: preview, names: targets.names.join('\n') }))) {
+      return;
+    }
+    resultEl.textContent = t('Running\u2026');
+    const result = await apiPost('/api/custom-commands', {
+      action: 'run', name: form.name, filenames: targets.names, tab: tabId()
+    });
+    if (!result.success) {
+      resultEl.textContent = '';
+      toast(errorMessage(result.error, t('Cannot run the command.')), true);
+      return;
+    }
+    resultEl.textContent = '';
+    let failed = 0;
+    for (const item of result.results || []) {
+      if (!item.success) failed++;
+      const line = document.createElement('div');
+      line.className = 'custom-command-result' + (item.success ? ' ok' : ' failed');
+      const head = document.createElement('strong');
+      head.textContent = item.file + ': ' +
+        (item.success ? t('Done') : t('Failed'));
+      line.appendChild(head);
+      const detail = [item.error, item.stdout, item.stderr]
+        .filter(text => text && text.trim()).join('\n').trim();
+      if (detail) {
+        const body = document.createElement('pre');
+        body.textContent = detail;
+        line.appendChild(body);
       }
-      let output = '';
-      for (const r of data.results || []) {
-        output += r.file + ': ' + (r.success ? 'OK' : 'FAILED') + '\n';
-        if (r.stdout) output += r.stdout + '\n';
-        if (r.stderr) output += r.stderr + '\n';
+      resultEl.appendChild(line);
+    }
+    toast(failed
+      ? tn('{count} command failed.', '{count} commands failed.', failed)
+      : t('The command finished.'), !!failed);
+    // A command may have changed either side, so both panes are refreshed.
+    await refreshPanes(null);
+  }
+  /* ------------------------------------------------------------------ *
+   * Sign-in                                                            *
+   * ------------------------------------------------------------------ */
+
+  /* The server started with --accounts-file= answers nothing until a
+   * session signs in, and says so with 'login_required'. The page had no
+   * way to answer that: it showed an empty panel and an error toast, and
+   * the accounts the backend kept were unreachable from a browser. */
+  let csrfToken = '';
+  let signedInAs = '';
+
+  function setAccountMenu() {
+    const item = $('accountMenuItem');
+    const separator = $('accountSeparator');
+    if (!item) return;
+    const shown = !!accountsEnabled;
+    item.style.display = shown ? '' : 'none';
+    separator.style.display = shown ? '' : 'none';
+    item.textContent = signedInAs
+      ? t('Sign out ({name})', { name: signedInAs })
+      : t('Sign in');
+    const logout = $('loginLogoutBtn');
+    if (logout) logout.style.display = signedInAs ? '' : 'none';
+  }
+
+  let accountsEnabled = false;
+
+  async function checkAccounts() {
+    const data = await apiGet('/api/accounts');
+    accountsEnabled = !!(data && data.accounts_enabled);
+    if (!accountsEnabled) { setAccountMenu(); return; }
+    const status = await apiGet('/api/login');
+    signedInAs = (status && status.logged_in && status.username) || '';
+    csrfToken = (status && status.csrf_token) || '';
+    setAccountMenu();
+    if (!signedInAs) openLogin();
+  }
+
+  function openLogin() {
+    $('loginError').textContent = '';
+    if (!signedInAs) {
+      $('loginUser').value = '';
+      $('loginPassword').value = '';
+    }
+    setAccountMenu();
+    openModal('loginModal');
+    setTimeout(() => $('loginUser').focus(), 50);
+  }
+
+  async function submitLogin() {
+    const username = $('loginUser').value.trim();
+    const password = $('loginPassword').value;
+    const errorBox = $('loginError');
+    errorBox.textContent = '';
+    if (!username || !password) {
+      errorBox.textContent = t('A user name and a password are required.');
+      return;
+    }
+    // No token and no CSRF header here: this is the request that earns them.
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json',
+                 'X-LSCP-Token': window.LSCP_TOKEN || '' },
+      body: JSON.stringify({ username: username, password: password })
+    });
+    const data = await response.json().catch(() => ({}));
+    $('loginPassword').value = '';
+    if (response.ok && data.success) {
+      signedInAs = data.username || username;
+      csrfToken = data.csrf_token || '';
+      setAccountMenu();
+      closeModal('loginModal');
+      toast(t('Signed in as {name}.', { name: signedInAs }));
+      await refreshAll();
+      return;
+    }
+    errorBox.textContent = data.retry_after
+      ? t('Too many failed sign-ins. Try again in {seconds} seconds.',
+          { seconds: data.retry_after })
+      : (data.error ? t(String(data.error)) : t('Invalid username or password.'));
+  }
+
+  async function submitLogout() {
+    await apiPost('/api/logout', {});
+    signedInAs = '';
+    csrfToken = '';
+    setAccountMenu();
+    toast(t('Signed out.'));
+    openLogin();
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Transfer settings                                                  *
+   * ------------------------------------------------------------------ */
+
+  const TRANSFER_DEFAULTS = {
+    transfer: '', filemask: '', speed: 0, resumesupport: '', resumeBytes: 0,
+    resume: true, preserveTime: true, newerOnly: false, append: false,
+    noPermissions: false, priority: false
+  };
+
+  let transferSettings = Object.assign({}, TRANSFER_DEFAULTS);
+
+  function loadTransferSettings() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem('lscp-transfer') || 'null'); }
+    catch (error) { saved = null; }
+    transferSettings = Object.assign({}, TRANSFER_DEFAULTS, saved || {});
+  }
+
+  function persistTransferSettings() {
+    try { localStorage.setItem('lscp-transfer', JSON.stringify(transferSettings)); }
+    catch (error) { toast(t('Cannot store the transfer settings.'), true); }
+  }
+
+  function openTransferSettings() {
+    $('transferMode').value = transferSettings.transfer || '';
+    $('transferMask').value = transferSettings.filemask || '';
+    $('transferSpeed').value = transferSettings.speed || 0;
+    $('transferResumeSupport').value = transferSettings.resumesupport || '';
+    $('transferResumeBytes').value = transferSettings.resumeBytes || 0;
+    $('transferResume').checked = transferSettings.resume !== false;
+    $('transferPreserveTime').checked = transferSettings.preserveTime !== false;
+    $('transferNewerOnly').checked = !!transferSettings.newerOnly;
+    $('transferAppend').checked = !!transferSettings.append;
+    $('transferNoPermissions').checked = !!transferSettings.noPermissions;
+    $('transferPriority').checked = !!transferSettings.priority;
+    resumeSupportChanged();
+    openModal('transferModal');
+  }
+
+  function resumeSupportChanged() {
+    $('transferResumeBytesRow').style.display =
+      $('transferResumeSupport').value === 'bytes' ? 'flex' : 'none';
+  }
+
+  function saveTransferSettings() {
+    const speed = parseInt($('transferSpeed').value, 10) || 0;
+    const resumeBytes = parseInt($('transferResumeBytes').value, 10) || 0;
+    if (speed < 0 || speed > 100000000) {
+      toast(t('The speed limit must be between 0 and 100000000 KiB/s.'), true);
+      return;
+    }
+    if (resumeBytes < 0) {
+      toast(t('The resume size cannot be negative.'), true);
+      return;
+    }
+    const support = $('transferResumeSupport').value;
+    transferSettings = {
+      transfer: $('transferMode').value,
+      filemask: $('transferMask').value.trim(),
+      speed: speed,
+      resumesupport: support === 'bytes' ? String(resumeBytes) : support,
+      resumeBytes: resumeBytes,
+      resume: $('transferResume').checked,
+      preserveTime: $('transferPreserveTime').checked,
+      newerOnly: $('transferNewerOnly').checked,
+      append: $('transferAppend').checked,
+      noPermissions: $('transferNoPermissions').checked,
+      priority: $('transferPriority').checked
+    };
+    persistTransferSettings();
+    closeModal('transferModal');
+    toast(t('Transfer settings saved.'));
+  }
+
+  function resetTransferSettings() {
+    transferSettings = Object.assign({}, TRANSFER_DEFAULTS);
+    persistTransferSettings();
+    openTransferSettings();
+    toast(t('Transfer settings restored to their defaults.'));
+  }
+
+  /* The payload every transfer endpoint shares, so the dialog applies to
+   * F5, F6, the toolbar and a desktop drop alike. */
+  function transferOptions() {
+    return {
+      resume: transferSettings.resume !== false,
+      recursive: true,
+      newer_only: !!transferSettings.newerOnly,
+      preserve_time: transferSettings.preserveTime !== false,
+      transfer: transferSettings.transfer || '',
+      filemask: transferSettings.filemask || '',
+      speed: transferSettings.speed || 0,
+      append: !!transferSettings.append,
+      no_permissions: !!transferSettings.noPermissions,
+      resumesupport: transferSettings.resumesupport || '',
+      priority: !!transferSettings.priority
+    };
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Properties, checksums and the other remote operations              *
+   * ------------------------------------------------------------------ */
+
+  function propertyRow(label, value) {
+    const row = document.createElement('tr');
+    const head = document.createElement('th');
+    head.textContent = label;
+    const cell = document.createElement('td');
+    cell.textContent = value === null || value === undefined || value === ''
+      ? '\u2013' : String(value);
+    row.appendChild(head);
+    row.appendChild(cell);
+    return row;
+  }
+
+  function propertyTable(rows) {
+    const table = document.createElement('table');
+    table.className = 'properties-table';
+    for (const [label, value] of rows) table.appendChild(propertyRow(label, value));
+    return table;
+  }
+
+  async function openProperties() {
+    const side = state.focusPane;
+    const names = selectedNames(side);
+    const body = $('propertiesBody');
+    body.innerHTML = '';
+    if (names.length !== 1) {
+      toast(t('Select exactly one item in the {side} panel.',
+        { side: sideLabel(side) }), true);
+      return;
+    }
+    const entry = state[side].entries.find(item => item.name === names[0]);
+    $('propertiesTitle').textContent = t('Properties of {name}', { name: names[0] });
+    if (!entry) { toast(t('That item is no longer listed.'), true); return; }
+    if (side === 'local') {
+      body.appendChild(propertyTable([
+        [t('Name'), entry.name], [t('Type'), entry.is_dir ? t('Directory') :
+          (entry.is_link ? t('Symbolic link') : t('File'))],
+        [t('Size'), entry.is_dir ? '' : formatBytes(entry.size)],
+        [t('Permissions'), entry.permissions], [t('Modified'), entry.date],
+        [t('Owner'), entry.owner],
+        [t('Link target'), entry.link_target || (entry.is_link ? '' : null)]
+      ]));
+      if (entry.is_broken) {
+        const warning = document.createElement('div');
+        warning.className = 'hint';
+        warning.textContent = t('The file this link points at does not exist.');
+        body.appendChild(warning);
       }
-      resultEl.textContent = output || 'Done.';
-      // Refresh the pane that might have changed
-      if (state.focusPane === 'remote') loadRemote(state.remote.path);
-      else loadLocal(state.local.path);
-    } catch (e) {
-      resultEl.textContent = 'Error: ' + e;
+      openModal('propertiesModal');
+      return;
+    }
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    body.appendChild(propertyTable([[t('Name'), entry.name],
+      [t('Size'), entry.is_dir ? '' : formatBytes(entry.size)],
+      [t('Permissions'), entry.permissions], [t('Modified'), entry.date],
+      [t('Owner'), entry.owner]]));
+    const result = await apiPost('/api/remote/properties',
+      { tab: tab.id, name: entry.name });
+    if (result.success) {
+      const attributes = result.attributes || {};
+      body.appendChild(propertyTable([
+        [t('Path on the server'), attributes.path || ''],
+        [t('Size in bytes'), attributes.size || 0],
+        [t('Type'), attributes.is_dir ? t('Directory') : t('File')],
+        [t('Mode'), attributes.permissions || '']
+      ]));
+      if (attributes.raw) {
+        const pre = document.createElement('pre');
+        pre.textContent = attributes.raw;
+        pre.style.cssText = 'margin-top:8px; font-size:10px; white-space:pre-wrap;';
+        body.appendChild(pre);
+      }
+    } else {
+      const note = document.createElement('div');
+      note.className = 'hint';
+      note.textContent = errorMessage(result.error,
+        t('The server did not report the attributes.'));
+      body.appendChild(note);
+    }
+    openModal('propertiesModal');
+  }
+
+  async function openChecksum() {
+    const side = state.focusPane;
+    if (side !== 'remote') {
+      toast(t('A checksum is read from the remote side; select the remote panel.'),
+        true);
+      return;
+    }
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    const names = selectedNames(side).filter(name => {
+      const entry = state.remote.entries.find(item => item.name === name);
+      return entry && !entry.is_dir;
+    });
+    if (!names.length) {
+      toast(t('Select one or more files in the {side} panel first.',
+        { side: sideLabel(side) }), true);
+      return;
+    }
+    const algorithm = prompt(t('Algorithm (sha-256, sha-1, md5 or crc32):'), 'sha-256');
+    if (!algorithm) return;
+    const result = await apiPost('/api/remote/checksum',
+      { tab: tab.id, algorithm: algorithm.trim(), names: names });
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot read the checksum.')), true);
+      return;
+    }
+    $('propertiesTitle').textContent = t('Checksums ({algorithm})',
+      { algorithm: result.algorithm });
+    const body = $('propertiesBody');
+    body.innerHTML = '';
+    for (const item of result.results || []) {
+      body.appendChild(propertyTable([[item.name, item.checksum || item.error || '']]));
+    }
+    openModal('propertiesModal');
+  }
+
+  async function promptRemoteCopy() {
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    const names = selectedNames('remote');
+    if (names.length !== 1) {
+      toast(t('Select exactly one item in the {side} panel.',
+        { side: t('Remote') }), true);
+      return;
+    }
+    const destination = prompt(t('Copy "{source}" on the server to:',
+      { source: names[0] }), names[0] + '.copy');
+    if (!destination) return;
+    const result = await apiPost('/api/remote/copy', {
+      tab: tab.id, source: names[0], destination: destination.trim()
+    });
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot copy on the server.')), true);
+      return;
+    }
+    toast(t('Copied on the server.'));
+    await refreshPanes('remote');
+  }
+
+  async function promptRemoteLink() {
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    const names = selectedNames('remote');
+    if (names.length !== 1) {
+      toast(t('Select exactly one item in the {side} panel.',
+        { side: t('Remote') }), true);
+      return;
+    }
+    const linkName = prompt(t('Name of the symbolic link to "{target}":',
+      { target: names[0] }), names[0] + '.lnk');
+    if (!linkName) return;
+    const result = await apiPost('/api/remote/link', {
+      tab: tab.id, target: names[0], name: linkName.trim()
+    });
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot create the symbolic link.')), true);
+      return;
+    }
+    toast(t('Created the symbolic link.'));
+    await refreshPanes('remote');
+  }
+
+  async function promptCopyId() {
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    const keyfile = prompt(t('Public key file to upload to the server (blank for the default id_ed25519.pub or id_rsa.pub):'), '');
+    if (keyfile === null) return;
+    if (!confirm(t('Add this public key to the server, so it accepts your key from now on?'))) return;
+    const result = await apiPost('/api/session/copyid',
+      { tab: tab.id, keyfile: keyfile.trim() });
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot upload the public key.')), true);
+      return;
+    }
+    toast(t('The public key was uploaded.'));
+    const box = $('logOutput');
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.textContent = result.output || '';
+    box.appendChild(div);
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Keeping a remote directory up to date                              *
+   * ------------------------------------------------------------------ */
+
+  function openKeepUpToDate() {
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    $('kudLocal').value = state.local.path;
+    $('kudRemote').value = state.remote.path;
+    $('kudMask').value = '';
+    $('kudInterval').value = 0;
+    $('kudCount').value = 0;
+    openModal('keepUpToDateModal');
+  }
+
+  async function startKeepUpToDate() {
+    const tab = activeTab();
+    if (!tab || !tab.connected) { toast(t('Not connected.'), true); return; }
+    const localDir = $('kudLocal').value.trim();
+    const remoteDir = $('kudRemote').value.trim();
+    if (!localDir || !remoteDir) {
+      toast(t('Both directories are required.'), true);
+      return;
+    }
+    const result = await apiPost('/api/transfer/keepuptodate', {
+      tab: tab.id, local_dir: localDir, remote_dir: remoteDir,
+      filemask: $('kudMask').value.trim(),
+      interval: parseInt($('kudInterval').value, 10) || 0,
+      count: parseInt($('kudCount').value, 10) || 0
+    });
+    if (!result.success) {
+      toast(errorMessage(result.error, t('Cannot start watching the directory.')), true);
+      return;
+    }
+    closeModal('keepUpToDateModal');
+    switchTab('queue');
+    refreshQueue();
+    toast(t('Watching the local directory; changes are copied as they happen.'));
+  }
+
+  /* ------------------------------------------------------------------ *
+   * Single-panel view                                                  *
+   * ------------------------------------------------------------------ */
+
+  function toggleExplorerMode() {
+    state.explorer = !state.explorer;
+    try { localStorage.setItem('lscp-explorer', state.explorer ? '1' : '0'); }
+    catch (error) { /* the choice still holds for this run */ }
+    applyExplorerMode();
+    toast(state.explorer
+      ? t('Single-panel view: the panel in focus fills the window.')
+      : t('Two-panel view.'));
+  }
+
+  function applyExplorerMode() {
+    const main = document.querySelector('.commander-main');
+    if (main) main.classList.toggle('explorer-mode', !!state.explorer);
+    for (const side of ['local', 'remote']) {
+      const pane = $(side + 'Pane');
+      if (!pane) continue;
+      const hidden = !!state.explorer && side !== state.focusPane;
+      pane.style.display = hidden ? 'none' : '';
     }
   }
 
@@ -2333,6 +3057,9 @@
    * ------------------------------------------------------------------ */
 
   async function boot() {
+    loadTransferSettings();
+    applyExplorerMode();
+    await checkAccounts();
     await refreshStatus();
     await loadLocal(state.local.path || '');
     await loadRemote(state.remote.path);
@@ -2340,6 +3067,9 @@
     setInterval(refreshQueue, 2000);
     setInterval(refreshLogs, 4000);
     setInterval(refreshStatus, 15000);
+    // A signed-in session has a lifetime; when it ends the next call says
+    // so and the dialog comes back rather than the page going silent.
+    if (accountsEnabled) setInterval(checkAccounts, 60000);
   }
 
   boot();

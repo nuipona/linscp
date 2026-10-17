@@ -255,6 +255,7 @@ check-live: $(BINDIR)/linscp
 	$(PYTHON) ../../source/gui/tests/LocalEditorTest.py
 	$(PYTHON) ../../source/gui/tests/BrowserUploadTest.py
 	$(PYTHON) ../../source/gui/tests/DesktopUriTest.py
+	$(PYTHON) ../../source/gui/tests/SecurityTest.py
 
 # Pull in the generated dependencies, if this is not the first build.
 -include $(PUTTY_OBJS:.o=.d) $(APP_OBJS:.o=.d) $(TEST_OBJS:.o=.d)

@@ -10,6 +10,7 @@
  */
 
 #include <cerrno>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
@@ -306,6 +307,16 @@ void TestPlatformServices()
     CHECK_TRUE(RunCapture(missing, out, err) == -1 || !err.empty() || out.empty());
 
     CHECK_TRUE(!HomeDirectory().empty() || !ConfigDirectory().empty());
+
+    /* The interrupt record a watching command stops on: it survives the
+     * signal, and the caller that goes on to run more commands in the same
+     * process can forget it, or the next one stops before it starts. */
+    InstallInterruptHandler();
+    CHECK_FALSE(Interrupted());
+    CHECK_TRUE(raise(SIGINT) == 0);
+    CHECK_TRUE(Interrupted());
+    ClearInterrupt();
+    CHECK_FALSE(Interrupted());
 }
 
 struct TransferProgressCapture
@@ -3232,6 +3243,114 @@ void TestNonUnixListingFormats()
     CHECK_TRUE(LooksLikeVmsListing(
         "FILE.TXT;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)"));
     CHECK_FALSE(LooksLikeVmsListing("-rw-r--r-- 1 user group 12345 Jun 25 test"));
+
+    /* A server that writes its months in lower case is still a VMS
+     * server. Detection and parsing have to agree on the case, or the
+     * caller is left with a directory it says it could not read. */
+    CHECK_TRUE(LooksLikeVmsListing(
+        "file.txt;1    25  25-jun-2023 11:22:33 [owner] (rwed,rwed,re,re)"));
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "file.txt;1    25  25-jun-2023 11:22:33 [owner] (rwed,rwed,re,re)",
+            entry));
+        CHECK_EQ(entry.name, std::string("file.txt"));
+        CHECK_TRUE(entry.timeKnown);
+    }
+
+    /* The protection field is the permissions the line actually carries:
+     * (RWED,RWED,RE,RE) is system, owner, group and world, so the owner
+     * may do anything, the group read and execute, and the world too. */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "FILE.TXT;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)",
+            entry));
+        CHECK_EQ(std::to_string(entry.permissions), std::to_string(0100755UL));
+        CHECK_EQ(PermissionsString(entry.permissions), std::string("-rwxr-xr-x"));
+    }
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "SECRET.DAT;1   4  25-JUN-2023 11:22:33 [OWNER] (RWED,RW-,,)",
+            entry));
+        CHECK_EQ(std::to_string(entry.permissions), std::to_string(0100600UL));
+        CHECK_EQ(PermissionsString(entry.permissions), std::string("-rw-------"));
+    }
+    /* A protection field that is not four classes is not guessed from. */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "ODD.TXT;1    25  25-JUN-2023 11:22:33 [OWNER] (RWED,RWED)", entry));
+        CHECK_EQ(std::to_string(entry.permissions), std::to_string(0100644UL));
+    }
+    /* What follows the date has to be a time before it is read as one:
+     * letters where digits belong used to become a negative hour that
+     * mktime() folded into some other day, reported as a known time. */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseVmsListingLine(
+            "NOTIME.TXT;1    25  25-JUN-2023 [OWNER] (RWED,RWED,RE,RE)", entry));
+        CHECK_EQ(entry.name, std::string("NOTIME.TXT"));
+        CHECK_FALSE(entry.timeKnown);
+    }
+    {
+        ListingEntry entry;
+        CHECK_FALSE(ParseVmsListingLine(
+            "BAD.TXT;1    25  99-XYZ-2023 11:22:33 [OWNER] (RWED,RWED,RE,RE)",
+            entry));
+    }
+
+    /* A mode has to survive the round trip through both directions. The
+     * special bits and the file type are part of what a listing says:
+     * losing them made a setuid binary look ordinary and a symbolic link
+     * look like the regular file it points at. */
+    {
+        static const char * const modes[] = {
+            "-rwsr-xr-x", "-rwxr-sr-x", "drwxrwxrwt", "-rw-r--r--",
+            "drwxr-xr-x", "-rwxrwxrwx", "-r--r--r--", "drwx------"
+        };
+        for (size_t i = 0; i < sizeof(modes) / sizeof(modes[0]); i++)
+        {
+            CHECK_EQ(PermissionsString(PermissionsFromString(modes[i])),
+                std::string(modes[i]));
+        }
+    }
+    /* An upper-case S or T is the special bit without the execute bit. */
+    CHECK_EQ(PermissionsString(PermissionsFromString("-rwSr--r--")),
+        std::string("-rwSr--r--"));
+    CHECK_EQ(PermissionsString(PermissionsFromString("drwxr-xr-T")),
+        std::string("drwxr-xr-T"));
+
+    /* A symbolic link line from any of the three producers: the shared
+     * parser takes the target off the name and keeps the link's own type,
+     * so no single backend has to know about the arrow. */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseUnixListingLine(
+            "lrwxrwxrwx 1 user group 11 Jun 25 11:22 link.txt -> hello.txt",
+            entry));
+        CHECK_EQ(entry.name, std::string("link.txt"));
+        CHECK_FALSE(entry.isDir);
+        CHECK_EQ(std::to_string(entry.permissions), std::to_string(0120777UL));
+        CHECK_EQ(PermissionsString(entry.permissions), std::string("lrwxrwxrwx"));
+    }
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseAnyListingLine(
+            "lrwxrwxrwx 1 user group 4 Jun 25 11:22 odd -> name.txt", entry));
+        CHECK_EQ(entry.name, std::string("odd"));
+        CHECK_EQ(std::to_string(entry.permissions), std::to_string(0120777UL));
+    }
+    /* A regular file whose name holds the arrow sequence keeps all of it:
+     * only a link line has a target to remove. */
+    {
+        ListingEntry entry;
+        CHECK_TRUE(ParseUnixListingLine(
+            "-rw-r--r-- 1 user group 4 Jun 25 11:22 odd -> name.txt", entry));
+        CHECK_EQ(entry.name, std::string("odd -> name.txt"));
+        CHECK_EQ(std::to_string(entry.permissions), std::to_string(0100644UL));
+    }
 }
 
 void TestEncodingHelpers()
@@ -3336,6 +3455,52 @@ void TestSshTunnelParsing()
         std::string error;
         CHECK_FALSE(ParseTunnelSpec("99999:localhost:80", TunnelType::Local,
             tunnel, error));
+    }
+    /* Invalid: a port that is not a number at all. Reading one with
+     * atoi() turned 'localhost:80x' into 80 and a port far past the
+     * range of an int into undefined behaviour rather than an error, so
+     * a tunnel could be built for a port nobody asked for. */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_FALSE(ParseTunnelSpec("8080:localhost:80x", TunnelType::Local,
+            tunnel, error));
+        CHECK_FALSE(error.empty());
+    }
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_FALSE(ParseTunnelSpec("http:localhost:80", TunnelType::Local,
+            tunnel, error));
+    }
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_FALSE(ParseTunnelSpec("99999999999999:localhost:80",
+            TunnelType::Local, tunnel, error));
+    }
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_FALSE(ParseTunnelSpec("-1:localhost:80", TunnelType::Local,
+            tunnel, error));
+    }
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("8080", TunnelType::Dynamic, tunnel, error));
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("8080"));
+        CHECK_FALSE(ParseTunnelSpec("1080x", TunnelType::Dynamic, tunnel,
+            error));
+    }
+    /* The ends of the range are both usable. */
+    {
+        SshTunnel tunnel;
+        std::string error;
+        CHECK_TRUE(ParseTunnelSpec("1:localhost:65535", TunnelType::Local,
+            tunnel, error));
+        CHECK_EQ(std::to_string(tunnel.bindPort), std::string("1"));
+        CHECK_EQ(std::to_string(tunnel.remotePort), std::string("65535"));
     }
     /* SSH flags */
     {

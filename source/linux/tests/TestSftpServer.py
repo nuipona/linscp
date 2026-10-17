@@ -59,8 +59,13 @@ class SftpSI(paramiko.SFTPServerInterface):
         try:
             out = []
             for fname in os.listdir(self._map(path)):
+                # lstat, as a real sftp-server uses: stat() follows the link
+                # and raises for one whose target is missing, which failed
+                # the whole listing instead of reporting the link. A
+                # directory that cannot be listed because of one broken
+                # link is not something a client test should hide.
                 attr = SFTPAttributes.from_stat(
-                    os.stat(os.path.join(self._map(path), fname)))
+                    os.lstat(os.path.join(self._map(path), fname)))
                 attr.filename = fname
                 out.append(attr)
             return out

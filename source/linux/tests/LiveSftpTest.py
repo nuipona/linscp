@@ -42,6 +42,16 @@ else:
 USER = "testuser"
 PASSWORD = "testpass"
 
+# Prefix for a client that has to be interruptible: it restores the default
+# SIGINT action and execs the real command, so the process the test signals is
+# the client itself. A runner that ignores SIGINT would otherwise pass that
+# disposition on and no interrupt test would mean anything. Written as a
+# wrapper rather than preexec_fn because this process has threads.
+RESET_SIGINT = [sys.executable, "-c",
+                "import os, signal, sys\n"
+                "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+                "os.execv(sys.argv[1], sys.argv[1:])"]
+
 
 class ProxyLines(list):
     """Reports are emitted by the proxy and read on a different thread.
@@ -213,13 +223,23 @@ class LiveSftpTests(unittest.TestCase):
                               timeout=timeout, env=env)
 
     def start_detached(self, commands, extra_args=()):
-        """Run a script without waiting for it, so that it can be interrupted."""
+        """Run a script without waiting for it, so that it can be interrupted.
+
+        The client is started through a wrapper that puts SIGINT back to its
+        default action first. A child inherits the signal dispositions of
+        whatever started this suite, and a runner that ignores SIGINT - a
+        service manager, a detached launcher - would hand the client a signal
+        it cannot be stopped by: the transfer would run to completion and
+        report success, which says nothing about the client. The wrapper
+        execs, so the process the test signals and waits for is the client.
+        """
         argv = [BINARY, "-batch", "-hostkey=*"]
         argv += list(extra_args)
         argv.append("-command=open sftp://%s:%s@127.0.0.1:%d/ ; %s" %
                     (USER, PASSWORD, self.port, commands))
         env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
-        return subprocess.Popen(argv, stdout=subprocess.PIPE,
+        return subprocess.Popen(RESET_SIGINT + argv,
+                                stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, env=env)
 
     def write_in_jail(self, name, size):
@@ -456,6 +476,46 @@ class LiveSftpTests(unittest.TestCase):
         client.communicate(timeout=60)
         self.assertFalse(part.exists())
         self.assertTrue(target.exists())
+
+    def test_the_client_is_stoppable_when_this_runner_ignores_sigint(self):
+        """A child inherits the signal dispositions of whatever started this
+        suite, so under a runner that ignores SIGINT - a service manager, a
+        detached launcher - a client started the naive way cannot be stopped
+        at all: the transfer runs to completion and reports success, and every
+        interrupt test above fails without saying anything about the client.
+        start_detached restores the default action first."""
+        source = self.write_in_jail("hostile-runner.bin", 4 << 20)
+        digest = sha256_of(source)
+        target = self.local / "hostile-runner.bin"
+        part = self.local / "hostile-runner.bin.filepart"
+        previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            # Started while this process ignores SIGINT, exactly as a child of
+            # such a supervisor would be.
+            client = self.start_detached(
+                "get -speed=512 /hostile-runner.bin %s" % target)
+        finally:
+            signal.signal(signal.SIGINT, previous)
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            if part.exists() and part.stat().st_size >= (1 << 20):
+                break
+            if client.poll() is not None:
+                self.fail("the download ended before it could be interrupted: " +
+                          client.stderr.read())
+            time.sleep(0.05)
+        else:
+            self.fail("the download never got far enough to interrupt")
+        self.assertFalse(target.exists())
+        client.send_signal(signal.SIGINT)
+        code = client.wait(timeout=60)
+        client.communicate(timeout=60)
+        self.assertNotEqual(code, 0,
+                            "the client finished the transfer instead of stopping")
+        self.assertTrue(part.exists())
+        self.assertFalse(target.exists())
+        self.assertLess(part.stat().st_size, source.stat().st_size)
+        self.assertEqual(sha256_of(source), digest)
 
     def test_staged_resume_continues_the_staging_file_not_the_old_final(self):
         """The complete file already at the destination must be replaced
