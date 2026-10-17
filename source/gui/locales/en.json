@@ -385,5 +385,14 @@
   "the remote file differs": "the remote file differs",
   "{reason} ({source} against {target} bytes)": "{reason} ({source} against {target} bytes)",
   "Cancelling": "Cancelling",
-  "Cannot read the directory.": "Cannot read the directory."
+  "Cannot read the directory.": "Cannot read the directory.",
+  "Custom commands": "Custom commands",
+  "Custom commands...": "Custom commands...",
+  "Saved command templates. Use": "Saved command templates. Use",
+  "as a placeholder for the selected file name. Commands run through the active session.": "as a placeholder for the selected file name. Commands run through the active session.",
+  "Name:": "Name:",
+  "Command:": "Command:",
+  "e.g. Checksum SHA-256": "e.g. Checksum SHA-256",
+  "e.g. checksum sha-256 {file}": "e.g. checksum sha-256 {file}",
+  "Run on selection": "Run on selection"
 }

@@ -293,7 +293,6 @@ bool TransferPresetStore::Load(std::string & error)
     std::string line;
     TransferPreset current;
     bool inSection = false;
-    std::vector<std::pair<std::string, std::string> > pending;
     while (std::getline(file, line))
     {
         const std::string trimmed = TrimCopy(line);

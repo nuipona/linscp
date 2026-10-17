@@ -745,7 +745,16 @@ bool FtpSession::OpenPassive(std::string & error)
             strncmp(address, "172.17.", 7) == 0 ||
             strncmp(address, "172.18.", 7) == 0 ||
             strncmp(address, "172.19.", 7) == 0 ||
-            strncmp(address, "172.2", 5) == 0 ||
+            strncmp(address, "172.20.", 7) == 0 ||
+            strncmp(address, "172.21.", 7) == 0 ||
+            strncmp(address, "172.22.", 7) == 0 ||
+            strncmp(address, "172.23.", 7) == 0 ||
+            strncmp(address, "172.24.", 7) == 0 ||
+            strncmp(address, "172.25.", 7) == 0 ||
+            strncmp(address, "172.26.", 7) == 0 ||
+            strncmp(address, "172.27.", 7) == 0 ||
+            strncmp(address, "172.28.", 7) == 0 ||
+            strncmp(address, "172.29.", 7) == 0 ||
             strncmp(address, "172.30.", 7) == 0 ||
             strncmp(address, "172.31.", 7) == 0 ||
             strncmp(address, "127.", 4) == 0 ||
@@ -1189,7 +1198,7 @@ bool ParseListLines(const std::string & text, std::vector<ListingEntry> & entrie
         }
         ListingEntry entry;
         entry.longname = line;
-        if (!ParseUnixListingLine(line, entry))
+        if (!ParseAnyListingLine(line, entry))
         {
             entry.name = line;
             if (!entry.name.empty() && entry.name.back() == '/')

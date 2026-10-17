@@ -1744,7 +1744,7 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
         path = parsed.path
         # Login endpoint is exempt from the auth guard.
         if path == "/api/login" and ACCOUNTS_FILE:
-            body = self.read_body_json()
+            body = self.read_json_body()
             username = body.get("username", "")
             password = body.get("password", "")
             if _authenticate_user(username, password):
@@ -2549,7 +2549,7 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
 
         # --- Custom commands (Explorer-style) ---
         if path == "/api/custom-commands":
-            body = self.read_body_json()
+            body = self.read_json_body()
             action = body.get("action", "list")
             cmds = _read_custom_commands()
             if action == "list":
