@@ -12,7 +12,8 @@
 # in libs/putty/unix. Every other protocol goes through the curl backend
 # in source/linux/ProtocolClient.cpp.
 
-cmake_minimum_required(VERSION 3.16)
+# 3.25 is Debian 13 (trixie), the oldest release this project supports.
+cmake_minimum_required(VERSION 3.25)
 project(LinSCP VERSION 1.0 LANGUAGES C CXX)
 
 # The platform layer uses Linux-only services (inotify, /proc/self/exe,
@@ -162,7 +163,7 @@ if(NODE_EXECUTABLE)
     add_test(NAME gui-localization-tests COMMAND ${NODE_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/source/gui/tests/LocalizationTest.js)
   else()
-    message(STATUS "Browser tests not registered: install jsdom@26 to run them")
+    message(STATUS "Browser tests not registered: install jsdom@29 to run them")
   endif()
 endif()
 

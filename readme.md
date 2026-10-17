@@ -15,9 +15,11 @@ parity**: see [Protocols](#protocols) and the [parity audit](docs/upstream-parit
 
 ## Requirements
 
-- Debian 12 (bookworm) or newer, with a GCC or Clang toolchain.
+- Debian 13 (trixie) or newer, with a GCC or Clang toolchain.
 - `curl` at run time, for FTP transfers, FTPS, WebDAV and S3.
 - Python 3, for the graphical client.
+- Node 20.19 or newer with `npm`, for the optional browser test suites
+  (`npm install jsdom@29`). Not needed to build or use the client.
 
 ```sh
 sudo apt install build-essential dpkg-dev curl python3
@@ -45,11 +47,13 @@ The live suites use optional Python packages: `paramiko` (SFTP),
 (FTP/FTPS). The SCP suite needs `openssh-server`; it starts its own `sshd` on a
 free port. A suite that skips a case says so on its evidence line.
 
-The GUI suites (`source/gui/tests/`) run separately, as in CI. For the
+The GUI suites (`source/gui/tests/`) run separately, as in CI. The two browser
+suites (`ClientTest.js`, `LocalizationTest.js`) are the ones that need Node and
+`jsdom`; CMake registers them only when both are installed. For the
 Debian package:
 
 ```sh
-dpkg-buildpackage -b -us -uc         # -> ../linscp_1.0-2_<arch>.deb
+dpkg-buildpackage -b -us -uc         # -> ../linscp_1.0-3_<arch>.deb
 ```
 
 ## Usage
