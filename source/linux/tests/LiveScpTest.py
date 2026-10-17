@@ -55,6 +55,17 @@ HERE = pathlib.Path(__file__).resolve().parent
 
 DEPENDENCY_ERROR = ""
 
+# Prefix for a client that has to be interruptible: it restores the default
+# SIGINT action and execs the real command, so the process the test signals is
+# the client itself. A child inherits the dispositions of whatever started this
+# suite, and a runner that ignores SIGINT would otherwise leave the client
+# unstoppable. Written as a wrapper rather than preexec_fn because this process
+# has threads.
+RESET_SIGINT = [sys.executable, "-c",
+                "import os, signal, sys\n"
+                "signal.signal(signal.SIGINT, signal.SIG_DFL)\n"
+                "os.execv(sys.argv[1], sys.argv[1:])"]
+
 
 def find_executable(*names):
     """The first of 'names' that can be run, or None."""
@@ -352,7 +363,8 @@ class LiveScpTests(unittest.TestCase):
                 "-privatekey=" + str(self.private_key)]
         argv.append("-command=open %s ; %s" % (self.url(), commands))
         env = dict(os.environ, LINSCP_CONFIG_DIR=str(self.config))
-        return subprocess.Popen(argv, stdout=subprocess.PIPE,
+        return subprocess.Popen(RESET_SIGINT + argv,
+                                stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, env=env,
                                 cwd=str(self.local), start_new_session=True)
 

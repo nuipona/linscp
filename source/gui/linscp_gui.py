@@ -65,14 +65,17 @@ REQUIRE_TOKEN = True
 # allowed; --allow-host adds more (a reverse proxy, for example).
 ALLOWED_HOSTS = set(["localhost", "127.0.0.1", "::1"])
 ALLOW_ANY_HOST = False
+# Browser origins allowed to read a response. Empty by default: the web
+# client is served by this server, so every request it makes is same-origin
+# and needs no CORS permission at all. --allow-origin=URL adds one, for a
+# front end that really is served from somewhere else.
+ALLOWED_ORIGINS = set()
 
 # --- Multi-user account and CSRF protection ---
 # When --accounts-file is given, the GUI authenticates users with
 # PBKDF2-hashed passwords and issues per-session CSRF tokens.
 ACCOUNTS_FILE = None     # path to accounts.ini, or None for single-user
 SESSION_SECS = 3600      # login session lifetime in seconds
-# Per-run CSRF token, distinct from API_TOKEN, bound to the session.
-CSRF_TOKEN = ""
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
@@ -126,6 +129,9 @@ def _read_accounts():
 
 def _write_account(username, password, home_dir=""):
     """Create or update a user account in accounts.ini."""
+    if not ACCOUNTS_FILE:
+        raise ValueError("No accounts file was given; start the server with "
+                         "--accounts-file=FILE to say where to keep them.")
     hash_hex, salt_hex = _hash_password(password)
     accounts = _read_accounts()
     if username in accounts:
@@ -136,14 +142,21 @@ def _write_account(username, password, home_dir=""):
     else:
         accounts[username] = {"hash": hash_hex, "salt": salt_hex,
                               "home_dir": home_dir}
-    # Write back
+    # Write back. The file holds the hashes and salts every login is
+    # checked against, so it is created for this user only: a world-readable
+    # copy is an offline password attack waiting to happen.
     path = ACCOUNTS_FILE
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as f:
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w") as f:
         for user, data in accounts.items():
             f.write("[%s]\n" % user)
             for key, val in data.items():
                 f.write("%s=%s\n" % (key, val))
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def _authenticate_user(username, password):
@@ -161,8 +174,15 @@ _LOGIN_LOCK = threading.Lock()
 
 
 def _create_login_session(username):
-    """Issue a login session and return its session_id."""
+    """Issue a login session and return (session_id, csrf_token).
+
+    The CSRF token belongs to this one login session rather than to the
+    server run: a token every user shared was not a per-session secret at
+    all, and one leaked copy would have served for everybody until the
+    process was restarted.
+    """
     sid = secrets.token_hex(32)
+    csrf = secrets.token_hex(32)
     accounts = _read_accounts()
     home_dir = accounts.get(username, {}).get("home_dir", "")
     with _LOGIN_LOCK:
@@ -170,23 +190,81 @@ def _create_login_session(username):
             "username": username,
             "created": time.time(),
             "home_dir": home_dir,
+            "csrf": csrf,
         }
-    return sid
+        # Sessions are only ever added, so an expired one that nobody asks
+        # about again would stay in the table for the life of the process.
+        now = time.time()
+        for stale in [key for key, value in _LOGIN_SESSIONS.items()
+                      if now - value["created"] > SESSION_SECS]:
+            _LOGIN_SESSIONS.pop(stale, None)
+    return sid, csrf
 
 
-def _validate_login_session(sid):
-    """Returns the username if the session is valid, else None."""
+def _login_session_record(sid):
+    """The live record behind a session id, or None once it has expired."""
     if not sid:
         return None
     with _LOGIN_LOCK:
         sess = _LOGIN_SESSIONS.get(sid)
-    if not sess:
-        return None
-    if time.time() - sess["created"] > SESSION_SECS:
-        with _LOGIN_LOCK:
+        if not sess:
+            return None
+        if time.time() - sess["created"] > SESSION_SECS:
             _LOGIN_SESSIONS.pop(sid, None)
-        return None
-    return sess.get("username")
+            return None
+        return dict(sess)
+
+
+def _validate_login_session(sid):
+    """Returns the username if the session is valid, else None."""
+    sess = _login_session_record(sid)
+    return sess.get("username") if sess else None
+
+
+def _session_home_dir(sid):
+    """The directory a logged-in user's own panel starts in, if one is set."""
+    sess = _login_session_record(sid)
+    return (sess or {}).get("home_dir") or ""
+
+
+def _csrf_ok(handler, sid):
+    """Constant-time check of a request's CSRF token against its session's."""
+    sess = _login_session_record(sid)
+    if not sess or not sess.get("csrf"):
+        return False
+    supplied = handler.headers.get("X-LSCP-CSRF") or ""
+    return hmac.compare_digest(supplied, sess["csrf"])
+
+
+# Failed sign-ins per user name, and when the lockout they earned expires.
+# An account endpoint reachable from anything that can open the port is an
+# online guessing target without one, however strong the stored hash is.
+_LOGIN_ATTEMPTS = {}
+_LOGIN_LOCKOUT_UNTIL = {}
+LOGIN_MAX_FAILURES = 5
+LOGIN_LOCKOUT_SECS = 60
+
+def _login_throttle(username):
+    """Seconds a caller has to wait before this user name may try again."""
+    with _LOGIN_LOCK:
+        until = _LOGIN_LOCKOUT_UNTIL.get(username, 0)
+        remaining = until - time.time()
+        return int(remaining) + 1 if remaining > 0 else 0
+
+
+def _login_failed(username):
+    with _LOGIN_LOCK:
+        attempts = _LOGIN_ATTEMPTS.get(username, 0) + 1
+        _LOGIN_ATTEMPTS[username] = attempts
+        if attempts >= LOGIN_MAX_FAILURES:
+            _LOGIN_LOCKOUT_UNTIL[username] = time.time() + LOGIN_LOCKOUT_SECS
+            _LOGIN_ATTEMPTS[username] = 0
+
+
+def _login_succeeded(username):
+    with _LOGIN_LOCK:
+        _LOGIN_ATTEMPTS.pop(username, None)
+        _LOGIN_LOCKOUT_UNTIL.pop(username, None)
 
 
 def _extract_login_cookie(handler):
@@ -715,6 +793,14 @@ class CoreSession(object):
                     return 1, [error or "The session process is gone."], []
                 self.connected = True
             del self._stderr[:]
+            # The core reads one command per line, so a command that holds
+            # a newline is really two commands and the second one was
+            # supplied by whatever reached this point - a file name on the
+            # server, a query parameter, a dropped path. Refusing it here
+            # protects every caller at once, including the ones that
+            # forget to quote.
+            if "\n" in command or "\r" in command:
+                return 1, ["Refused: a command must be a single line."], []
             try:
                 self.proc.stdin.write(command + "\n")
                 self.proc.stdin.flush()
@@ -790,6 +876,35 @@ def require_tab(tab_id=None):
     if tab is None or not tab.connected:
         return None
     return tab
+
+
+def find_challenge(tab_id):
+    """The connection parked for a host-key decision, whatever the id's type.
+
+    A tab id arrives from JSON as a number or a string, and the challenge
+    table is keyed by the number the server chose. A lookup that missed on
+    the type told the user the connection had stopped waiting while its
+    core process was still parked with an open socket.
+    """
+    with STATE_LOCK:
+        challenges = STATE["challenges"]
+        if tab_id in challenges:
+            return challenges[tab_id]
+        for key in list(challenges):
+            if str(key) == str(tab_id):
+                return challenges[key]
+    return None
+
+
+def pop_challenge(tab_id):
+    with STATE_LOCK:
+        challenges = STATE["challenges"]
+        if tab_id in challenges:
+            return challenges.pop(tab_id)
+        for key in list(challenges):
+            if str(key) == str(tab_id):
+                return challenges.pop(key)
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -969,6 +1084,12 @@ class TaskManager(object):
             task.status = "Cancelled"
             task.finished = time.strftime("%H:%M:%S")
             add_log("%s cancelled: %s" % (task.kind, task.source), "info")
+            # The staged file of a browser upload is only removed once the
+            # core process has really stopped reading it; a cancellation
+            # that is still in flight keeps it, and the queue clear that
+            # follows takes it away.
+            if code is not None:
+                self.cleanup_source(task)
             return
         move_error = ""
         if code == 0 and task.move_source:
@@ -1128,13 +1249,27 @@ class TaskManager(object):
             self.cleanup_source(task)
 
     def cancel_all(self):
+        staged = []
         with STATE_LOCK:
             for task in STATE["tasks"]:
                 if task.status == "Queued":
                     task.status = "Cancelled"
+                    # Nothing is reading the staged file of a task that
+                    # never started, so it can go now. Collecting it and
+                    # removing it after the lock is released is what
+                    # clear_finished() does too: an unlink that blocks on
+                    # a slow file system must not hold up every other
+                    # request that reads the queue.
+                    staged.append(task)
                 elif task.status == "Running":
+                    # The core process of a running task is reading its
+                    # staged source. Removing it here turned a cancellation
+                    # into a failure part way through the file, and left
+                    # 'retry' with nothing to retry from. The worker
+                    # removes it when the process has actually stopped.
                     task.status = "Cancelling"
-                self.cleanup_source(task)
+        for task in staged:
+            self.cleanup_source(task)
 
 
 TASKS = TaskManager()
@@ -1145,10 +1280,220 @@ TASKS = TaskManager()
 # ---------------------------------------------------------------------------
 
 def quote_remote(path):
-    """Quote a remote path so that it survives the command splitter."""
+    """Quote a remote path so that it survives the command splitter.
+
+    A control character cannot be quoted at all: the core reads one
+    command per line in -server mode, so a name holding a newline is two
+    commands, and the second one is whatever the name said. A directory
+    on the server can be called anything, so this is reached by listing a
+    hostile server as easily as by a crafted API call - refuse the operand
+    instead of sending it.
+    """
+    if not isinstance(path, str):
+        raise ValueError("A remote path must be text.")
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
+        raise ValueError("A remote path must not contain a control character.")
     if path and not any(ch in path for ch in " \t\"';"):
         return path
-    return '"' + path.replace('"', '\\"') + '"'
+    return '"' + path.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def quote_local(path):
+    """Quote a local path for a command line, with the same rule.
+
+    'lcd' and 'put' take a local path too, and it reaches the same
+    line-oriented command stream, so it is validated the same way rather
+    than being wrapped in quotes that a backslash or a newline defeats.
+    """
+    if not isinstance(path, str):
+        raise ValueError("A local path must be text.")
+    if any(ord(char) < 32 or ord(char) == 127 for char in path):
+        raise ValueError("A local path must not contain a control character.")
+    if path and not any(ch in path for ch in " \t\"';\\"):
+        return path
+    return '"' + path.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def check_permission_mode(mode_text):
+    """Validate a chmod mode the way the console client accepts one.
+
+    Returns an error message, or an empty string when the mode is usable.
+    The remote chmod interpolated whatever it was given straight into a
+    command line, so this is what stands between a permissions field and
+    the session's command stream. Both the octal and the symbolic forms
+    'chmod' documents are accepted, and nothing else.
+    """
+    text = str(mode_text or "").strip()
+    if not text:
+        return "Enter a permission mode, such as 644 or u+x."
+    if len(text) > 64:
+        return "That permission mode is too long."
+    if all(ch in "01234567" for ch in text):
+        if len(text) > 4:
+            return "Permissions must be an octal mode such as 644."
+        return ""
+    # Symbolic: [ugoa...][[-+=][rwxXstugo...]...], comma separated, with the
+    # same grammar the console client parses in ParseSymbolicPermissions().
+    # A mode that is neither form is refused here rather than sent to be
+    # misread there, and one the client would accept is not refused here.
+    for clause in text.split(","):
+        clause = clause.strip()
+        if not clause:
+            return "That permission mode has an empty clause."
+        index = 0
+        while index < len(clause) and clause[index] in "ugoa":
+            index += 1
+        if index >= len(clause) or clause[index] not in "-+=":
+            return ("A symbolic mode needs one of -, + or = after "
+                    "u, g, o or a, as in u+x or a=r,go-w.")
+        if index == 0 and clause[0] != "=":
+            # '=rwx' with no letters in front applies to everybody, which
+            # is what the console client does with it. Anything else needs
+            # to say who it is for.
+            return ("A symbolic mode starts with u, g, o or a, "
+                    "as in u+x or a=r,go-w.")
+        while index < len(clause):
+            operator = clause[index]
+            index += 1
+            letters = 0
+            while index < len(clause) and clause[index] in "rwxXstuugo":
+                index += 1
+                letters += 1
+            if letters == 0:
+                return ("A symbolic mode needs a permission letter after "
+                        "-, + or =, from r, w, x, X, s, t, u, g or o.")
+            if index < len(clause) and clause[index] not in "-+=":
+                return ("A symbolic mode has something after its permission "
+                        "letters that is not another -, + or =.")
+    return ""
+
+
+CHECKSUM_ALGORITHMS = ("sha-256", "sha-1", "md5", "crc32")
+
+
+def single_remote_name(tab, name):
+    """One entry of the remote panel, resolved against its directory.
+
+    Returns (operand, error). The remote operations were given whatever the
+    request held, so an absolute path or one with '..' in it named a file
+    outside the directory the panel was showing - and the user was told the
+    operation had been done on the entry they had selected.
+    """
+    if not isinstance(name, str) or not name:
+        return None, "Select an item in the remote panel first."
+    if name in (".", ".."):
+        return None, "\"%s\" is not a file name." % name
+    if any(ord(char) < 32 or ord(char) == 127 for char in name):
+        return None, "A file name must not contain a control character."
+    base = tab.remote_dir if tab and tab.remote_dir else "/"
+    if posixpath.isabs(name):
+        return posixpath.normpath(name), ""
+    if "\\" in name:
+        return None, ("A backslash is not a separator on this server; "
+                      "\"%s\" was refused rather than flattened." % name)
+    parts = name.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None, ("\"%s\" names more than one entry of this directory."
+                      % name)
+    return posixpath.normpath(posixpath.join(base, *parts)), ""
+
+
+def contained_local_path(base, name):
+    """Resolve one panel entry against the directory the panel is showing.
+
+    Returns (path, error). The local operations used to be
+    ``os.path.join(base, name)`` with a name that came from the request:
+    an absolute name replaced the base outright and ``..`` walked out of
+    it, so a delete or a rename could land anywhere the user running the
+    server could reach. The panel shows one directory, and an entry in it
+    is a single name - anything else is refused, which also keeps a second
+    browser window from moving the first one's operations somewhere else.
+    """
+    if not isinstance(name, str) or not name:
+        return None, "Select an item first."
+    if name in (".", "..") or "/" in name or "\x00" in name:
+        return None, ("\"%s\" is not a single file name in this directory."
+                      % name)
+    if any(ord(char) < 32 or ord(char) == 127 for char in name):
+        return None, "A file name must not contain a control character."
+    if not isinstance(base, str) or not base or not os.path.isabs(base):
+        return None, "The local directory of this panel is not set."
+    target = os.path.join(base, name)
+    if os.path.commonpath([os.path.abspath(base), target]) != os.path.abspath(base):
+        return None, "That name escapes the directory the panel is showing."
+    return target, ""
+
+
+def apply_local_mode(path, mode_text):
+    """Apply an octal or symbolic mode to a local path.
+
+    The symbolic form is applied through chmod(1)'s own grammar as far as
+    this needs it: the console client already parses the same modes for
+    the remote side, and a local panel that only understood octal could
+    not offer the one the user typed for the other side.
+    """
+    text = str(mode_text).strip()
+    if all(ch in "01234567" for ch in text) and text:
+        os.chmod(path, int(text, 8))
+        return
+    st_mode = os.stat(path).st_mode
+    current = stat.S_IMODE(st_mode)
+    is_dir = stat.S_ISDIR(st_mode)
+    for clause in text.split(","):
+        clause = clause.strip()
+        index = 0
+        who = 0
+        while index < len(clause) and clause[index] in "ugoa":
+            letter = clause[index]
+            index += 1
+            if letter == "u":
+                who |= 0o700
+            elif letter == "g":
+                who |= 0o070
+            elif letter == "o":
+                who |= 0o007
+            else:
+                who |= 0o777
+        while index < len(clause):
+            operator = clause[index]
+            index += 1
+            if who == 0 and operator == "=":
+                # '=rwx' names nobody in front of it, so it is for
+                # everybody: the same reading the console client gives it.
+                who = 0o777
+            bits = 0
+            while index < len(clause) and clause[index] in "rwxXstugo":
+                letter = clause[index]
+                index += 1
+                if letter == "r":
+                    bits |= 0o444
+                elif letter == "w":
+                    bits |= 0o222
+                elif letter == "x":
+                    bits |= 0o111
+                elif letter == "X":
+                    # 'X' is execute for a directory, or for a file that
+                    # already has one execute bit set.
+                    if is_dir or current & 0o111:
+                        bits |= 0o111
+                elif letter == "s":
+                    bits |= 0o6000
+                elif letter == "t":
+                    bits |= 0o1000
+                elif letter in "ugo":
+                    # As a permission letter, u/g/o means "whatever that
+                    # class already has", so the bits are copied from the
+                    # mode being changed.
+                    bits |= current & {"u": 0o700, "g": 0o070,
+                                       "o": 0o007}[letter]
+            selected = bits & who
+            if operator == "+":
+                current |= selected
+            elif operator == "-":
+                current &= ~selected
+            else:
+                current = (current & ~who) | selected
+    os.chmod(path, current & 0o7777)
 
 
 def browser_destination(remote_dir, relative_path):
@@ -1291,6 +1636,19 @@ def save_local_browser_upload(local_dir, filename, source_stream,
                     raise IOError("The upload ended before all bytes arrived.")
                 handle.write(chunk)
                 remaining -= len(chunk)
+        # mkstemp creates its file 0600 for safety while it is being
+        # written; that is not the mode a file the user dropped into their
+        # own directory should keep. Apply the process umask the way an
+        # ordinary create would, without ever widening an existing file.
+        umask = os.umask(0)
+        os.umask(umask)
+        if os.path.exists(destination):
+            try:
+                os.chmod(temp_path, stat.S_IMODE(os.stat(destination).st_mode))
+            except OSError:
+                os.chmod(temp_path, 0o666 & ~umask)
+        else:
+            os.chmod(temp_path, 0o666 & ~umask)
         os.replace(temp_path, destination)
         add_log("Saved dropped local file: %s" % destination, "success")
         return destination
@@ -1321,7 +1679,18 @@ def parse_ls_output(stdout):
         parts = line.split(None, 8)
         if len(parts) >= 9:
             perms, links, owner, group, size_str, m1, m2, m3, name = parts
+            is_link = perms.startswith("l")
             is_dir = perms.startswith("d")
+            # A server that supplies its own 'ls -l' text writes a link as
+            # 'name -> target'. The target says where the link points, not
+            # what it is called, and every operation below is given the
+            # name alone - so keeping the arrow made the panel show an
+            # entry that no rename, delete or download could ever find.
+            target = ""
+            if is_link:
+                arrow = name.find(" -> ")
+                if arrow != -1:
+                    name, target = name[:arrow], name[arrow + 4:]
             try:
                 size = int(size_str)
             except ValueError:
@@ -1332,6 +1701,8 @@ def parse_ls_output(stdout):
             entries.append({
                 "name": name,
                 "is_dir": is_dir,
+                "is_link": is_link,
+                "link_target": target,
                 "size": size,
                 "permissions": perms,
                 "date": date_str,
@@ -1355,13 +1726,26 @@ def list_local_directory(path):
         with os.scandir(path) as it:
             for item in it:
                 try:
-                    st = item.stat()
+                    is_link = item.is_symlink()
+                    try:
+                        st = item.stat()
+                    except OSError:
+                        # A symbolic link whose target is missing has no
+                        # stat(). Reading the link itself is what makes it
+                        # appear at all: a panel that hides it is a panel
+                        # the user cannot select, rename or delete it in,
+                        # and it stays on disk after every refresh.
+                        if not is_link:
+                            continue
+                        st = item.stat(follow_symlinks=False)
                     is_dir = item.is_dir()
                     date_str = time.strftime("%b %d %H:%M", time.localtime(st.st_mtime))
                     perms = stat.filemode(st.st_mode)
                     entries.append({
                         "name": item.name,
                         "is_dir": is_dir,
+                        "is_link": is_link,
+                        "is_broken": is_link and not os.path.exists(item.path),
                         "size": st.st_size if not is_dir else 0,
                         "permissions": perms,
                         "date": date_str,
@@ -1383,9 +1767,27 @@ def list_local_directory(path):
 
 SYNC_ACTIONS = ("download", "upload", "delete-local", "delete-remote", "conflict")
 
+# The values 'synchronize' accepts. Every one of them is interpolated into
+# a command line, so each is checked against its own vocabulary: a mode
+# that was not one of these three words used to arrive on the command line
+# verbatim, and 'synchronize ' + mode made it the start of a new command.
+SYNC_MODES = ("local", "remote", "both")
+SYNC_CRITERIA = ("none", "either", "both", "time", "size", "checksum",
+                 "time,size", "time,checksum", "size,checksum",
+                 "time,size,checksum")
+SYNC_CONFLICTS = ("skip", "local", "remote", "newer")
+
 
 def build_sync_command(mode, local_dir, remote_dir, delete=False, criteria="time",
                        filemask="", recursive=True, preview=False, conflict="skip"):
+    if mode not in SYNC_MODES:
+        raise ValueError("The direction must be local, remote or both.")
+    if criteria not in SYNC_CRITERIA:
+        raise ValueError("The comparison must be one of: %s." %
+                         ", ".join(SYNC_CRITERIA))
+    if conflict not in SYNC_CONFLICTS:
+        raise ValueError("The conflict policy must be one of: %s." %
+                         ", ".join(SYNC_CONFLICTS))
     command = "synchronize " + mode
     if delete:
         command += " -delete"
@@ -1395,11 +1797,13 @@ def build_sync_command(mode, local_dir, remote_dir, delete=False, criteria="time
         command += " -nonrecursive"
     if criteria and criteria != "time":
         command += " -criteria=" + criteria
-    if conflict and conflict in ("skip", "local", "remote", "newer") and conflict != "skip":
+    if conflict and conflict != "skip":
         command += " -conflict=" + conflict
     if filemask:
-        command += ' -filemask="%s"' % filemask.replace('"', "")
-    command += ' "%s" "%s"' % (local_dir, remote_dir)
+        # A mask is the one operand the user is meant to type wildcards
+        # into, so it is quoted rather than validated against a list.
+        command += " -filemask=" + quote_remote(filemask)
+    command += " " + quote_local(local_dir) + " " + quote_remote(remote_dir)
     return command
 
 
@@ -1533,14 +1937,15 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                                     "error": "Login required.",
                                     "login_required": True}, status=401)
                     return False
-                # CSRF protection: POST requests must carry the token.
-                if self.command == "POST":
-                    csrf = self.headers.get("X-LSCP-CSRF") or ""
-                    if not csrf or csrf != CSRF_TOKEN:
-                        self.send_json({"success": False,
-                                        "error": "CSRF token missing or "
-                                                 "invalid."}, status=403)
-                        return False
+                # CSRF protection: a state-changing request must carry the
+                # token issued to this login session, compared in constant
+                # time so the answer does not leak how much of it matched.
+                if self.command == "POST" and not _csrf_ok(self, sid):
+                    self.send_json({"success": False,
+                                    "error": "CSRF token missing or "
+                                             "invalid.",
+                                    "login_required": True}, status=403)
+                    return False
         return True
 
     def serve_client(self):
@@ -1573,13 +1978,38 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def end_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # No wildcard CORS. The page this server hands out carries this
+        # run's API token, and 'Access-Control-Allow-Origin: *' let any
+        # web site the user visited fetch that page, read the token out of
+        # it and then drive the whole API from its own origin - listing,
+        # reading, changing and deleting the local file system. The
+        # browser client is served by this same server, so it is always
+        # same-origin and never needs a CORS header; --allow-origin=NAME
+        # is the explicit opt-in for a front end that really is elsewhere.
+        origin = self.headers.get("Origin") or ""
+        if origin and origin in ALLOWED_ORIGINS:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers",
+                             "Content-Type, X-LSCP-Token, X-LSCP-CSRF")
+            # A cross-origin request that is allowed at all has to be
+            # allowed to carry its token, and must not also be allowed to
+            # carry cookies it was not issued.
+            self.send_header("Vary", "Origin")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        # The token in the page is what protects the API; a frame from
+        # another site must not be able to host it.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
         super().end_headers()
 
     def do_OPTIONS(self):
+        origin = self.headers.get("Origin") or ""
+        if origin and origin not in ALLOWED_ORIGINS:
+            self.send_json({"success": False,
+                            "error": "This origin is not allowed."}, status=403)
+            return
         self.send_response(200)
         self.end_headers()
 
@@ -1604,6 +2034,24 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
     # -- GET ---------------------------------------------------------------
 
     def do_GET(self):
+        try:
+            return self._dispatch_get()
+        except ValueError as exc:
+            # An operand this server will not put on a command line - a path
+            # holding a control character, a mode that is not a mode.
+            # Answering 400 says why; letting it reach socketserver closes
+            # the connection with a traceback and no answer at all.
+            return self.send_json({"success": False, "error": str(exc)},
+                                  status=400)
+
+    def do_POST(self):
+        try:
+            return self._dispatch_post()
+        except ValueError as exc:
+            return self.send_json({"success": False, "error": str(exc)},
+                                  status=400)
+
+    def _dispatch_get(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = urllib.parse.parse_qs(parsed.query)
@@ -1611,18 +2059,30 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self.serve_client()
 
-        # Login status: returns the current username and CSRF token.
+        # Login status: returns the current username and this session's own
+        # CSRF token. It is answered before guarded() because it is how a
+        # page that has just been told 'login_required' learns whether it
+        # is signed in, and it gives out nothing to a caller with no
+        # session cookie.
         if path == "/api/login" and ACCOUNTS_FILE:
             sid = _extract_login_cookie(self)
-            username = _validate_login_session(sid)
+            record = _login_session_record(sid)
+            username = record.get("username") if record else None
             self.send_json({
                 "logged_in": username is not None,
                 "username": username or "",
-                "csrf_token": CSRF_TOKEN,
+                "csrf_token": (record or {}).get("csrf", ""),
+                "accounts_enabled": True,
             })
             return
 
         if path.startswith("/api/") and not self.guarded():
+            return
+
+        if path == "/api/accounts":
+            # Whether this run asks for a sign-in at all, so a page can show
+            # the form instead of failing its first call.
+            self.send_json({"accounts_enabled": bool(ACCOUNTS_FILE)})
             return
 
         if path == "/api/status":
@@ -1739,16 +2199,29 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
 
     # -- POST --------------------------------------------------------------
 
-    def do_POST(self):
+    def _dispatch_post(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         # Login endpoint is exempt from the auth guard.
         if path == "/api/login" and ACCOUNTS_FILE:
             body = self.read_json_body()
-            username = body.get("username", "")
-            password = body.get("password", "")
+            username = str(body.get("username") or "")
+            password = str(body.get("password") or "")
+            if not username or not password:
+                self.send_json({"success": False,
+                                "error": "A user name and a password are "
+                                         "required."}, status=400)
+                return
+            delay = _login_throttle(username)
+            if delay:
+                self.send_json({"success": False, "retry_after": delay,
+                                "error": "Too many failed sign-ins. Try again "
+                                         "in %d seconds." % delay}, status=429)
+                return
             if _authenticate_user(username, password):
-                sid = _create_login_session(username)
+                _login_succeeded(username)
+                sid, csrf = _create_login_session(username)
+                add_log("User '%s' signed in." % username, "success")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Set-Cookie",
@@ -1757,8 +2230,13 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({
                     "success": True, "username": username,
-                    "csrf_token": CSRF_TOKEN}).encode("utf-8"))
+                    "csrf_token": csrf}).encode("utf-8"))
             else:
+                # A failed sign-in is recorded before the answer is sent, so
+                # an endpoint that is open to anything able to reach the
+                # port cannot be used to try a password list at speed.
+                _login_failed(username)
+                add_log("Failed sign-in for '%s'." % username, "error")
                 self.send_json({"success": False,
                                 "error": "Invalid username or password."},
                                status=401)
@@ -1921,6 +2399,13 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                 elif not STATE["tabs"]:
                     STATE["tabs"].append(tab)
                     STATE["active_tab"] = tab.id
+                else:
+                    # A failed connection with no key to ask about is not
+                    # reachable from the interface any more, but connect()
+                    # already started its core process. Dropping the tab
+                    # without terminating it left a linscp -server running
+                    # for every failed attempt, with its socket open.
+                    tab.terminate()
             if ok:
                 add_log("Connected to %s" % tab.name, "success")
                 self.send_json({"success": True, "tab": tab.describe()})
@@ -1945,9 +2430,9 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_json({"success": False, "error": "No host key given"},
                                status=400)
                 return
-            with STATE_LOCK:
-                tab = STATE["challenges"].get(tab_id)
-                if tab is None:
+            tab = find_challenge(tab_id)
+            if tab is None:
+                with STATE_LOCK:
                     for candidate in STATE["tabs"]:
                         if candidate.id == tab_id or str(candidate.id) == str(tab_id):
                             tab = candidate
@@ -1990,12 +2475,14 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
 
         if path == "/api/tabs/close":
             tab_id = body.get("tab")
+            # A connection that is waiting for a host-key decision lives in
+            # 'challenges', not in the tab list. The id arrives from JSON as
+            # a number or a string, and a lookup that missed on the type
+            # left the parked core process running with no way to reach it.
+            pending = pop_challenge(tab_id)
+            if pending is not None:
+                pending.terminate()
             with STATE_LOCK:
-                # A connection that is waiting for a host-key decision lives
-                # in 'challenges', not in the tab list.
-                pending = STATE["challenges"].pop(tab_id, None)
-                if pending is not None:
-                    pending.terminate()
                 for index, tab in enumerate(STATE["tabs"]):
                     if tab.id == tab_id or str(tab.id) == str(tab_id):
                         STATE["tabs"].pop(index)
@@ -2081,7 +2568,10 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
         if path == "/api/local/mkdir":
             tab = get_tab(body.get("tab"))
             base = tab.local_dir if tab else os.path.expanduser("~")
-            target = os.path.join(base, body.get("name") or "")
+            target, contain_error = contained_local_path(base, body.get("name") or "")
+            if contain_error:
+                self.send_json({"success": False, "error": contain_error}, status=400)
+                return
             try:
                 os.makedirs(target, exist_ok=True)
                 add_log("Created local directory: %s" % target, "success")
@@ -2096,7 +2586,10 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
             names = body.get("names") or ([body["name"]] if body.get("name") else [])
             errors = []
             for name in names:
-                target = os.path.join(base, name)
+                target, contain_error = contained_local_path(base, name)
+                if contain_error:
+                    errors.append("%s: %s" % (name, contain_error))
+                    continue
                 try:
                     if os.path.isdir(target) and not os.path.islink(target):
                         shutil.rmtree(target)
@@ -2119,8 +2612,14 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                 self.send_json({"success": False, "error": "Both names are required"},
                                status=400)
                 return
+            source, contain_error = contained_local_path(base, old)
+            if not contain_error:
+                _, contain_error = contained_local_path(base, new)
+            if contain_error:
+                self.send_json({"success": False, "error": contain_error}, status=400)
+                return
             try:
-                os.rename(os.path.join(base, old), os.path.join(base, new))
+                os.rename(source, os.path.join(base, new))
                 add_log("Renamed %s to %s" % (old, new), "success")
                 self.send_json({"success": True})
             except Exception as exc:
@@ -2132,13 +2631,18 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
             base = tab.local_dir if tab else os.path.expanduser("~")
             name = body.get("name") or ""
             mode_text = str(body.get("permissions") or "")
-            if not name or not mode_text or any(ch not in "01234567" for ch in mode_text) or len(mode_text) > 4:
+            mode_error = check_permission_mode(mode_text)
+            if not name or mode_error:
                 self.send_json({"success": False,
-                                "error": "Permissions must be an octal mode such as 644."},
+                                "error": mode_error or "Select an item first."},
                                status=400)
                 return
+            target, contain_error = contained_local_path(base, name)
+            if contain_error:
+                self.send_json({"success": False, "error": contain_error}, status=400)
+                return
             try:
-                os.chmod(os.path.join(base, name), int(mode_text, 8))
+                apply_local_mode(target, mode_text)
                 add_log("Changed local permissions: %s" % name, "success")
                 self.send_json({"success": True})
             except OSError as exc:
@@ -2226,11 +2730,16 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
             if tab is None:
                 self.send_json({"success": False, "error": "Not connected"}, status=400)
                 return
+            mode_text = str(body.get("permissions") or "644")
+            mode_error = check_permission_mode(mode_text)
+            if mode_error:
+                self.send_json({"success": False, "error": mode_error}, status=400)
+                return
             code, lines = tab.run_many([
                 "cd " + quote_remote(tab.remote_dir),
-                "chmod %s %s" % (body.get("permissions") or "644",
-                                 quote_remote(body.get("name") or ""))])
+                "chmod %s %s" % (mode_text, quote_remote(body.get("name") or ""))])
             if code == 0:
+                add_log("Changed remote permissions: %s" % body.get("name"), "success")
                 self.send_json({"success": True})
             else:
                 self.send_json({"success": False,
@@ -2308,8 +2817,9 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
             for name in names:
                 remote_path = posixpath.join(tab.remote_dir, name)
                 local_target = os.path.join(local_dir, name)
-                command = 'lcd "%s" ; cd %s ; get %s %s' % (
-                    local_dir, quote_remote(tab.remote_dir), switches, quote_remote(name))
+                command = "lcd %s ; cd %s ; get %s %s" % (
+                    quote_local(local_dir), quote_remote(tab.remote_dir),
+                    switches, quote_remote(name))
                 task = TASKS.submit("Download", command, tab.session, remote_path,
                                     local_target, tab.id, progress_path=local_target,
                                     priority=priority)
@@ -2332,9 +2842,9 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
             for name in names:
                 local_path = os.path.join(tab.local_dir, name)
                 remote_target = posixpath.join(remote_dir, name)
-                command = 'lcd "%s" ; cd %s ; put %s %s' % (
-                    tab.local_dir, quote_remote(remote_dir), switches,
-                    '"%s"' % name)
+                command = "lcd %s ; cd %s ; put %s %s" % (
+                    quote_local(tab.local_dir), quote_remote(remote_dir),
+                    switches, quote_local(name))
                 task = TASKS.submit("Upload", command, tab.session, local_path,
                                     remote_target, tab.id,
                                     progress_remote=(tab.id, remote_target),
@@ -2414,8 +2924,8 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                 name = record["name"]
                 if direction == "upload":
                     source_info = record["source_info"]
-                    command = 'lcd "%s" ; cd %s ; put %s %s' % (
-                        local_dir.replace('"', '\\"'), quote_remote(remote_dir),
+                    command = "lcd %s ; cd %s ; put %s %s" % (
+                        quote_local(local_dir), quote_remote(remote_dir),
                         switches, quote_remote(name))
                     task = TASKS.submit(
                         "Move to remote", command, tab.session, record["source"],
@@ -2428,8 +2938,8 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
                     task.bytes_total = source_info.st_size
                 else:
                     source_info = record["source_info"]
-                    command = 'lcd "%s" ; cd %s ; get %s %s' % (
-                        local_dir.replace('"', '\\"'), quote_remote(remote_dir),
+                    command = "lcd %s ; cd %s ; get %s %s" % (
+                        quote_local(local_dir), quote_remote(remote_dir),
                         switches, quote_remote(name))
                     task = TASKS.submit(
                         "Move to local", command, tab.session, record["source"],
@@ -2521,6 +3031,196 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
             self.send_json({"success": True})
             return
 
+        # --- Operations the console client has and the panel did not -----
+        #
+        # Each of these takes single names from the panel and validates them
+        # here, so the operand that reaches the session is one the client
+        # would accept and nothing else. Running them through the free-text
+        # console endpoint instead would put the quoting back on the page.
+        if path == "/api/remote/properties":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            name = body.get("name")
+            operand, operand_error = single_remote_name(tab, name)
+            if operand_error:
+                self.send_json({"success": False, "error": operand_error}, status=400)
+                return
+            code, lines, errors = tab.run_many_capture(
+                ["stat " + quote_remote(operand), "attr " + quote_remote(operand)])
+            if code != 0:
+                self.send_json({"success": False,
+                                "error": "\n".join(lines + errors) or
+                                         "Cannot read the properties."}, status=400)
+                return
+            info = remote_stat(tab, operand) or {}
+            self.send_json({"success": True, "name": operand,
+                            "listing": "\n".join(lines),
+                            "attributes": info})
+            return
+
+        if path == "/api/remote/link":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            target, error = single_remote_name(tab, body.get("target"))
+            if not error:
+                name, error = single_remote_name(tab, body.get("name"))
+            if error:
+                self.send_json({"success": False, "error": error}, status=400)
+                return
+            code, lines = tab.run_many([
+                "cd " + quote_remote(tab.remote_dir),
+                "ln %s %s" % (quote_remote(target), quote_remote(name))])
+            if code == 0:
+                add_log("Created remote link '%s' -> '%s'" % (name, target), "success")
+                self.send_json({"success": True})
+            else:
+                self.send_json({"success": False,
+                                "error": "\n".join(lines) or "Cannot create the link."},
+                               status=400)
+            return
+
+        if path == "/api/remote/copy":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            source, error = single_remote_name(tab, body.get("source"))
+            if not error:
+                destination, error = single_remote_name(tab, body.get("destination"))
+            if error:
+                self.send_json({"success": False, "error": error}, status=400)
+                return
+            code, lines = tab.run_many([
+                "cd " + quote_remote(tab.remote_dir),
+                "cp %s %s" % (quote_remote(source), quote_remote(destination))])
+            if code == 0:
+                add_log("Copied remote '%s' to '%s'" % (source, destination), "success")
+                self.send_json({"success": True})
+            else:
+                self.send_json({"success": False,
+                                "error": "\n".join(lines) or "Cannot copy."},
+                               status=400)
+            return
+
+        if path == "/api/remote/checksum":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            algorithm = str(body.get("algorithm") or "sha256").strip().lower()
+            if algorithm not in CHECKSUM_ALGORITHMS:
+                self.send_json({"success": False,
+                                "error": "The algorithm must be one of: %s." %
+                                         ", ".join(sorted(CHECKSUM_ALGORITHMS))},
+                               status=400)
+                return
+            names = body.get("names")
+            if not isinstance(names, list) or not names:
+                self.send_json({"success": False,
+                                "error": "Select one or more files."}, status=400)
+                return
+            if len(names) > 200:
+                self.send_json({"success": False,
+                                "error": "Too many files selected (maximum 200)."},
+                               status=400)
+                return
+            results = []
+            for name in names:
+                operand, operand_error = single_remote_name(tab, name)
+                if operand_error:
+                    results.append({"name": str(name), "error": operand_error})
+                    continue
+                code, lines = tab.run("checksum %s %s" % (
+                    algorithm, quote_remote(operand)))
+                if code == 0:
+                    results.append({"name": operand,
+                                    "checksum": "\n".join(lines).strip()})
+                else:
+                    results.append({"name": operand,
+                                    "error": "\n".join(lines).strip() or
+                                             "Cannot read the checksum."})
+            self.send_json({"success": True, "algorithm": algorithm,
+                            "results": results})
+            return
+
+        if path == "/api/session/copyid":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            keyfile = str(body.get("keyfile") or "").strip()
+            command = "copyid"
+            if keyfile:
+                # The key file is a local path, and it is this user's own:
+                # it is quoted, not validated against the panel directory.
+                command += " " + quote_local(keyfile)
+            code, lines, errors = tab.run_many_capture([command])
+            text = "\n".join(lines + errors).strip()
+            if code == 0:
+                add_log("Uploaded the public key to the server", "success")
+                self.send_json({"success": True, "output": text})
+            else:
+                self.send_json({"success": False,
+                                "error": text or "Cannot upload the public key."},
+                               status=400)
+            return
+
+        if path == "/api/transfer/keepuptodate":
+            tab = require_tab(body.get("tab"))
+            if tab is None:
+                self.send_json({"success": False, "error": "Not connected"}, status=400)
+                return
+            local_dir = os.path.abspath(str(body.get("local_dir") or tab.local_dir))
+            remote_dir = str(body.get("remote_dir") or tab.remote_dir)
+            if not os.path.isdir(local_dir):
+                self.send_json({"success": False,
+                                "error": "The local directory no longer exists."},
+                               status=400)
+                return
+            command = "keepuptodate"
+            try:
+                interval = int(body.get("interval") or 0)
+            except (TypeError, ValueError):
+                self.send_json({"success": False,
+                                "error": "The interval must be a number of seconds."},
+                               status=400)
+                return
+            if interval:
+                if interval < 1 or interval > 86400:
+                    self.send_json({"success": False,
+                                    "error": "The interval must be between 1 and "
+                                             "86400 seconds."}, status=400)
+                    return
+                command += " -interval=%d" % interval
+            try:
+                count = int(body.get("count") or 0)
+            except (TypeError, ValueError):
+                self.send_json({"success": False,
+                                "error": "The number of passes must be a number."},
+                               status=400)
+                return
+            if count:
+                if count < 1 or count > 1000000:
+                    self.send_json({"success": False,
+                                    "error": "The number of passes must be between "
+                                             "1 and 1000000."}, status=400)
+                    return
+                command += " -count=%d" % count
+            mask = str(body.get("filemask") or "").strip()
+            if mask:
+                command += " -filemask=" + quote_remote(mask)
+            command += " " + quote_local(local_dir) + " " + quote_remote(remote_dir)
+            task = TASKS.submit("Keep up to date", command, tab.session,
+                                local_dir, remote_dir, tab.id)
+            add_log("Queued a watch of %s against %s" % (local_dir, remote_dir), "info")
+            self.send_json({"success": True, "task_id": task.id,
+                            "command": command})
+            return
+
         if path == "/api/command/exec":
             cmd_text = body.get("command", "")
             if not cmd_text:
@@ -2549,53 +3249,111 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
 
         # --- Custom commands (Explorer-style) ---
         if path == "/api/custom-commands":
-            body = self.read_json_body()
+            # do_POST has already read the body: every route below it shares
+            # the one parse. Reading it a second time here asked the socket
+            # for Content-Length more bytes that had been consumed, so the
+            # handler blocked until the client gave up and the whole feature
+            # answered nothing at all.
             action = body.get("action", "list")
             cmds = _read_custom_commands()
             if action == "list":
                 self.send_json({"success": True, "commands": cmds})
             elif action == "save":
-                name = body.get("name", "").strip()
-                command = body.get("command", "").strip()
-                if not name or not command:
+                template = normalize_custom_command(body)
+                if not template:
                     self.send_json({"success": False,
-                                    "error": "Name and command are required."})
+                                    "error": "A name and a one-line command "
+                                             "are required."}, status=400)
                     return
-                cmds = [c for c in cmds if c.get("name") != name]
-                cmds.append({"name": name, "command": command})
-                _write_custom_commands(cmds)
-                self.send_json({"success": True})
+                cmds = [c for c in cmds if c.get("name") != template["name"]]
+                cmds.append(template)
+                try:
+                    _write_custom_commands(cmds)
+                except OSError as exc:
+                    self.send_json({"success": False,
+                                    "error": "Cannot save the commands: %s" % exc},
+                                   status=500)
+                    return
+                add_log("Saved custom command '%s'" % template["name"], "success")
+                self.send_json({"success": True, "commands": cmds})
             elif action == "delete":
-                name = body.get("name", "").strip()
-                cmds = [c for c in cmds if c.get("name") != name]
-                _write_custom_commands(cmds)
-                self.send_json({"success": True})
-            elif action == "run":
-                name = body.get("name", "").strip()
-                filenames = body.get("filenames", [])
-                cmd = next((c for c in cmds if c.get("name") == name), None)
-                if not cmd:
+                name = str(body.get("name") or "").strip()
+                remaining = [c for c in cmds if c.get("name") != name]
+                if len(remaining) == len(cmds):
                     self.send_json({"success": False,
-                                    "error": "Unknown command '%s'." % name})
+                                    "error": "There is no command '%s'." % name},
+                                   status=404)
                     return
-                # Safe filename substitution: {file} is replaced with each
-                # selected filename, shell-interpolation-safe (single-quoted).
+                try:
+                    _write_custom_commands(remaining)
+                except OSError as exc:
+                    self.send_json({"success": False,
+                                    "error": "Cannot save the commands: %s" % exc},
+                                   status=500)
+                    return
+                add_log("Removed custom command '%s'" % name, "info")
+                self.send_json({"success": True, "commands": remaining})
+            elif action == "run":
+                name = str(body.get("name") or "").strip()
+                filenames = body.get("filenames")
+                template = next((c for c in cmds if c.get("name") == name), None)
+                if not template:
+                    self.send_json({"success": False,
+                                    "error": "Unknown command '%s'." % name},
+                                   status=404)
+                    return
+                if not isinstance(filenames, list) or not filenames:
+                    self.send_json({"success": False,
+                                    "error": "Select one or more files to run "
+                                             "it on."}, status=400)
+                    return
+                if len(filenames) > 500:
+                    self.send_json({"success": False,
+                                    "error": "Too many files selected "
+                                             "(maximum 500)."}, status=400)
+                    return
+                # A command template runs in the session the panel belongs
+                # to, which is the connection the user is looking at. The
+                # earlier version opened a fresh process against the default
+                # site, so a template ran somewhere other than where the
+                # selection was.
+                tab = require_tab(body.get("tab"))
+                local = template.get("scope") == "local"
+                if not local and tab is None:
+                    self.send_json({"success": False,
+                                    "error": "Not connected. A remote command "
+                                             "needs an open session."},
+                                   status=400)
+                    return
                 results = []
-                for fn in filenames:
-                    # Validate: no path traversal
-                    if ".." in fn or fn.startswith("/"):
-                        results.append({"file": fn, "success": False,
-                                        "error": "Path traversal rejected."})
+                for filename in filenames:
+                    command, error = build_custom_command(template, filename)
+                    if error:
+                        results.append({"file": filename, "success": False,
+                                        "error": error})
                         continue
-                    safe_fn = "'" + fn.replace("'", "'\\''") + "'"
-                    actual_cmd = cmd["command"].replace("{file}", safe_fn)
-                    code, stdout, stderr = run_linscp(actual_cmd)
-                    results.append({"file": fn, "success": code == 0,
+                    add_log("Custom command '%s': %s" % (name, command), "cmd")
+                    try:
+                        if local:
+                            code, stdout, stderr = run_linscp(command,
+                                                              tab.session if tab else None)
+                        else:
+                            code, lines, errors = tab.run_many_capture(
+                                ["cd " + quote_remote(tab.remote_dir), command])
+                            stdout, stderr = "\n".join(lines), "\n".join(errors)
+                    except ValueError as exc:
+                        results.append({"file": filename, "success": False,
+                                        "error": str(exc)})
+                        continue
+                    results.append({"file": filename, "success": code == 0,
+                                    "exit_code": code,
                                     "stdout": stdout, "stderr": stderr})
-                self.send_json({"success": True, "results": results})
+                self.send_json({"success": True, "results": results,
+                                "scope": template.get("scope", "remote")})
             else:
                 self.send_json({"success": False,
-                                "error": "Unknown action '%s'." % action})
+                                "error": "Unknown action '%s'." % action},
+                               status=400)
             return
 
         self.send_json({"error": "Not Found"}, status=404)
@@ -2605,36 +3363,140 @@ class LinScpGuiHandler(SimpleHTTPRequestHandler):
 # Custom commands (persisted command templates for Explorer-style UI)
 # ---------------------------------------------------------------------------
 
+def _config_root():
+    """The configuration directory this run keeps its own files in.
+
+    Every other file the client writes lives under it, found the same way;
+    the custom commands used to look at a differently named variable and
+    fall back to ~/.config, so a run started with its own LINSCP_CONFIG_DIR
+    still shared them with the user's real configuration - and a test that
+    pointed the variable at a temporary directory wrote to the home one.
+    """
+    override = os.environ.get("LINSCP_CONFIG_DIR")
+    if override:
+        return override
+    root = os.environ.get("XDG_CONFIG_HOME") or os.path.join(
+        os.path.expanduser("~"), ".config")
+    return os.path.join(root, "LinSCP")
+
+
 def _custom_commands_path():
-    root = os.environ.get("LINSCP_CONFIG")
-    if not root:
-        root = os.path.join(os.path.expanduser("~"), ".config", "LinSCP")
-    return os.path.join(root, "custom-commands.json")
+    return os.path.join(_config_root(), "custom-commands.json")
+
+
+def _default_custom_commands():
+    """The templates the client ships with, until the user saves their own.
+
+    A first run with an empty list gives a dialog that says nothing can be
+    run and no way to see what a command template looks like. The shipped
+    set is the one in source/gui/explorer-commands.json, next to this
+    module or under the installed share directory.
+    """
+    for candidate in (os.path.join(BASE_DIR, "explorer-commands.json"),
+                      os.path.join(WEB_DIR, "..", "explorer-commands.json"),
+                      "/usr/share/linscp/gui/explorer-commands.json"):
+        try:
+            with open(candidate, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except (OSError, ValueError):
+            continue
+        return [normalize_custom_command(item) for item in data
+                if normalize_custom_command(item)]
+    return []
+
+
+def normalize_custom_command(item):
+    """One command template in the shape the API and the dialog use.
+
+    Returns None for an entry that is not a usable template, so a file
+    edited by hand or written by an older version cannot put a half-read
+    command in front of the run button.
+    """
+    if not isinstance(item, dict):
+        return None
+    name = str(item.get("name") or "").strip()
+    command = str(item.get("command") or "").strip()
+    if not name or not command:
+        return None
+    if len(name) > 128 or len(command) > 1024:
+        return None
+    # A template is one command line: the core reads one line at a time in
+    # server mode, so a stored newline would be a second command nobody
+    # asked for.
+    if any(ord(char) < 32 or ord(char) == 127 for char in name + command):
+        return None
+    scope = str(item.get("scope") or "remote").strip().lower()
+    if scope not in ("remote", "local"):
+        scope = "remote"
+    return {"name": name, "command": command, "scope": scope}
 
 
 def _read_custom_commands():
     path = _custom_commands_path()
     if not os.path.isfile(path):
-        return []
+        return _default_custom_commands()
     try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return []
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (ValueError, OSError):
+        return _default_custom_commands()
+    if not isinstance(data, list):
+        return _default_custom_commands()
+    commands = [normalize_custom_command(item) for item in data]
+    return [item for item in commands if item]
 
 
 def _write_custom_commands(commands):
     path = _custom_commands_path()
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w") as f:
+    # Commands run against the user's own sessions and file system, so the
+    # file that stores them is not for anybody else to read or rewrite.
+    handle = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(handle, "w", encoding="utf-8") as f:
         json.dump(commands, f, indent=2)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+def build_custom_command(template, filename):
+    """Substitute {file} in a template for one selected name.
+
+    Returns (command, error). The name is quoted the way the LinSCP command
+    splitter reads quotes, not the way a shell would: single quotes are an
+    ordinary character to it, so a name with a space arrived as two
+    arguments and the command ran against the wrong file. A name is never
+    handed to a shell here at all.
+    """
+    if not isinstance(filename, str) or not filename:
+        return None, "A command needs a selected file name."
+    if "/" in filename or "\\" in filename or filename in (".", ".."):
+        return None, "\"%s\" is not a single file name." % filename
+    if any(ord(char) < 32 or ord(char) == 127 for char in filename):
+        return None, "A file name must not contain a control character."
+    quoted = (quote_remote if template.get("scope") != "local" else quote_local)(
+        filename)
+    if "{file}" not in template["command"]:
+        return template["command"], ""
+    return template["command"].replace("{file}", quoted), ""
 
 
 # ---------------------------------------------------------------------------
 # Helpers used by the endpoints
 # ---------------------------------------------------------------------------
 
+TRANSFER_MODES = ("binary", "ascii", "automatic")
+
+
 def transfer_switches(body):
+    """The get/put switches a transfer dialog asked for.
+
+    Every value is checked against what the console client accepts before
+    it reaches a command line: a mode, a mask or a limit that was passed
+    through unquoted would have been the start of a new command rather
+    than an argument.
+    """
     switches = []
     if body.get("resume", True):
         switches.append("-resume")
@@ -2644,7 +3506,51 @@ def transfer_switches(body):
         switches.append("-neweronly")
     if body.get("preserve_time", True):
         switches.append("-preservetime")
-    return " ".join(switches)
+    else:
+        switches.append("-nopreservetime")
+    if body.get("delete_source"):
+        switches.append("-delete")
+    mode = str(body.get("transfer") or "").strip().lower()
+    if mode and mode != "automatic_default":
+        if mode not in TRANSFER_MODES:
+            raise ValueError("The transfer mode must be binary, ascii or "
+                             "automatic.")
+        switches.append("-transfer=" + mode)
+    mask = body.get("filemask")
+    if mask:
+        if not isinstance(mask, str):
+            raise ValueError("A file mask must be text.")
+        switches.append("-filemask=" + quote_remote(mask.strip()))
+    speed = body.get("speed")
+    if speed not in (None, "", 0, "0"):
+        try:
+            value = int(speed)
+        except (TypeError, ValueError):
+            raise ValueError("The speed limit must be a number of KiB/s.")
+        if value < 1 or value > 100000000:
+            raise ValueError("The speed limit must be between 1 and "
+                             "100000000 KiB/s.")
+        switches.append("-speed=%d" % value)
+    if body.get("append"):
+        switches.append("-append")
+    if body.get("no_permissions"):
+        switches.append("-nopermissions")
+    resume_support = body.get("resumesupport")
+    if resume_support not in (None, ""):
+        text = str(resume_support).strip().lower()
+        if text in ("on", "off"):
+            switches.append("-resumesupport=" + text)
+        else:
+            try:
+                threshold = int(text)
+            except ValueError:
+                raise ValueError("Resume support must be on, off or a number "
+                                 "of bytes.")
+            if threshold < 0:
+                raise ValueError("Resume support must be on, off or a number "
+                                 "of bytes.")
+            switches.append("-resumesupport=%d" % threshold)
+    return " ".join(part for part in switches if part)
 
 
 def remote_stat(tab, remote_path, timeout=30):
@@ -3000,11 +3906,12 @@ def upload_remote_text(tab, remote_path, content, base_mtime=None):
 
 def main():
     global PORT, HOST, API_TOKEN, REQUIRE_TOKEN, ALLOWED_HOSTS, ALLOW_ANY_HOST
-    global ACCOUNTS_FILE, CSRF_TOKEN
+    global ACCOUNTS_FILE, ALLOWED_ORIGINS
     port = PORT
     host = HOST
     fixed_token = None
     startup_url = None
+    print_token = False
     for arg in sys.argv[1:]:
         if (startup_url is None and arg.lower().startswith(
                 ("sftp://", "ftp://", "ftps://"))):
@@ -3027,14 +3934,40 @@ def main():
                 ALLOWED_HOSTS.add(value)
         elif arg == "--allow-any-host":
             ALLOW_ANY_HOST = True
+        elif arg.startswith("--allow-origin="):
+            value = arg.split("=", 1)[1].strip().rstrip("/")
+            if value:
+                ALLOWED_ORIGINS.add(value)
         elif arg.startswith("--accounts-file="):
             ACCOUNTS_FILE = arg.split("=", 1)[1].strip()
+        elif arg == "--print-token":
+            print_token = True
         elif arg == "--add-account":
             # Interactive: create a user account and exit.
+            if not ACCOUNTS_FILE:
+                print("--add-account needs --accounts-file=FILE to say which "
+                      "file to add it to.", file=sys.stderr)
+                return 2
             user = input("Username: ").strip()
+            if not user:
+                print("A user name is required.", file=sys.stderr)
+                return 2
             pw = getpass.getpass("Password: ")
-            _write_account(user, pw)
-            print("Account '%s' created." % user)
+            again = getpass.getpass("Password again: ")
+            if pw != again:
+                print("The two passwords do not match.", file=sys.stderr)
+                return 2
+            if not pw:
+                print("An empty password is not accepted.", file=sys.stderr)
+                return 2
+            home = input("Home directory (optional, blank for none): ").strip()
+            try:
+                _write_account(user, pw, home)
+            except OSError as exc:
+                print("Cannot write %s: %s" % (ACCOUNTS_FILE, exc),
+                      file=sys.stderr)
+                return 1
+            print("Account '%s' created in %s." % (user, ACCOUNTS_FILE))
             return 0
         elif arg in ("-h", "--help"):
             print(__doc__)
@@ -3046,6 +3979,8 @@ def main():
             print("  --no-auth              accept API calls without a token")
             print("  --allow-host=NAME      also answer requests addressed to NAME")
             print("  --allow-any-host       answer requests for any host name")
+            print("  --allow-origin=URL     let the browser origin URL read responses")
+            print("                         (default: none; the client is same-origin)")
             print("  --accounts-file=FILE   enable multi-user accounts (PBKDF2)")
             print("  --add-account          create a user account interactively")
             print("  --print-token          write the token to the terminal")
@@ -3058,7 +3993,16 @@ def main():
             print("Cannot open desktop site URL: %s" % exc, file=sys.stderr)
             return 2
     API_TOKEN = fixed_token or secrets.token_hex(32)
-    CSRF_TOKEN = secrets.token_hex(32)
+
+    if ACCOUNTS_FILE and not os.path.isfile(ACCOUNTS_FILE):
+        # Silently continuing here would start a server that refuses every
+        # request with 'Login required' and can never be signed into,
+        # because the file the accounts would be read from does not exist.
+        print("Cannot find the accounts file '%s'." % ACCOUNTS_FILE,
+              file=sys.stderr)
+        print("Create an account first: %s --accounts-file=%s --add-account"
+              % (os.path.basename(sys.argv[0]), ACCOUNTS_FILE), file=sys.stderr)
+        return 2
 
     server_address = (host, port)
     try:
@@ -3066,16 +4010,20 @@ def main():
     except OSError as exc:
         print("Cannot listen on %s:%d: %s" % (host, port, exc), file=sys.stderr)
         return 1
+    # '--port=0' asks the kernel for a free port, so the number to tell the
+    # user is the one that was bound, not the one that was asked for.
+    # Printing the request left the address of a run nobody could reach.
+    bound_port = httpd.server_address[1]
     if startup_session is not None:
         open_desktop_site(startup_session)
-    print("LinSCP Commander GUI running at http://localhost:%d/" % port)
+    print("LinSCP Commander GUI running at http://localhost:%d/" % bound_port)
     print("Serving web client from: %s" % WEB_DIR)
     print("LinSCP core binary: %s" % LINSCP_BIN)
     print("Stored sessions: %s" % session_store_path())
     if REQUIRE_TOKEN:
         print("API calls need this run's token (X-LSCP-Token header); the")
         print("page served below carries it, and --print-token shows it.")
-        if "--print-token" in sys.argv[1:]:
+        if print_token:
             print("Token: %s" % API_TOKEN)
     else:
         print("Warning: the API is open to anything that can reach this port.")

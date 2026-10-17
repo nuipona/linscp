@@ -232,6 +232,11 @@ bool Interrupted()
     return gInterrupted != 0;
 }
 
+void ClearInterrupt()
+{
+    gInterrupted = 0;
+}
+
 int RunInteractive(const std::vector<std::string> & args, std::string & error)
 {
     if (args.empty())

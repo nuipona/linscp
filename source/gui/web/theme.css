@@ -739,3 +739,72 @@ table.file-table tr.selected td { color: var(--selection-text); }
 /* Language names remain readable at longer translated label lengths. */
 .language-control { display:flex; align-items:center; gap:6px; font-size:12px; }
 .language-control select { max-width:150px; font:inherit; }
+
+/* ---- Custom command templates ---------------------------------------- */
+.custom-command-list {
+  max-height: 190px; overflow-y: auto; margin-bottom: 12px; padding: 4px;
+  border: 1px solid var(--border); border-radius: 5px; background: var(--table-row);
+}
+.custom-command-empty { padding: 8px; color: var(--subtle); font-size: 11px; }
+.custom-command {
+  display: flex; align-items: baseline; gap: 7px; padding: 4px 8px;
+  border-bottom: 1px solid var(--border); border-radius: 4px;
+  font-size: 12px; cursor: pointer;
+}
+.custom-command:last-child { border-bottom: none; }
+.custom-command:hover { background: var(--surface-hover); }
+.custom-command:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.custom-command.selected { background: var(--accent-soft); color: var(--accent-hover); }
+.custom-command strong { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; }
+.custom-command-scope {
+  flex: none; padding: 0 5px; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .04em;
+}
+.custom-command code {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--muted); font-size: 11px;
+}
+.custom-command-results {
+  margin-top: 8px; max-height: 150px; overflow-y: auto;
+  font-size: 11px; white-space: pre-wrap;
+}
+.custom-command-result { padding: 3px 6px; border-left: 2px solid var(--border); margin-bottom: 3px; }
+.custom-command-result.ok { border-left-color: var(--success); }
+.custom-command-result.failed { border-left-color: var(--danger); }
+.custom-command-result pre {
+  margin: 2px 0 0; padding: 0; color: var(--muted);
+  font-family: "Cascadia Code", Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 10px; white-space: pre-wrap; word-break: break-word;
+}
+
+/* ---- Sign-in ---------------------------------------------------------- */
+.login-modal .modal-box { width: 380px; }
+.login-error { margin-top: 8px; color: var(--danger); font-size: 11px; min-height: 14px; }
+
+/* ---- Transfer settings ------------------------------------------------ */
+.transfer-preset-row { display: flex; align-items: center; gap: 6px; }
+.transfer-preset-row .select-field { flex: 1; }
+.speed-row { display: flex; align-items: center; gap: 6px; }
+.speed-row .input-field { width: 110px; flex: none; }
+.checkbox-row { display: flex; align-items: center; gap: 7px; font-weight: normal; }
+.checkbox-row input { flex: none; }
+
+/* ---- Properties ------------------------------------------------------- */
+.properties-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.properties-table th, .properties-table td {
+  padding: 3px 6px; text-align: left; border-bottom: 1px solid var(--border);
+  vertical-align: top; word-break: break-word;
+}
+.properties-table th { color: var(--muted); font-weight: 600; width: 34%; }
+
+/* ---- Panel modes ------------------------------------------------------ */
+.commander-main.explorer-mode .pane.remote-pane { display: none; }
+.commander-main.explorer-mode .pane.local-pane { display: none; }
+.explorer-hint {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  color: var(--muted); font-size: 11px;
+  border-bottom: 1px solid var(--border); background: var(--surface-raised);
+}
+
+/* ---- Entries that are not readable as they stand ---------------------- */
+.file-table tr.broken-link td:first-child { color: var(--muted); font-style: italic; }

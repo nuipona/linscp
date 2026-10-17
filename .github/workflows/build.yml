@@ -214,6 +214,7 @@ jobs:
         run: |
           python3 source/gui/tests/BrowserUploadTest.py
           python3 source/gui/tests/DesktopUriTest.py
+          python3 source/gui/tests/SecurityTest.py
 
   linux-cmake:
     name: Linux (CMake)

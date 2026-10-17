@@ -278,15 +278,56 @@ writes the same files.
 browser:
 
 * A dual-pane explorer, with the local filesystem on the left and the server on
-  the right.
-* A background transfer queue with progress and speed.
+  the right, and a single-panel view for a narrow window.
+* A background transfer queue with progress, speed, pause, retry, per-item
+  cancel and reordering to the front.
+* A transfer settings dialog: transfer mode (binary, ASCII or automatic by
+  mask), a file mask, a speed limit in KiB/s, resume support, preserve time,
+  newer-only, append, and whether to set permissions at all. These are the same
+  switches the console client's `get` and `put` take.
 * Remote search by file-name mask or literal UTF-8 content, with per-file and
   per-search bounds.
+* Synchronization with a preview, a conflict policy and a direction, plus
+  `keepuptodate` as a queue item that watches a local directory.
+* Properties, checksums, server-side copy, symbolic links and `copyid` from the
+  Commands menu.
+* Saved command templates with `{file}` for the selected name, scoped to the
+  open session or to the local side. Each run asks first and shows the command
+  it will use.
 * A console log and an embedded command line.
-* Drag-and-drop of files and folders from a file manager into the remote pane.
+* Drag-and-drop of files and folders from a file manager into either pane.
   Relative paths and empty directories are kept, and unsafe paths are rejected.
-  Local-pane drops and other desktops are not yet verified.
+* Multi-user sign-in when the server is started with `--accounts-file=`.
 * A desktop entry and URL scheme handlers, from `linscp.desktop`.
+
+### Reaching the server
+
+The server binds `127.0.0.1:8080` by default and generates a per-run API token.
+The page it serves carries that token and every `/api/` call has to present it,
+so a process on the machine that did not start the server cannot drive it.
+
+* `--host=` and `--port=` choose the address; `--port=0` asks the kernel for a
+  free port and the address printed is the one that was bound.
+* `--token=` fixes the token instead of generating one.
+* Requests are answered only for a `Host` header naming loopback. `--allow-host=`
+  adds a name, for a reverse proxy, and `--allow-any-host` disables the check.
+* **No CORS permission is granted.** The browser client is served by this same
+  server, so its calls are same-origin and need none. Without that, any page
+  the user visited could fetch the served document, read this run's token out
+  of it and then drive the whole API — which is the local file system of
+  whoever started the server. `--allow-origin=URL` is the explicit opt-in for a
+  front end that really is served from somewhere else; it is granted that one
+  origin and no other, and `*` is never sent.
+* Responses carry `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`
+  and `Referrer-Policy: no-referrer`.
+
+With `--accounts-file=FILE`, every request also needs a signed-in session:
+`--add-account` creates one, passwords are stored as PBKDF2-SHA256 with a
+per-account salt, the file is created readable by this account only, state
+changes need the CSRF token that the sign-in answered with, and five failed
+sign-ins lock a user name out for a minute. Sessions last an hour. Each account
+can carry a `home_dir`, which is recorded but not yet enforced as the root of
+that user's local pane.
 
 ## Authentication
 
@@ -337,8 +378,8 @@ watch cannot be set up, the client falls back to timer polling. It runs in the
 foreground until Ctrl-C, or until `-count=` passes complete, so a
 non-interactive script must give `-count=`.
 
-Not implemented: queue priorities, the .NET assembly API, GSSAPI, SSH tunnels,
-and the S3 version-aware operations. S3 and WebDAV are partial. See the
+Not implemented: the .NET assembly API, GSSAPI, SSH tunnels, and the S3
+version-aware operations. S3 and WebDAV are partial. See the
 [parity audit](upstream-parity.md) for the full list.
 
 ## Troubleshooting
